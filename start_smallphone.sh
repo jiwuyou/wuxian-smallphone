@@ -16,9 +16,12 @@ OPENCODE_DATA_DIR="$RUNTIME_DATA/opencode"
 OPENCODE_CONFIG_DIR="$RUNTIME_CONFIG/opencode"
 TAILSCALE_IP="$(hostname -I | tr ' ' '\n' | grep '^100\.' | head -n 1 || true)"
 PRIMARY_IP="$(hostname -I | tr ' ' '\n' | grep -Ev '^(127\.|172\.17\.)' | head -n 1 || true)"
+LOCAL_HOST="${LOCAL_HOST:-127.0.0.1}"
+START_LOCAL_LISTENERS="${START_LOCAL_LISTENERS:-1}"
 BACKEND_HOST="${BACKEND_HOST:-${TAILSCALE_IP:-${PRIMARY_IP:-127.0.0.1}}}"
 BACKEND_PORT="${BACKEND_PORT:-18096}"
 APP_BACKEND_HOST="${APP_BACKEND_HOST:-$BACKEND_HOST}"
+APP_BACKEND_HOSTS="${APP_BACKEND_HOSTS:-$APP_BACKEND_HOST}"
 APP_BACKEND_PORT="${APP_BACKEND_PORT:-3100}"
 FRONTEND_HOST="${FRONTEND_HOST:-$BACKEND_HOST}"
 FRONTEND_PORT="${FRONTEND_PORT:-18080}"
@@ -29,6 +32,10 @@ CC_CONNECT_CONFIG_FILE="${CC_CONNECT_CONFIG_FILE:-/root/.cc-connect/config.toml}
 SMALLPHONE_PROVIDER_ID="${SMALLPHONE_PROVIDER_ID:-smallphone}"
 SMALLPHONE_RUNTIME_MODE="${SMALLPHONE_RUNTIME_MODE:-cc-webclient}"
 SMALLPHONE_CCCONNECT_PLATFORM="${SMALLPHONE_CCCONNECT_PLATFORM:-smallphone}"
+
+if [[ "$START_LOCAL_LISTENERS" != "0" && "$APP_BACKEND_HOST" != "$LOCAL_HOST" ]]; then
+  APP_BACKEND_HOSTS="${APP_BACKEND_HOSTS},${LOCAL_HOST}"
+fi
 
 if ! command -v bun >/dev/null 2>&1; then
   echo "bun is required but not installed."
@@ -243,14 +250,21 @@ cleanup() {
   if [[ -n "${BETA_FRONTEND_PID:-}" ]]; then
     kill "${BETA_FRONTEND_PID}" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${LOCAL_FRONTEND_PID:-}" ]]; then
+    kill "${LOCAL_FRONTEND_PID}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${LOCAL_BETA_FRONTEND_PID:-}" ]]; then
+    kill "${LOCAL_BETA_FRONTEND_PID}" >/dev/null 2>&1 || true
+  fi
 }
 
 trap cleanup EXIT INT TERM
 
-echo "Starting smallphone app API on http://${APP_BACKEND_HOST}:${APP_BACKEND_PORT}"
+echo "Starting smallphone app API on ${APP_BACKEND_HOSTS}:${APP_BACKEND_PORT}"
 (
   cd "$APP_BACKEND_DIR"
   SMALLPHONE_HOST="$APP_BACKEND_HOST" \
+  SMALLPHONE_HOSTS="$APP_BACKEND_HOSTS" \
   SMALLPHONE_PORT="$APP_BACKEND_PORT" \
   SMALLPHONE_RUNTIME_MODE="$SMALLPHONE_RUNTIME_MODE" \
   SMALLPHONE_CCCONNECT_WS_URL="${SMALLPHONE_CCCONNECT_WS_URL:-}" \
@@ -289,6 +303,15 @@ echo "Starting smallphone frontend on http://${FRONTEND_HOST}:${FRONTEND_PORT}"
 ) &
 FRONTEND_PID=$!
 
+if [[ "$START_LOCAL_LISTENERS" != "0" && "$FRONTEND_HOST" != "$LOCAL_HOST" ]]; then
+  echo "Starting smallphone local frontend on http://${LOCAL_HOST}:${FRONTEND_PORT}"
+  (
+    cd "$FRONTEND_DIR"
+    python3 -m http.server "$FRONTEND_PORT" --bind "$LOCAL_HOST"
+  ) &
+  LOCAL_FRONTEND_PID=$!
+fi
+
 if [[ -d "$BETA_FRONTEND_DIR" ]]; then
   echo "Starting smallphone beta frontend on http://${BETA_FRONTEND_HOST}:${BETA_FRONTEND_PORT}"
   (
@@ -296,20 +319,44 @@ if [[ -d "$BETA_FRONTEND_DIR" ]]; then
     python3 -m http.server "$BETA_FRONTEND_PORT" --bind "$BETA_FRONTEND_HOST"
   ) &
   BETA_FRONTEND_PID=$!
+
+  if [[ "$START_LOCAL_LISTENERS" != "0" && "$BETA_FRONTEND_HOST" != "$LOCAL_HOST" ]]; then
+    echo "Starting smallphone local beta frontend on http://${LOCAL_HOST}:${BETA_FRONTEND_PORT}"
+    (
+      cd "$BETA_FRONTEND_DIR"
+      python3 -m http.server "$BETA_FRONTEND_PORT" --bind "$LOCAL_HOST"
+    ) &
+    LOCAL_BETA_FRONTEND_PID=$!
+  fi
 fi
 
 echo
 echo "Frontend stable: http://${FRONTEND_HOST}:${FRONTEND_PORT}"
+if [[ -n "${LOCAL_FRONTEND_PID:-}" ]]; then
+  echo "Frontend stable local: http://${LOCAL_HOST}:${FRONTEND_PORT}"
+fi
 if [[ -n "${BETA_FRONTEND_PID:-}" ]]; then
   echo "Frontend beta:   http://${BETA_FRONTEND_HOST}:${BETA_FRONTEND_PORT}"
 fi
+if [[ -n "${LOCAL_BETA_FRONTEND_PID:-}" ]]; then
+  echo "Frontend beta local: http://${LOCAL_HOST}:${BETA_FRONTEND_PORT}"
+fi
 echo "API:      http://${APP_BACKEND_HOST}:${APP_BACKEND_PORT}/api"
+if [[ "$START_LOCAL_LISTENERS" != "0" && "$APP_BACKEND_HOST" != "$LOCAL_HOST" ]]; then
+  echo "API local: http://${LOCAL_HOST}:${APP_BACKEND_PORT}/api"
+fi
 echo "Backend:  http://${BACKEND_HOST}:${BACKEND_PORT}"
 echo
 echo "Press Ctrl+C to stop all services."
 
-if [[ -n "${BETA_FRONTEND_PID:-}" ]]; then
-  wait "$APP_BACKEND_PID" "$BACKEND_PID" "$FRONTEND_PID" "$BETA_FRONTEND_PID"
-else
-  wait "$APP_BACKEND_PID" "$BACKEND_PID" "$FRONTEND_PID"
+WAIT_PIDS=("$APP_BACKEND_PID" "$BACKEND_PID" "$FRONTEND_PID")
+if [[ -n "${LOCAL_FRONTEND_PID:-}" ]]; then
+  WAIT_PIDS+=("$LOCAL_FRONTEND_PID")
 fi
+if [[ -n "${BETA_FRONTEND_PID:-}" ]]; then
+  WAIT_PIDS+=("$BETA_FRONTEND_PID")
+fi
+if [[ -n "${LOCAL_BETA_FRONTEND_PID:-}" ]]; then
+  WAIT_PIDS+=("$LOCAL_BETA_FRONTEND_PID")
+fi
+wait "${WAIT_PIDS[@]}"

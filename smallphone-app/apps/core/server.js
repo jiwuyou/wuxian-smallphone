@@ -7,6 +7,7 @@ const { SmallPhoneService } = require("../../packages/domain/service");
 
 const PORT = Number.parseInt(process.env.SMALLPHONE_PORT || "3100", 10);
 const HOST = process.env.SMALLPHONE_HOST || "127.0.0.1";
+const HOSTS = parseHostList(process.env.SMALLPHONE_HOSTS || HOST);
 const WEB_ROOT = path.join(__dirname, "..", "web");
 const ATTACHMENTS_ROOT = path.join(__dirname, "..", "..", "data", "attachments");
 const ATTACHMENTS_ROOT_RESOLVED = path.resolve(ATTACHMENTS_ROOT);
@@ -59,7 +60,19 @@ function setCorsHeaders(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
-const server = http.createServer(async (req, res) => {
+function parseHostList(value) {
+  const hosts = String(value || "")
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean);
+  return [...new Set(hosts.length ? hosts : ["127.0.0.1"])];
+}
+
+function createAppServer() {
+  return http.createServer(handleRequest);
+}
+
+async function handleRequest(req, res) {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || `${HOST}:${PORT}`}`);
     if (url.pathname.startsWith("/api/")) {
@@ -78,10 +91,17 @@ const server = http.createServer(async (req, res) => {
       error: error instanceof Error ? error.message : String(error),
     });
   }
-});
+}
 
-server.listen(PORT, HOST, () => {
-  console.log(`[smallphone] listening on http://${HOST}:${PORT}`);
+for (const listenHost of HOSTS) {
+  const server = createAppServer();
+  server.listen(PORT, listenHost, () => {
+    console.log(`[smallphone] listening on http://${listenHost}:${PORT}`);
+  });
+}
+
+process.on("SIGTERM", () => {
+  process.exit(0);
 });
 
 if (TASK_WORKER_ENABLED) {
