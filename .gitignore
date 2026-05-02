@@ -1,0 +1,25 @@
+.codex
+
+# Separate nested repository
+generic-mini-phone/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Runtime data and logs
+smallphone-app/data/
+smallphone-app/*.log
+*.log
+
+# Local environment and generated output
+.env
+.env.*
+tmp/
+dist/
+build/
+
+# OS/editor noise
+.DS_Store
+*.swp
+*.tmp

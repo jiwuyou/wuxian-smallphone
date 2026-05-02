@@ -1,0 +1,12 @@
+{
+  "name": "@smallphone/openclaw-smallphone-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SmallPhone plugin for OpenClaw",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

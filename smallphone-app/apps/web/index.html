@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SmallPhone</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">SP</div>
+          <div>
+            <div class="brand-name">SmallPhone</div>
+            <div class="brand-sub">P0 product shell</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="nav-item active" data-screen="chat">聊天</button>
+          <button class="nav-item" data-screen="permissions">权限</button>
+          <button class="nav-item" data-screen="reminders">提醒</button>
+        </nav>
+        <section class="contacts-panel">
+          <div class="panel-row">
+            <div class="panel-title">联系人</div>
+            <button id="new-companion-button" class="ghost-button" type="button">新建</button>
+          </div>
+          <div class="contact-group">
+            <div class="group-title">活跃</div>
+            <div id="contact-list-active" class="contact-list"></div>
+          </div>
+          <div class="contact-group archived-group">
+            <button id="archived-toggle-button" class="group-toggle" type="button">
+              <span>归档</span>
+              <span id="archived-count-badge" class="count-badge">0</span>
+            </button>
+            <div id="contact-list-archived" class="contact-list hidden"></div>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main">
+        <section class="topbar">
+          <div>
+            <div id="thread-title" class="thread-title">加载中</div>
+            <div id="thread-summary" class="thread-summary">Connecting…</div>
+          </div>
+          <div class="topbar-actions">
+            <button id="edit-companion-button" class="ghost-button" type="button">编辑角色</button>
+            <button id="archive-companion-button" class="ghost-button" type="button">归档</button>
+            <button id="delete-companion-button" class="ghost-button danger" type="button">删除</button>
+            <div id="runtime-badge" class="runtime-badge">runtime</div>
+          </div>
+        </section>
+
+        <section id="screen-chat" class="screen active">
+          <section id="thread-debug-panel" class="thread-debug-panel hidden">
+            <div class="panel-head thread-debug-head">
+              <h2>线程调试</h2>
+              <div id="thread-debug-updated" class="card-meta"></div>
+            </div>
+            <div id="thread-debug-overview" class="thread-debug-overview"></div>
+            <div id="thread-debug-context" class="thread-debug-context"></div>
+          </section>
+          <div id="messages" class="messages"></div>
+          <form id="composer" class="composer">
+            <textarea id="composer-input" placeholder="给联系人发消息…" rows="3"></textarea>
+            <button type="submit">发送</button>
+          </form>
+        </section>
+
+        <section id="screen-reminders" class="screen">
+          <div class="panel-head reminder-head">
+            <div>
+              <h2>提醒</h2>
+              <div class="card-meta">当前联系人的提醒会绑定到同一条 thread。</div>
+            </div>
+          </div>
+          <form id="reminder-form" class="reminder-form">
+            <input id="reminder-note" placeholder="提醒内容" />
+            <input id="reminder-due" type="datetime-local" />
+            <button type="submit">添加提醒</button>
+          </form>
+          <div id="reminder-list" class="card-list"></div>
+        </section>
+
+        <section id="screen-permissions" class="screen">
+          <div class="panel-head permission-head">
+            <div>
+              <h2>权限</h2>
+              <div id="permission-summary" class="card-meta">当前联系人使用的 SmallPhone 权限模板。</div>
+            </div>
+            <div id="permission-source-badge" class="runtime-badge">local</div>
+          </div>
+          <div id="permission-template-list" class="permission-template-list"></div>
+          <div id="permission-decision-list" class="permission-decision-list"></div>
+        </section>
+
+      </main>
+    </div>
+
+    <section id="companion-drawer" class="drawer hidden" aria-hidden="true">
+      <div class="drawer-backdrop" id="companion-drawer-backdrop"></div>
+      <div class="drawer-panel">
+        <div class="panel-head">
+          <h2 id="companion-drawer-title">新建角色</h2>
+          <button id="close-companion-drawer" class="ghost-button" type="button">关闭</button>
+        </div>
+        <form id="companion-form" class="companion-form">
+          <input id="companion-name" placeholder="角色名" required />
+          <input id="companion-display-name" placeholder="显示名" />
+          <input id="companion-avatar" placeholder="头像缩写，如 AK" />
+          <input id="companion-style" placeholder="风格，如 steady, intimate, direct" />
+          <textarea id="companion-persona" rows="5" placeholder="角色设定 / persona"></textarea>
+          <textarea id="companion-worldbook-content" rows="4" placeholder="默认世界书内容"></textarea>
+          <textarea id="companion-thread-summary" rows="3" placeholder="线程摘要"></textarea>
+          <textarea id="companion-greeting" rows="3" placeholder="初始问候（仅创建时使用）"></textarea>
+          <div class="grid-two">
+            <input id="companion-trust" type="number" min="0" max="1" step="0.01" placeholder="trust" />
+            <input id="companion-intimacy" type="number" min="0" max="1" step="0.01" placeholder="intimacy" />
+          </div>
+          <div class="grid-two">
+            <input id="companion-tension" type="number" min="0" max="1" step="0.01" placeholder="tension" />
+            <input id="companion-responsiveness" type="number" min="0" max="1" step="0.01" placeholder="responsiveness" />
+          </div>
+          <input id="companion-relationship-state" placeholder="关系状态，如 trusted_private_channel" />
+          <input id="companion-relationship-intensity" type="number" min="0" max="1" step="0.01" placeholder="关系强度" />
+          <input id="companion-tool-allow" placeholder="工具列表，逗号分隔，如 search,file" />
+          <div class="drawer-actions">
+            <button id="submit-companion-form" type="submit">保存</button>
+          </div>
+        </form>
+      </div>
+    </section>
+    <script src="./app.js"></script>
+  </body>
+  </html>

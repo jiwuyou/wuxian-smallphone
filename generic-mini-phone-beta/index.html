@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>手机桌面</title>
+  <link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+  <div class="app-shell">
+    <div class="phone-frame">
+      <section class="overlay-screen lock-screen" id="lock-screen" aria-hidden="true">
+        <div class="lock-topline">
+          <span>5G</span>
+          <span>88%</span>
+        </div>
+        <div class="lock-main">
+          <p class="lock-date" id="lock-date">周五 4 月 17 日</p>
+          <h1 class="lock-time" id="lock-time">10:18</h1>
+          <div class="lock-card">
+            <p class="eyebrow">新通知</p>
+            <strong id="lock-notice-title">林秋</strong>
+            <p id="lock-notice-text">我把今天的晚霞拍下来了，要不要一起去看海边夜市？</p>
+          </div>
+        </div>
+        <button class="soft-button unlock-button" id="unlock-button">上滑解锁</button>
+      </section>
+
+        <section class="overlay-screen desktop-screen" id="desktop-screen" aria-hidden="true">
+          <div class="desktop-headline">
+            <div>
+              <p class="eyebrow">桌面</p>
+              <h2 id="desktop-greeting">晚上好，晚风</h2>
+              <p class="desktop-weather" id="desktop-weather">晴 23°C · 海边风轻</p>
+            </div>
+            <div class="desktop-head-actions">
+              <div class="desktop-mode-switch" aria-label="桌面模式">
+                <button class="desktop-mode-button" data-desktop-mode="world" type="button">世界</button>
+                <button class="desktop-mode-button" data-desktop-mode="icons" type="button">图标</button>
+              </div>
+              <button class="ghost-pill ghost-pill-subtle" id="relock-button">锁屏</button>
+            </div>
+          </div>
+
+          <div class="world-board" id="world-board">
+            <div class="world-toolbar">
+              <button class="world-edit-toggle" id="world-edit-toggle" type="button">编辑</button>
+              <div class="world-terrain-palette" id="world-terrain-palette" aria-label="地块类型"></div>
+            </div>
+            <div class="world-map-shell">
+              <canvas class="world-map" id="world-map" width="640" height="640"></canvas>
+            </div>
+            <div class="world-controls" aria-label="玩家移动">
+              <span></span>
+              <button class="world-move-button" data-world-move="up" type="button">↑</button>
+              <span></span>
+              <button class="world-move-button" data-world-move="left" type="button">←</button>
+              <button class="world-move-button" data-world-action="enter" type="button">进入</button>
+              <button class="world-move-button" data-world-move="right" type="button">→</button>
+              <span></span>
+              <button class="world-move-button" data-world-move="down" type="button">↓</button>
+              <span></span>
+            </div>
+            <div class="world-inspector" id="world-inspector">未开垦地块 · 点编辑后可填每一格</div>
+          </div>
+
+          <div class="desktop-pages-viewport" id="desktop-pages-viewport">
+            <div class="desktop-pages" id="desktop-pages"></div>
+          </div>
+
+          <div class="desktop-pagination" id="desktop-pagination" aria-label="桌面分页"></div>
+
+        <div class="dock-row ios-dock">
+          <button class="dock-app" data-desktop-target="messages">
+            <span class="icon-orb orb-chat">聊</span>
+            <strong>消息</strong>
+          </button>
+          <button class="dock-app" data-desktop-target="contacts">
+            <span class="icon-orb orb-character">人</span>
+            <strong>联系人</strong>
+          </button>
+          <button class="dock-app" data-panel-target="character">
+            <span class="icon-orb orb-world">角</span>
+            <strong>角色</strong>
+          </button>
+          <button class="dock-app" data-panel-target="settings">
+            <span class="icon-orb orb-settings">调</span>
+            <strong>调试</strong>
+          </button>
+          <button class="dock-app" data-panel-target="permissions">
+            <span class="icon-orb orb-permission">权</span>
+            <strong>权限</strong>
+          </button>
+        </div>
+      </section>
+
+      <header class="status-bar">
+        <div class="status-time" id="status-time">10:18</div>
+        <div class="status-icons">
+          <span id="theme-label">柔雾</span>
+          <span>5G</span>
+          <span>88%</span>
+        </div>
+      </header>
+
+      <button class="app-exit-button" id="app-exit-button" type="button">回到桌面</button>
+
+      <main class="screen">
+        <section class="view view-active" data-view="messages">
+          <div class="section-title-row">
+            <h2>消息</h2>
+            <button class="ghost-button" id="mark-read-button">全部已读</button>
+          </div>
+
+          <div class="list-card message-list" id="message-list"></div>
+        </section>
+
+        <section class="view" data-view="contacts">
+          <div class="section-title-row sticky-title">
+            <h2>联系人</h2>
+          </div>
+
+          <div class="stack-grid compact-gap">
+            <div class="list-card" id="contact-list"></div>
+
+            <div class="character-detail-card" id="character-highlight"></div>
+          </div>
+        </section>
+
+        <div id="registered-app-views"></div>
+
+
+        <section class="view chat-view" data-view="chat">
+          <div class="chat-header">
+            <button class="icon-button" data-back>返回</button>
+            <div>
+              <strong id="chat-title">林秋</strong>
+              <p id="chat-subtitle">随聊 · 在线 · 海风很轻</p>
+            </div>
+          </div>
+
+          <div class="chat-date">今天</div>
+          <div class="chat-thread" id="chat-thread"></div>
+
+          <div class="chat-tools">
+            <button class="tool-chip" data-chat-shortcut="表情包有点可爱。">表情</button>
+            <button class="tool-chip" data-chat-shortcut="我刚刚拍了一张照片。">照片</button>
+            <button class="tool-chip" id="prompt-preview-button" type="button">提示词</button>
+            <button class="tool-chip" id="continue-generate">继续生成</button>
+          </div>
+
+          <div class="chat-status" id="chat-status">当前为纯前端模式。配置 OpenAI 兼容接口后可直接聊天。</div>
+
+          <form class="input-bar" id="chat-form">
+            <input id="chat-input" type="text" placeholder="发一条消息...">
+            <button type="button" class="magic-wand-button" id="magic-wand-button" aria-label="魔法棒：送到后端" title="魔法棒：送到后端">✦</button>
+            <button type="submit" class="send-button">发送</button>
+          </form>
+        </section>
+
+        <aside class="panel" id="feature-panel" aria-hidden="true">
+          <div class="panel-header">
+            <button class="icon-button panel-back-button" id="panel-back-button">返回</button>
+            <div>
+              <p class="eyebrow panel-eyebrow" id="panel-eyebrow">功能</p>
+              <h2 id="panel-title">功能面板</h2>
+            </div>
+            <button class="icon-button" id="close-panel">关闭</button>
+          </div>
+
+          <div class="panel-body">
+            <section class="panel-view" data-panel="moments">
+              <form class="journal-form" id="moments-form">
+                <input type="text" id="moments-input" placeholder="发一条朋友圈，比如：今天码头的风很轻。">
+                <button type="submit" class="soft-button small-button">发布动态</button>
+              </form>
+              <div class="stack-grid" id="moments-list"></div>
+            </section>
+
+            <section class="panel-view" data-panel="forum">
+              <form class="journal-form" id="forum-form">
+                <input type="text" id="forum-title" placeholder="帖子标题，比如：今晚码头值得去吗？">
+                <textarea id="forum-input" rows="4" placeholder="写下帖子内容、问题或公共线索..."></textarea>
+                <button type="submit" class="soft-button small-button">发布帖子</button>
+              </form>
+              <div class="stack-grid" id="forum-list"></div>
+            </section>
+
+            <section class="panel-view" data-panel="memory">
+              <form class="inline-form" id="memory-form">
+                <input type="text" id="memory-input" placeholder="新增一条长期记忆，例如：喜欢海风和旧书店">
+                <button type="submit" class="soft-button small-button">保存</button>
+              </form>
+              <div class="stack-grid" id="memory-list"></div>
+            </section>
+
+            <section class="panel-view" data-panel="worldbook">
+              <form class="journal-form" id="worldbook-form">
+                <input type="text" id="worldbook-title" placeholder="词条标题，比如：海街夜市">
+                <input type="text" id="worldbook-keys" placeholder="触发关键词，用逗号分隔，比如：夜市,码头,晚霞">
+                <textarea id="worldbook-text" rows="4" placeholder="词条内容，会像 SillyTavern 一样在命中关键词时进入上下文。"></textarea>
+                <button type="submit" class="soft-button small-button">新增词条</button>
+              </form>
+              <div class="stack-grid" id="worldbook-list"></div>
+            </section>
+
+            <section class="panel-view" data-panel="journal">
+              <form class="journal-form" id="journal-form">
+                <input type="text" id="journal-title" placeholder="标题，比如：今天的海风">
+                <textarea id="journal-input" rows="5" placeholder="写下今天的聊天碎片、情绪和小事..."></textarea>
+                <button type="submit" class="soft-button small-button">写入手账</button>
+              </form>
+              <div class="stack-grid" id="journal-list"></div>
+            </section>
+
+            <section class="panel-view" data-panel="settings">
+              <form class="settings-form" id="settings-form">
+                <label>
+                  <span>系统入口说明</span>
+                  <input type="text" value="主题、API、人设、角色管理等系统项统一收拢到设置" readonly>
+                </label>
+                <button type="button" class="secondary-button" data-panel-target="character">进入角色管理</button>
+                <label>
+                  <span>主题</span>
+                  <select id="theme-select">
+                    <option value="mist">柔雾粉紫</option>
+                    <option value="night">夜色蓝紫</option>
+                    <option value="mint">奶油薄荷</option>
+                  </select>
+                </label>
+                <label>
+                  <span>API 名称</span>
+                  <input type="text" id="api-name" placeholder="例如：OpenAI / OpenRouter / 自定义">
+                </label>
+                <label>
+                  <span>Base URL</span>
+                  <input type="text" id="api-url" placeholder="例如：https://api.openai.com/v1">
+                </label>
+                <label>
+                  <span>API Key</span>
+                  <input type="password" id="api-key" placeholder="仅本地保存，直接由浏览器发请求">
+                </label>
+                <label>
+                  <span>模型名称</span>
+                  <input type="text" id="model-name" placeholder="例如：gpt-4o-mini">
+                </label>
+                <label>
+                  <span>Temperature</span>
+                  <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="0.8">
+                </label>
+                <label>
+                  <span>Max Tokens</span>
+                  <input type="number" id="max-tokens" min="64" max="8192" step="1" placeholder="512">
+                </label>
+                <label>
+                  <span>全局系统提示词</span>
+                  <textarea id="system-prompt" rows="5" placeholder="这里会作为全局 system prompt，与角色卡、人设、世界书、记忆一起拼装。"></textarea>
+                </label>
+                <button type="submit" class="soft-button small-button">保存设置</button>
+              </form>
+              <article class="info-card">
+                <p class="eyebrow">Prompt Preview</p>
+                <strong>当前聊天上下文预览</strong>
+                <pre class="prompt-preview" id="prompt-preview"></pre>
+              </article>
+            </section>
+
+            <section class="panel-view" data-panel="permissions">
+              <div class="permission-panel-head">
+                <p id="permission-panel-summary">当前联系人权限。</p>
+                <span class="runtime-pill" id="permission-panel-source">local</span>
+              </div>
+              <div class="permission-template-grid" id="permission-template-grid"></div>
+              <div class="permission-decision-stack" id="permission-decision-stack"></div>
+            </section>
+
+            <section class="panel-view" data-panel="imports">
+              <form class="settings-form" id="imports-form">
+                <label>
+                  <span>导入类型</span>
+                  <select id="import-type">
+                    <option value="auto">自动识别</option>
+                    <option value="character">角色卡</option>
+                    <option value="worldbook">世界书</option>
+                    <option value="chat">聊天记录</option>
+                  </select>
+                </label>
+                <label>
+                  <span>导入模式</span>
+                  <select id="import-mode">
+                    <option value="replace">覆盖现有内容</option>
+                    <option value="append">追加到现有内容</option>
+                  </select>
+                </label>
+                <label>
+                  <span>选择 JSON 文件</span>
+                  <input type="file" id="import-file" accept="application/json,.json,text/plain">
+                </label>
+                <label>
+                  <span>粘贴 JSON</span>
+                  <textarea id="import-json" rows="10" placeholder='支持粘贴角色卡、世界书、聊天记录，或包含 character / worldbook / chat 的对象'></textarea>
+                </label>
+                <button type="submit" class="soft-button small-button">导入到当前项目</button>
+              </form>
+              <article class="info-card import-note-card">
+                <p class="eyebrow">支持范围</p>
+                <strong>角色卡 / 世界书 / 聊天记录</strong>
+                <p id="import-result">可粘贴 JSON 或选择本地 JSON 文件。世界书和聊天记录支持覆盖或追加。</p>
+              </article>
+            </section>
+
+            <section class="panel-view" data-panel="persona">
+              <form class="settings-form" id="persona-form">
+                <label>
+                  <span>昵称</span>
+                  <input type="text" id="persona-name" placeholder="你的名字">
+                </label>
+                <label>
+                  <span>签名</span>
+                  <input type="text" id="persona-signature" placeholder="一句想挂在主页的话">
+                </label>
+                <label>
+                  <span>人物设定</span>
+                  <textarea id="persona-bio" rows="4" placeholder="例如：夜游爱好者，偏爱慢节奏聊天和旧书店。"></textarea>
+                </label>
+                <button type="submit" class="soft-button small-button">保存人设</button>
+              </form>
+              <article class="info-card">
+                <p class="eyebrow">当前人设</p>
+                <strong id="persona-preview-name">晚风</strong>
+                <p id="persona-preview-bio">夜游爱好者，偏爱慢节奏聊天和旧书店。</p>
+              </article>
+            </section>
+
+            <section class="panel-view" data-panel="character">
+              <form class="settings-form" id="character-form">
+                <label>
+                  <span>角色选择</span>
+                  <select id="character-select"></select>
+                </label>
+                <label>
+                  <span>角色名</span>
+                  <input type="text" id="character-name" placeholder="角色昵称">
+                </label>
+                <label>
+                  <span>角色简介</span>
+                  <textarea id="character-description" rows="4" placeholder="一句话介绍角色定位、语气和相处感"></textarea>
+                </label>
+                <label>
+                  <span>状态文案</span>
+                  <input type="text" id="character-subtitle" placeholder="例如：在线 · 海风很轻">
+                </label>
+                <label>
+                  <span>聊天摘要</span>
+                  <input type="text" id="character-summary" placeholder="消息列表里显示的最后一条内容">
+                </label>
+                <label>
+                  <span>性格</span>
+                  <textarea id="character-personality" rows="3" placeholder="参考 SillyTavern 的 personality 字段"></textarea>
+                </label>
+                <label>
+                  <span>场景</span>
+                  <textarea id="character-scenario" rows="3" placeholder="角色常处于什么环境、什么关系阶段"></textarea>
+                </label>
+                <label>
+                  <span>角色补充提示词</span>
+                  <textarea id="character-system-prompt" rows="4" placeholder="类似角色卡 system prompt override"></textarea>
+                </label>
+                <label>
+                  <span>主动联系</span>
+                  <div class="toggle-row">
+                    <input type="checkbox" id="character-proactive-toggle">
+                    <span>允许系统在合适的时候主动给这个联系人发消息</span>
+                  </div>
+                </label>
+                <button type="submit" class="soft-button small-button">保存角色</button>
+              </form>
+
+              <article class="info-card">
+                <p class="eyebrow">角色预览</p>
+                <strong id="character-preview-name">林秋</strong>
+                <p id="character-preview-description">海边摄影师，语气温柔，擅长把日常说得很浪漫。</p>
+              </article>
+            </section>
+          </div>
+        </aside>
+      </main>
+
+      <nav class="tab-bar">
+        <button class="tab active" data-tab="messages">消息</button>
+        <button class="tab" data-tab="contacts">联系人</button>
+      </nav>
+    </div>
+  </div>
+
+  <script type="module" src="scripts/main.js?v=3"></script>
+</body>
+</html>

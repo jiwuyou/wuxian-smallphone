@@ -1,0 +1,24 @@
+{
+  "id": "smallphone",
+  "name": "SmallPhone",
+  "description": "SmallPhone dedicated gateway route and session orchestration.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "agentId": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string"
+      },
+      "workspaceDir": {
+        "type": "string"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "minimum": 1000
+      }
+    }
+  }
+}
