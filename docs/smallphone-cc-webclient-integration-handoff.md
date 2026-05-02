@@ -5,7 +5,7 @@
 这份文档给接替 SmallPhone 接入工作的 agent 或开发者使用。它基于：
 
 - `/root/cc-connect-fresh/docs/webclient-app-integration.zh-CN.md`
-- `/root/projects/smallphone/docs/smallphone-dual-frontend.md`
+- `/root/projects/smallphone/smallphone-active/docs/smallphone-dual-frontend.md`
 - 当前 `smallphone-app` 后端与 stable/beta 前端代码
 
 ## 当前结论
@@ -46,8 +46,9 @@ Project Agent
 - stable 前端：`/root/projects/smallphone/smallphone-active/generic-mini-phone`
 - beta 前端：`/root/projects/smallphone/smallphone-active/generic-mini-phone-beta`
 - SmallPhone 后端：`/root/projects/smallphone/smallphone-active/smallphone-app`
-- 启动脚本：`/root/projects/smallphone/start_smallphone.sh`
-- 双前端说明：`/root/projects/smallphone/docs/smallphone-dual-frontend.md`
+- 启动脚本：`/root/projects/smallphone/smallphone-active/start_smallphone.sh`
+- 兼容入口：`/root/projects/smallphone/start_smallphone.sh`
+- 双前端说明：`/root/projects/smallphone/smallphone-active/docs/smallphone-dual-frontend.md`
 
 当前约定端口：
 
@@ -154,7 +155,7 @@ SMALLPHONE_CCCONNECT_PROJECT=smallphone-3e9fc251
 - 在 `smallphone-app/packages/openclaw-adapter/index.js` 新增 `createCcWebclientAdapter(config)`。
 - 在 `createRuntimeAdapter()` 中识别 `cc-webclient`。
 - 在 `smallphone-app/apps/core/server.js` 读取并传入新增 env。
-- 在 `/root/projects/smallphone/start_smallphone.sh` 从 `/root/.cc-connect/config.toml` 读取 webclient `port` 与 `token`，注入 `smallphone-app` 后端进程。
+- 在 `/root/projects/smallphone/smallphone-active/start_smallphone.sh` 从 `/root/.cc-connect/config.toml` 读取 webclient `port` 与 `token`，注入 `smallphone-app` 后端进程。
 
 发送消息使用 webclient v1 send API：
 
@@ -222,7 +223,7 @@ curl -sS \
 9. 启动 SmallPhone 并验证：
 
 ```bash
-cd /root/projects/smallphone
+cd /root/projects/smallphone/smallphone-active
 setsid -f ./start_smallphone.sh </dev/null >/tmp/smallphone-start.log 2>&1
 ```
 
@@ -303,4 +304,3 @@ P2：流式与附件
 - session rotate 后新会话不污染旧会话。
 - cc-connect reload 后 SmallPhone 无需改前端即可继续工作。
 - webclient app 禁用后，SmallPhone 返回清晰错误，而不是静默成功。
-
