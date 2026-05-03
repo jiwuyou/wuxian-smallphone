@@ -11,6 +11,7 @@ let backendEnabled = false;
 let backendBase = DEFAULT_BACKEND_BASE;
 let threadEventSource = null;
 let threadEventSourceKey = '';
+let characterCreateDraftKey = '';
 
 const CORE_DESKTOP_APPS = [
   { id: 'messages', name: '消息', shortName: '聊', orbClass: 'orb-chat', target: 'messages', badge: 'unread' },
@@ -308,6 +309,46 @@ function normalizeAgentType(value) {
   return '';
 }
 
+function createLocalChatKey(name = 'contact') {
+  const base = String(name || 'contact')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/[\u4e00-\u9fa5]/g, '') || 'contact';
+  let key = base;
+  let index = 2;
+  while (state.chats[key]) {
+    key = `${base}-${index}`;
+    index += 1;
+  }
+  return key;
+}
+
+function createBlankChatDraft() {
+  const key = createLocalChatKey('new-contact');
+  return {
+    key,
+    chat: {
+      name: '新联系人',
+      subtitle: '刚刚创建',
+      avatarClass: chooseAvatarClass(key),
+      avatarText: '新',
+      proactiveContactEnabled: true,
+      unread: 0,
+      summary: '新的 SmallPhone 独立窗口。',
+      time: '刚刚',
+      description: '新的私人联系人。',
+      roleLevel: 'contact',
+      agentType: '',
+      personality: '',
+      scenario: '',
+      systemPrompt: '',
+      messages: [],
+    },
+  };
+}
+
 function mapBootstrapToFrontendState(snapshot, previousState = state) {
   const bootstrap = snapshot?.bootstrap || {};
   const threadList = Array.isArray(bootstrap.threads) ? bootstrap.threads : [];
@@ -466,6 +507,59 @@ async function syncCharacterEdits(threadId, chat) {
   });
   await refreshBackendState(threadId);
   return true;
+}
+
+async function createBackendCompanion(chat) {
+  const payload = buildCompanionPayload(chat);
+  const created = await requestBackend('/companions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  const threadId = String(created?.thread?.id || '').trim();
+  await refreshBackendState(threadId || uiState.activeChatKey);
+  return resolvePreferredChatKey(state.chats, threadId) || resolveChatKeyByBackendContactId(created?.contact?.id) || '';
+}
+
+function resolveChatKeyByBackendContactId(contactId) {
+  const target = String(contactId || '').trim();
+  if (!target) return '';
+  return Object.entries(state.chats).find(([, chat]) => chat?.backend?.contactId === target)?.[0] || '';
+}
+
+function buildCompanionPayload(chat) {
+  return {
+    name: chat.name,
+    displayName: chat.name,
+    style: chat.personality || chat.subtitle || 'concise, private, mobile-native',
+    persona: [chat.description, chat.scenario].filter(Boolean).join('\n\n') || chat.description || chat.name,
+    worldbookContent: [chat.systemPrompt, chat.scenario, chat.description].filter(Boolean).join('\n\n') || chat.description || chat.name,
+    threadSummary: chat.summary || chat.description || chat.name,
+    roleLevel: normalizeRoleLevel(chat.roleLevel),
+    agentType: normalizeAgentType(chat.agentType),
+  };
+}
+
+function beginCreateContact() {
+  discardUnsavedContactDraft();
+  const draft = createBlankChatDraft();
+  state.chats[draft.key] = draft.chat;
+  characterCreateDraftKey = draft.key;
+  uiState.editingCharacterKey = draft.key;
+  uiState.activeChatKey = draft.key;
+  openPanel('character');
+  renderCharacterEditor();
+  renderCharacterHighlight();
+  renderMessages();
+  renderContacts();
+}
+
+function discardUnsavedContactDraft() {
+  if (!characterCreateDraftKey) return;
+  const draft = state.chats[characterCreateDraftKey];
+  if (draft && !draft.backend?.contactId) {
+    delete state.chats[characterCreateDraftKey];
+  }
+  characterCreateDraftKey = '';
 }
 
 async function syncWorldbookEntry(entry) {
@@ -1468,6 +1562,9 @@ function renderCharacterEditor() {
   dom.characterProactiveToggle.checked = chat.proactiveContactEnabled !== false;
   dom.characterPreviewName.textContent = chat.name;
   dom.characterPreviewDescription.textContent = chat.description;
+  if (dom.characterSubmitButton) {
+    dom.characterSubmitButton.textContent = characterCreateDraftKey === uiState.editingCharacterKey ? '创建联系人' : '保存角色';
+  }
 }
 
 function renderPermissionPanel(errorMessage = '') {
@@ -1933,7 +2030,11 @@ dom.forumForm.addEventListener('submit', (event) => {
 });
 
 dom.characterSelect.addEventListener('change', () => {
+  const previousDraftKey = characterCreateDraftKey;
   uiState.editingCharacterKey = dom.characterSelect.value;
+  if (previousDraftKey && previousDraftKey !== uiState.editingCharacterKey) {
+    discardUnsavedContactDraft();
+  }
   renderCharacterEditor();
   renderCharacterHighlight();
   if (backendEnabled) {
@@ -1943,13 +2044,21 @@ dom.characterSelect.addEventListener('change', () => {
   }
 });
 
+if (dom.addContactButton) {
+  dom.addContactButton.addEventListener('click', () => {
+    beginCreateContact();
+  });
+}
+
 dom.characterForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
   if (!chat) return;
+  const isCreating = characterCreateDraftKey === uiState.editingCharacterKey;
   const editingKey = String(chat.backend?.threadId || uiState.editingCharacterKey || '').trim() || uiState.editingCharacterKey;
   chat.name = dom.characterNameInput.value.trim() || chat.name;
   chat.description = dom.characterDescriptionInput.value.trim() || chat.description;
+  chat.avatarText = chat.name.slice(0, 1) || chat.avatarText || '新';
   chat.roleLevel = normalizeRoleLevel(dom.characterRoleLevelSelect?.value || chat.roleLevel);
   chat.agentType = normalizeAgentType(dom.characterAgentTypeSelect?.value || chat.agentType);
   chat.subtitle = dom.characterSubtitleInput.value.trim() || chat.subtitle;
@@ -1961,10 +2070,19 @@ dom.characterForm.addEventListener('submit', async (event) => {
   saveState();
   try {
     if (backendEnabled) {
-      await syncCharacterEdits(editingKey, chat);
-      setChatStatus('角色卡已同步到 smallphone-app。');
+      if (isCreating) {
+        const createdKey = await createBackendCompanion(chat);
+        characterCreateDraftKey = '';
+        uiState.activeChatKey = createdKey || resolvePreferredChatKey(state.chats, uiState.activeChatKey) || uiState.activeChatKey;
+        uiState.editingCharacterKey = uiState.activeChatKey;
+        setChatStatus('联系人已创建。');
+      } else {
+        await syncCharacterEdits(editingKey, chat);
+        setChatStatus('角色卡已同步到 smallphone-app。');
+      }
     } else {
-      queueStateSync('角色卡已保存。');
+      characterCreateDraftKey = '';
+      queueStateSync(isCreating ? '联系人已创建。' : '角色卡已保存。');
     }
     renderAll();
   } catch (error) {

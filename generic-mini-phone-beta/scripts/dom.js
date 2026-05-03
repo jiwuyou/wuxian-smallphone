@@ -43,6 +43,7 @@ export const statusTime = document.querySelector('#status-time');
 export const themeLabel = document.querySelector('#theme-label');
 export const appExitButton = document.querySelector('#app-exit-button');
 export const markReadButton = document.querySelector('#mark-read-button');
+export const addContactButton = document.querySelector('#add-contact-button');
 export const continueGenerateButton = document.querySelector('#continue-generate');
 export const promptPreviewButton = document.querySelector('#prompt-preview-button');
 export const chatStatus = document.querySelector('#chat-status');
@@ -110,6 +111,7 @@ export const characterPersonalityInput = document.querySelector('#character-pers
 export const characterScenarioInput = document.querySelector('#character-scenario');
 export const characterSystemPromptInput = document.querySelector('#character-system-prompt');
 export const characterProactiveToggle = document.querySelector('#character-proactive-toggle');
+export const characterSubmitButton = document.querySelector('#character-submit-button');
 
 export const profileName = document.querySelector('#profile-name');
 export const profileSignature = document.querySelector('#profile-signature');
