@@ -1,4 +1,4 @@
-import * as dom from './dom.js?v=3';
+import * as dom from './dom.js?v=4';
 import { appModules, appSpaceTemplates, registeredApps } from './app-registry.js?v=3';
 import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=3';
 import { applyDesktopMode, bindWorld, renderWorld, renderWorldToolbar } from './world.js?v=3';
@@ -956,6 +956,10 @@ function buildFallbackReply(chat, userInput = '') {
 async function generateAssistantReply(userInput = '', { continueOnly = false } = {}) {
   const chat = getActiveChat();
   if (!chat || uiState.isGenerating) return;
+  if (backendEnabled) {
+    setChatStatus('后端已连接，已禁用前端本地自动回复。', true);
+    return;
+  }
 
   uiState.isGenerating = true;
   dom.chatInput.disabled = true;
@@ -1967,11 +1971,12 @@ dom.chatForm.addEventListener('submit', async (event) => {
   dom.chatInput.value = '';
   saveState();
   renderAll();
-  setChatStatus(
-    backendEnabled
-      ? '已先放在前端。点魔法棒再送到后端。'
-      : '已先放在前端。点魔法棒后生成回复。',
-  );
+  if (backendEnabled) {
+    setChatStatus('正在发送到 smallphone-app 后端...');
+    void flushPendingOutbox();
+    return;
+  }
+  setChatStatus('已先放在前端。点魔法棒后生成回复。');
 });
 
 dom.memoryForm.addEventListener('submit', (event) => {
