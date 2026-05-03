@@ -144,20 +144,21 @@ function createCcWebclientAdapter(config) {
       };
     },
     async sendTurn(payload) {
-      if (!baseUrl || !token || !appId || !project) {
+      const turnProject = normalizeText(payload?.thread?.runtime?.project) || project;
+      if (!baseUrl || !token || !appId || !turnProject) {
         throw new Error(
           "cc-webclient runtime requires webclientBaseUrl, webclientToken, webclientAppId, and ccConnectProject.",
         );
       }
 
       const preferredSessionId = derivePreferredWebclientSessionId(payload);
-      const sessionKey = deriveWebclientSessionKey(payload, project);
+      const sessionKey = deriveWebclientSessionKey(payload, turnProject);
       const sessionName = deriveWebclientSessionName(payload);
       const ensuredSession = await ensureWebclientSession({
         baseUrl,
         token,
         appId,
-        project,
+        project: turnProject,
         sessionKey,
         sessionId: preferredSessionId,
         name: sessionName,
@@ -173,7 +174,7 @@ function createCcWebclientAdapter(config) {
       const webclientImages = await buildWebclientImages(imageAttachments);
       const message = buildWebclientTurnMessage(payload, fileAttachments);
 
-      const sendUrl = buildWebclientUrl(baseUrl, appId, `/api/v1/projects/${encodeURIComponent(project)}/send`);
+      const sendUrl = buildWebclientUrl(baseUrl, appId, `/api/v1/projects/${encodeURIComponent(turnProject)}/send`);
       const sendResponse = await fetchWithTimeout(
         sendUrl,
         {
@@ -207,7 +208,7 @@ function createCcWebclientAdapter(config) {
         baseUrl,
         token,
         appId,
-        project,
+        project: turnProject,
         sessionId: resolvedSessionId,
         outboxId,
         timeoutMs,

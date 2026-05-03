@@ -464,6 +464,8 @@ class SmallPhoneService {
         runtimeSessionId: "",
         runtime: {
           provider: this.runtimeInfo.id || "mock",
+          project: payload.runtimeProject,
+          agentType: payload.agentType,
           model: payload.model || this.runtimeInfo.model || "",
           agentId,
           workspaceDir,
@@ -629,6 +631,8 @@ class SmallPhoneService {
       liveThread.runtime = {
         ...(liveThread.runtime || {}),
         provider: this.runtimeInfo.id || liveThread.runtime?.provider || "mock",
+        project: payload.runtimeProject,
+        agentType: payload.agentType,
         model: payload.model,
         agentId: payload.agentId,
         workspaceDir: payload.workspaceDir,
@@ -1618,6 +1622,14 @@ class SmallPhoneService {
         liveThread.runtime = {
           ...(liveThread.runtime || {}),
           provider: routedThread.runtime?.provider || this.runtimeInfo.id || "mock",
+          project:
+            liveThread.runtime?.project ||
+            routedThread.runtime?.project ||
+            "",
+          agentType:
+            liveThread.runtime?.agentType ||
+            routedThread.runtime?.agentType ||
+            "",
           agentId:
             liveThread.runtime?.agentId ||
             routedThread.runtime?.agentId ||
@@ -1769,6 +1781,8 @@ function attachThreadRouting(thread, runtimeProvider = "") {
     channelId,
     runtime: {
       provider: runtimeProvider || thread.runtime?.provider || "mock",
+      project: thread.runtime?.project || "",
+      agentType: thread.runtime?.agentType || "",
       model: thread.runtime?.model || "",
       agentId:
         thread.runtime?.agentId ||
@@ -2460,6 +2474,8 @@ function normalizeCompanionInput(input) {
       `${displayName} 的 SmallPhone 独立窗口已建立，后续消息固定路由到该 agent。`,
     greeting: String(input?.greeting || "").trim(),
     model: String(input?.model || "").trim(),
+    agentType: normalizeAgentType(input?.agentType),
+    runtimeProject: String(input?.runtimeProject || input?.project || "").trim(),
     agentId: String(input?.agentId || "").trim(),
     workspaceDir: String(input?.workspaceDir || "").trim(),
     sessionKey: String(input?.sessionKey || "").trim(),
@@ -2529,6 +2545,10 @@ function normalizeCompanionPatchInput(params) {
       String(thread.runtime?.model || "").trim() ||
       String(runtimeInfo.model || "").trim() ||
       "",
+    agentType: normalizeAgentType(input?.agentType) || normalizeAgentType(thread.runtime?.agentType),
+    runtimeProject:
+      String(input?.runtimeProject || input?.project || "").trim() ||
+      String(thread.runtime?.project || "").trim(),
     agentId,
     workspaceDir,
     sessionKey,
@@ -2549,6 +2569,13 @@ function normalizeRelationshipBaseline(input) {
     tension: clampUnit(input?.tension, 0.08),
     responsiveness: clampUnit(input?.responsiveness, 0.75),
   };
+}
+
+function normalizeAgentType(value) {
+  const text = String(value || "").trim().toLowerCase().replace(/[-_\s]+/g, "");
+  if (text === "codex") return "codex";
+  if (text === "claudecode" || text === "claude") return "claudecode";
+  return "";
 }
 
 function normalizeCompanionRelationshipState(input) {
