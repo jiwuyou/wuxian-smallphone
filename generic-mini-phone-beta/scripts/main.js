@@ -259,6 +259,11 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
     }))
     .filter((message) => message.text);
   const latestMessageText = chatMessages.at(-1)?.text || cleanThreadSummary(thread?.summary);
+  const previousDescription = String(previousChat?.description || '').trim();
+  const threadSummary = cleanThreadSummary(thread?.summary);
+  const fallbackDescription = previousDescription && previousDescription !== latestMessageText && previousDescription !== threadSummary
+    ? previousDescription
+    : '这个联系人正在通过 SmallPhone 后端提供回复。';
 
   return {
     name: String(contact?.displayName || thread?.title || character?.name || '未命名联系人').trim(),
@@ -269,7 +274,7 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
     unread: Number(thread?.unreadCount || 0),
     summary: latestMessageText,
     time: formatRelativeThreadTime(thread?.updatedAt),
-    description: String(character?.persona || thread?.summary || previousChat?.description || '这个联系人正在通过 SmallPhone 后端提供回复。').trim(),
+    description: String(character?.persona || fallbackDescription).trim(),
     personality: String(character?.style || previousChat?.personality || '').trim(),
     scenario: String(relationshipState?.guidance?.join(' / ') || previousChat?.scenario || '').trim(),
     systemPrompt: String(scopedWorldbook?.content || previousChat?.systemPrompt || '').trim(),
@@ -295,7 +300,7 @@ function mapBootstrapToFrontendState(snapshot, previousState = state) {
   const messagesByThreadId = snapshot?.messagesByThreadId || {};
   const contactsById = new Map(contactList.map((contact) => [contact.id, contact]));
   const chats = Object.fromEntries(threadList.map((thread) => {
-    const contact = thread.contact || contactsById.get(thread.contactId) || null;
+    const contact = contactsById.get(thread.contactId) || thread.contact || null;
     const previousChat = previousState?.chats?.[thread.id] || null;
     return [thread.id, mapThreadToChat({
       thread,
