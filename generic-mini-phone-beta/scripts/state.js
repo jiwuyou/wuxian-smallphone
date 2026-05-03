@@ -54,6 +54,9 @@ export const defaultState = {
     name: '晚风',
     signature: '今晚也想和喜欢的人说很多无关紧要的话。',
     bio: '夜游爱好者，偏爱慢节奏聊天和旧书店。',
+    avatarText: '你',
+    avatarImage: '',
+    avatarAttachmentId: '',
     masks: 6,
   },
   chats: {

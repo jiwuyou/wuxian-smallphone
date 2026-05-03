@@ -1183,6 +1183,8 @@ p {
   font-weight: 700;
   color: #fff;
   flex: none;
+  overflow: hidden;
+  position: relative;
 }
 
 .large-avatar {
@@ -1196,6 +1198,55 @@ p {
 .avatar-gold { background: linear-gradient(135deg, #f3b05d, #ffd77f); }
 .avatar-green { background: linear-gradient(135deg, #59b68d, #84d9ab); }
 .avatar-dark { background: linear-gradient(135deg, #35304f, #5f5b7a); }
+
+.avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-fallback {
+  position: relative;
+  z-index: 1;
+}
+
+.avatar-with-image .avatar-fallback {
+  opacity: 0;
+}
+
+.chat-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  align-self: flex-end;
+  margin-bottom: 2px;
+  font-size: 12px;
+}
+
+.avatar-editor {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.avatar-editor-preview {
+  flex: none;
+}
+
+.avatar-editor-fields {
+  display: grid;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.avatar-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
 .badge {
   min-width: 22px;
@@ -1236,6 +1287,47 @@ p {
   font-size: 16px;
 }
 
+.my-profile-shell {
+  display: grid;
+  gap: 16px;
+  padding-bottom: 14px;
+}
+
+.my-profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 22px;
+  background: var(--surface-strong);
+  box-shadow: 0 12px 34px rgba(89, 81, 117, 0.08);
+}
+
+.my-profile-hero strong {
+  display: block;
+  font-size: 22px;
+  line-height: 1.2;
+  margin-bottom: 6px;
+}
+
+.my-profile-hero p:last-child {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.my-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 24px;
+  font-size: 20px;
+}
+
+.my-profile-form {
+  padding: 0 2px;
+}
+
 .settings-item {
   justify-content: space-between;
 }
@@ -1250,9 +1342,14 @@ p {
 }
 
 .chat-header {
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   padding: 4px 2px 14px;
+}
+
+.chat-header > div:last-child {
+  min-width: 0;
+  flex: 1;
 }
 
 .chat-date {
@@ -1270,6 +1367,17 @@ p {
   max-height: calc(100% - 172px);
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.chat-message-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.chat-message-self {
+  justify-content: flex-end;
 }
 
 .bubble {

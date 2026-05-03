@@ -128,12 +128,55 @@
           </div>
         </section>
 
+        <section class="view" data-view="my">
+          <div class="section-title-row sticky-title">
+            <h2>我的</h2>
+          </div>
+
+          <div class="my-profile-shell">
+            <section class="my-profile-hero">
+              <div id="my-avatar-preview"></div>
+              <div>
+                <p class="eyebrow">个人资料</p>
+                <strong id="my-preview-name">晚风</strong>
+                <p id="my-preview-signature">今晚也想和喜欢的人说很多无关紧要的话。</p>
+              </div>
+            </section>
+
+            <form class="settings-form my-profile-form" id="my-profile-form">
+              <label>
+                <span>头像文字</span>
+                <input type="text" id="my-avatar-text" maxlength="2" placeholder="你">
+              </label>
+              <div class="avatar-editor-actions">
+                <input type="file" id="my-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                <button type="button" class="secondary-button" id="my-avatar-upload">上传头像</button>
+                <button type="button" class="ghost-button" id="my-avatar-remove">移除图片</button>
+              </div>
+              <label>
+                <span>昵称</span>
+                <input type="text" id="my-name" placeholder="你的名字">
+              </label>
+              <label>
+                <span>签名</span>
+                <input type="text" id="my-signature" placeholder="一句想挂在主页的话">
+              </label>
+              <label>
+                <span>人物设定</span>
+                <textarea id="my-bio" rows="5" placeholder="例如：夜游爱好者，偏爱慢节奏聊天和旧书店。"></textarea>
+              </label>
+              <button type="submit" class="soft-button small-button">保存资料</button>
+            </form>
+          </div>
+        </section>
+
         <div id="registered-app-views"></div>
 
 
         <section class="view chat-view" data-view="chat">
           <div class="chat-header">
             <button class="icon-button" data-back>返回</button>
+            <div id="chat-header-avatar"></div>
             <div>
               <strong id="chat-title">林秋</strong>
               <p id="chat-subtitle">随聊 · 在线 · 海风很轻</p>
@@ -350,6 +393,20 @@
                   <span>角色名</span>
                   <input type="text" id="character-name" placeholder="角色昵称">
                 </label>
+                <section class="avatar-editor" aria-label="角色头像">
+                  <div class="avatar-editor-preview" id="character-avatar-preview"></div>
+                  <div class="avatar-editor-fields">
+                    <label>
+                      <span>头像文字</span>
+                      <input type="text" id="character-avatar-text" maxlength="2" placeholder="林">
+                    </label>
+                    <div class="avatar-editor-actions">
+                      <input type="file" id="character-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                      <button type="button" class="secondary-button" id="character-avatar-upload">上传头像</button>
+                      <button type="button" class="ghost-button" id="character-avatar-remove">移除图片</button>
+                    </div>
+                  </div>
+                </section>
                 <label>
                   <span>角色简介</span>
                   <textarea id="character-description" rows="4" placeholder="一句话介绍角色定位、语气和相处感"></textarea>
@@ -421,6 +478,7 @@
       <nav class="tab-bar">
         <button class="tab active" data-tab="messages">消息</button>
         <button class="tab" data-tab="contacts">联系人</button>
+        <button class="tab" data-tab="my">我的</button>
       </nav>
     </div>
   </div>

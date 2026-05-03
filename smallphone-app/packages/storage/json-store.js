@@ -633,6 +633,7 @@ function normalizeAttachments(attachments, createdAt) {
       messageId: typeof item.messageId === "string" ? item.messageId.trim() : "",
       role: typeof item.role === "string" ? item.role.trim().toLowerCase() : "",
       kind: typeof item.kind === "string" ? item.kind.trim().toLowerCase() : "",
+      purpose: typeof item.purpose === "string" ? item.purpose.trim().toLowerCase() : "",
       fileName: typeof item.fileName === "string" ? item.fileName.trim() : "",
       mimeType: typeof item.mimeType === "string" ? item.mimeType.trim().toLowerCase() : "",
       size: Number.isFinite(Number(item.size)) ? Number(item.size) : 0,

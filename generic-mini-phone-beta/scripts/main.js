@@ -186,6 +186,31 @@ function buildAvatarText(contact, character, title) {
   return name.slice(0, 1) || '聊';
 }
 
+function resolveAvatarImageUrl(character, previousChat = null) {
+  const raw = String(character?.avatarUrl || character?.avatarAttachment?.downloadUrl || previousChat?.avatarImage || '').trim();
+  return attachmentDownloadUrl({ downloadUrl: raw });
+}
+
+function renderAvatar(chat, className = 'avatar') {
+  const image = String(chat?.avatarImage || '').trim();
+  const text = String(chat?.avatarText || chat?.name?.slice(0, 1) || '聊').slice(0, 2);
+  const avatarClass = String(chat?.avatarClass || chooseAvatarClass(chat?.name || text)).trim();
+  const fallback = `<span class="avatar-fallback">${escapeHtml(text)}</span>`;
+  if (image) {
+    return `<div class="${escapeHtml(className)} ${escapeHtml(avatarClass)} avatar-with-image"><img src="${escapeHtml(image)}" alt="" loading="lazy" onerror="this.remove();this.parentElement.classList.remove('avatar-with-image')">${fallback}</div>`;
+  }
+  return `<div class="${escapeHtml(className)} ${escapeHtml(avatarClass)}">${fallback}</div>`;
+}
+
+function personaAvatarSource() {
+  return {
+    name: state.persona.name || '我的',
+    avatarText: String(state.persona.avatarText || state.persona.name?.slice(0, 1) || '你').slice(0, 2),
+    avatarClass: 'avatar-green',
+    avatarImage: state.persona.avatarImage || '',
+  };
+}
+
 function normalizeMessageContent(content) {
   if (typeof content === 'string') return content.trim();
   if (Array.isArray(content)) {
@@ -335,6 +360,8 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
     subtitle: buildChatSubtitle(contact, thread, relationshipState),
     avatarClass: chooseAvatarClass(thread?.id || contact?.id || character?.id),
     avatarText: buildAvatarText(contact, character, thread?.title),
+    avatarImage: resolveAvatarImageUrl(character, previousChat),
+    avatarAttachmentId: String(character?.avatarAttachmentId || previousChat?.avatarAttachmentId || '').trim(),
     proactiveContactEnabled: previousChat?.proactiveContactEnabled !== false,
     unread: Number(thread?.unreadCount || 0),
     summary: latestMessageText,
@@ -398,6 +425,8 @@ function createBlankChatDraft() {
       subtitle: '刚刚创建',
       avatarClass: chooseAvatarClass(key),
       avatarText: '新',
+      avatarImage: '',
+      avatarAttachmentId: '',
       proactiveContactEnabled: true,
       unread: 0,
       summary: '新的 SmallPhone 独立窗口。',
@@ -556,6 +585,8 @@ async function syncCharacterEdits(threadId, chat) {
     roleLevel: normalizeRoleLevel(chat.roleLevel),
     agentType: normalizeAgentType(chat.agentType),
     agentMode: normalizeAgentPermissionMode(chat.agentMode, chat.agentType),
+    avatar: String(chat.avatarText || chat.name.slice(0, 1) || '').trim(),
+    avatarAttachmentId: String(chat.avatarAttachmentId || '').trim(),
   };
   if (chat.backend?.relationship) payload.relationship = chat.backend.relationship;
   if (chat.backend?.relationshipState?.state) {
@@ -603,6 +634,8 @@ function buildCompanionPayload(chat) {
     roleLevel: normalizeRoleLevel(chat.roleLevel),
     agentType: normalizeAgentType(chat.agentType),
     agentMode: normalizeAgentPermissionMode(chat.agentMode, chat.agentType),
+    avatar: String(chat.avatarText || chat.name.slice(0, 1) || '').trim(),
+    avatarAttachmentId: String(chat.avatarAttachmentId || '').trim(),
   };
 }
 
@@ -740,6 +773,101 @@ function renderAgentModeSelect(selectedMode = '', agentType = '', runtimeModes =
   dom.characterAgentModeSelect.innerHTML = modes
     .map((mode) => `<option value="${escapeHtml(mode.key)}" ${mode.key === selected ? 'selected' : ''}>${escapeHtml(mode.label)}</option>`)
     .join('');
+}
+
+function renderCharacterAvatarPreview(chat = null) {
+  if (!dom.characterAvatarPreview) return;
+  const source = chat || state.chats[uiState.editingCharacterKey] || getFallbackChat();
+  dom.characterAvatarPreview.innerHTML = renderAvatar(source, 'avatar large-avatar');
+}
+
+async function uploadCharacterAvatar(file) {
+  const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
+  if (!chat || !file) return;
+  if (!backendEnabled) {
+    throw new Error('头像上传需要连接 smallphone-app 后端。');
+  }
+  if (!String(file.type || '').startsWith('image/')) {
+    throw new Error('请选择图片文件。');
+  }
+  const data = await fileToBase64(file);
+  const created = await requestBackend('/avatars', {
+    method: 'POST',
+    body: JSON.stringify({
+      fileName: file.name || 'avatar',
+      mimeType: file.type || 'image/png',
+      data,
+    }),
+  });
+  chat.avatarAttachmentId = String(created.id || '').trim();
+  chat.avatarImage = attachmentDownloadUrl(created);
+  if (dom.characterAvatarTextInput) {
+    chat.avatarText = dom.characterAvatarTextInput.value.trim().slice(0, 2) || chat.avatarText || chat.name.slice(0, 1);
+  }
+  saveState();
+  renderCharacterAvatarPreview(chat);
+  renderMessages();
+  renderContacts();
+  renderCharacterHighlight();
+  renderChat();
+  setChatStatus('头像已上传，保存角色后会同步到后端。');
+}
+
+function removeCharacterAvatarImage() {
+  const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
+  if (!chat) return;
+  chat.avatarAttachmentId = '';
+  chat.avatarImage = '';
+  saveState();
+  renderCharacterAvatarPreview(chat);
+  renderMessages();
+  renderContacts();
+  renderCharacterHighlight();
+  renderChat();
+}
+
+function renderMyProfile() {
+  if (dom.myAvatarPreview) dom.myAvatarPreview.innerHTML = renderAvatar(personaAvatarSource(), 'avatar large-avatar my-avatar');
+  if (dom.myPreviewName) dom.myPreviewName.textContent = state.persona.name;
+  if (dom.myPreviewSignature) dom.myPreviewSignature.textContent = state.persona.signature;
+  if (dom.myAvatarTextInput) dom.myAvatarTextInput.value = String(state.persona.avatarText || state.persona.name.slice(0, 1) || '你').slice(0, 2);
+  if (dom.myNameInput) dom.myNameInput.value = state.persona.name;
+  if (dom.mySignatureInput) dom.mySignatureInput.value = state.persona.signature;
+  if (dom.myBioInput) dom.myBioInput.value = state.persona.bio;
+}
+
+async function uploadMyAvatar(file) {
+  if (!file) return;
+  if (!backendEnabled) {
+    throw new Error('头像上传需要连接 smallphone-app 后端。');
+  }
+  if (!String(file.type || '').startsWith('image/')) {
+    throw new Error('请选择图片文件。');
+  }
+  const data = await fileToBase64(file);
+  const created = await requestBackend('/avatars', {
+    method: 'POST',
+    body: JSON.stringify({
+      fileName: file.name || 'avatar',
+      mimeType: file.type || 'image/png',
+      data,
+    }),
+  });
+  state.persona.avatarAttachmentId = String(created.id || '').trim();
+  state.persona.avatarImage = attachmentDownloadUrl(created);
+  state.persona.avatarText = dom.myAvatarTextInput?.value.trim().slice(0, 2) || state.persona.avatarText || state.persona.name.slice(0, 1) || '你';
+  saveState();
+  renderProfile();
+  renderContacts();
+  setChatStatus('个人头像已上传。');
+}
+
+function removeMyAvatarImage() {
+  state.persona.avatarAttachmentId = '';
+  state.persona.avatarImage = '';
+  saveState();
+  renderProfile();
+  renderContacts();
 }
 
 function queueStateSync(statusMessage = '') {
@@ -1557,7 +1685,7 @@ function renderMessages() {
     button.className = 'message-item';
     button.dataset.openChat = key;
     button.innerHTML = `
-      <div class="avatar ${chat.avatarClass}">${chat.avatarText}</div>
+      ${renderAvatar(chat)}
       <div class="message-meta">
         <div class="message-topline">
           <strong>${chat.name}</strong>
@@ -1581,7 +1709,7 @@ function renderContacts() {
     const item = document.createElement('article');
     item.className = 'contact-item';
     item.innerHTML = `
-      <div class="avatar ${chat.avatarClass}">${chat.avatarText}</div>
+      ${renderAvatar(chat)}
       <div class="contact-meta">
         <strong>${escapeHtml(chat.name)}</strong>
         <p class="contact-copy">${escapeHtml(chat.description)}</p>
@@ -1598,7 +1726,7 @@ function renderContacts() {
   const self = document.createElement('article');
   self.className = 'contact-item';
   self.innerHTML = `
-    <div class="avatar avatar-green">你</div>
+    ${renderAvatar(personaAvatarSource())}
     <div class="contact-meta">
       <strong>我的人设</strong>
       <p class="contact-copy">${state.persona.bio}</p>
@@ -1615,7 +1743,7 @@ function renderCharacterHighlight() {
   }
   dom.characterHighlight.innerHTML = `
     <div class="character-detail-top">
-      <div class="avatar ${chat.avatarClass}">${chat.avatarText}</div>
+      ${renderAvatar(chat)}
       <div>
         <p class="eyebrow">角色详情</p>
         <strong>${escapeHtml(chat.name)}</strong>
@@ -1706,6 +1834,7 @@ function renderChat() {
   if (!chat) {
     dom.chatTitle.textContent = '暂无聊天';
     dom.chatSubtitle.textContent = '';
+    if (dom.chatHeaderAvatar) dom.chatHeaderAvatar.innerHTML = '';
     dom.chatThread.innerHTML = '';
     updatePromptPreview();
     renderAttachmentStrip();
@@ -1713,9 +1842,12 @@ function renderChat() {
   }
   dom.chatTitle.textContent = chat.name;
   dom.chatSubtitle.textContent = chat.subtitle;
+  if (dom.chatHeaderAvatar) dom.chatHeaderAvatar.innerHTML = renderAvatar(chat, 'avatar');
   dom.chatThread.innerHTML = '';
 
   chat.messages.forEach((message) => {
+    const row = document.createElement('div');
+    row.className = `chat-message-row chat-message-${message.side}`;
     const bubble = document.createElement('div');
     bubble.className = `bubble bubble-${message.side}${message.pending ? ' bubble-pending' : ''}${message.streaming ? ' bubble-streaming' : ''}`;
     bubble.innerHTML = [
@@ -1724,7 +1856,11 @@ function renderChat() {
       renderMessageActions(message),
     ].filter(Boolean).join('');
     bindMessageActions(bubble);
-    dom.chatThread.appendChild(bubble);
+    if (message.side === 'other') {
+      row.innerHTML = renderAvatar(chat, 'avatar chat-avatar');
+    }
+    row.appendChild(bubble);
+    dom.chatThread.appendChild(row);
   });
 
   updatePromptPreview();
@@ -1871,6 +2007,7 @@ function renderProfile() {
   if (dom.personaNameInput) dom.personaNameInput.value = state.persona.name;
   if (dom.personaSignatureInput) dom.personaSignatureInput.value = state.persona.signature;
   if (dom.personaBioInput) dom.personaBioInput.value = state.persona.bio;
+  renderMyProfile();
 }
 
 function renderDesktopBadge() {
@@ -1906,6 +2043,8 @@ function renderCharacterEditor() {
   const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
   if (!chat) return;
   dom.characterNameInput.value = chat.name;
+  if (dom.characterAvatarTextInput) dom.characterAvatarTextInput.value = String(chat.avatarText || chat.name.slice(0, 1) || '').slice(0, 2);
+  renderCharacterAvatarPreview(chat);
   dom.characterDescriptionInput.value = chat.description;
   if (dom.characterRoleLevelSelect) dom.characterRoleLevelSelect.value = normalizeRoleLevel(chat.roleLevel);
   if (dom.characterAgentTypeSelect) dom.characterAgentTypeSelect.value = normalizeAgentType(chat.agentType);
@@ -1933,6 +2072,62 @@ function renderCharacterEditor() {
 dom.characterAgentTypeSelect?.addEventListener('change', () => {
   const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
   renderAgentModeSelect('', dom.characterAgentTypeSelect.value || chat?.agentType || 'codex');
+});
+
+dom.characterAvatarTextInput?.addEventListener('input', () => {
+  const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
+  if (!chat) return;
+  chat.avatarText = dom.characterAvatarTextInput.value.trim().slice(0, 2) || chat.name.slice(0, 1) || '聊';
+  renderCharacterAvatarPreview(chat);
+});
+
+dom.characterAvatarUploadButton?.addEventListener('click', () => {
+  if (!backendEnabled) {
+    setChatStatus('头像上传需要连接 smallphone-app 后端。', true);
+    return;
+  }
+  dom.characterAvatarFileInput?.click();
+});
+
+dom.characterAvatarRemoveButton?.addEventListener('click', () => {
+  removeCharacterAvatarImage();
+  setChatStatus('头像图片已移除，保存角色后会同步到后端。');
+});
+
+dom.characterAvatarFileInput?.addEventListener('change', () => {
+  const file = dom.characterAvatarFileInput.files?.[0] || null;
+  dom.characterAvatarFileInput.value = '';
+  if (!file) return;
+  uploadCharacterAvatar(file).catch((error) => {
+    setChatStatus(error instanceof Error ? error.message : '头像上传失败', true);
+  });
+});
+
+dom.myAvatarTextInput?.addEventListener('input', () => {
+  state.persona.avatarText = dom.myAvatarTextInput.value.trim().slice(0, 2) || state.persona.name.slice(0, 1) || '你';
+  renderMyProfile();
+});
+
+dom.myAvatarUploadButton?.addEventListener('click', () => {
+  if (!backendEnabled) {
+    setChatStatus('头像上传需要连接 smallphone-app 后端。', true);
+    return;
+  }
+  dom.myAvatarFileInput?.click();
+});
+
+dom.myAvatarRemoveButton?.addEventListener('click', () => {
+  removeMyAvatarImage();
+  setChatStatus('个人头像图片已移除。');
+});
+
+dom.myAvatarFileInput?.addEventListener('change', () => {
+  const file = dom.myAvatarFileInput.files?.[0] || null;
+  dom.myAvatarFileInput.value = '';
+  if (!file) return;
+  uploadMyAvatar(file).catch((error) => {
+    setChatStatus(error instanceof Error ? error.message : '头像上传失败', true);
+  });
 });
 
 dom.permissionContactSelect?.addEventListener('change', () => {
@@ -2079,12 +2274,15 @@ function importCharacter(payload) {
   const firstLine = String(data.first_mes || data.greeting || data.firstMessage || '').trim();
   const description = String(data.description || data.personality || data.scenario || '已导入角色').trim();
   const mesExample = String(data.mes_example || data.example_dialogue || '').trim();
+  const avatarImage = normalizeImportedAvatarImage(data.avatarImage || data.avatar_image || data.extensions?.avatarImage || data.extensions?.avatar_image);
 
   state.chats[key] = {
     name,
     subtitle: '已导入角色',
     avatarClass: 'avatar-pink',
     avatarText: name.slice(0, 1),
+    avatarImage,
+    avatarAttachmentId: '',
     proactiveContactEnabled: true,
     unread: 0,
     summary: firstLine || description.slice(0, 34) || '已导入角色卡',
@@ -2103,6 +2301,11 @@ function importCharacter(payload) {
 
   uiState.activeChatKey = key;
   uiState.editingCharacterKey = key;
+}
+
+function normalizeImportedAvatarImage(value) {
+  const raw = String(value || '').trim();
+  return raw.startsWith('data:image/') ? raw : '';
 }
 
 function importWorldbook(payload, mode) {
@@ -2474,7 +2677,7 @@ dom.characterForm.addEventListener('submit', async (event) => {
   const editingKey = String(chat.backend?.threadId || uiState.editingCharacterKey || '').trim() || uiState.editingCharacterKey;
   chat.name = dom.characterNameInput.value.trim() || chat.name;
   chat.description = dom.characterDescriptionInput.value.trim() || chat.description;
-  chat.avatarText = chat.name.slice(0, 1) || chat.avatarText || '新';
+  chat.avatarText = dom.characterAvatarTextInput?.value.trim().slice(0, 2) || chat.name.slice(0, 1) || chat.avatarText || '新';
   chat.roleLevel = normalizeRoleLevel(dom.characterRoleLevelSelect?.value || chat.roleLevel);
   chat.agentType = normalizeAgentType(dom.characterAgentTypeSelect?.value || chat.agentType);
   chat.agentMode = normalizeAgentPermissionMode(dom.characterAgentModeSelect?.value || chat.agentMode, chat.agentType);
@@ -2571,6 +2774,19 @@ dom.personaForm.addEventListener('submit', (event) => {
   state.persona.bio = dom.personaBioInput.value.trim() || '夜游爱好者，偏爱慢节奏聊天和旧书店。';
   saveState();
   queueStateSync('人设已保存在前端本地。');
+  renderProfile();
+  renderContacts();
+  updatePromptPreview();
+});
+
+dom.myProfileForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  state.persona.name = dom.myNameInput.value.trim() || '晚风';
+  state.persona.signature = dom.mySignatureInput.value.trim() || '今晚也想和喜欢的人说很多无关紧要的话。';
+  state.persona.bio = dom.myBioInput.value.trim() || '夜游爱好者，偏爱慢节奏聊天和旧书店。';
+  state.persona.avatarText = dom.myAvatarTextInput?.value.trim().slice(0, 2) || state.persona.name.slice(0, 1) || '你';
+  saveState();
+  queueStateSync('个人资料已保存。');
   renderProfile();
   renderContacts();
   updatePromptPreview();

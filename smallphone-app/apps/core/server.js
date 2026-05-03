@@ -128,6 +128,11 @@ async function handleApi(req, res, url) {
     const created = service.createAttachment(body);
     return sendJson(res, 200, created);
   }
+  if (method === "POST" && url.pathname === "/api/avatars") {
+    const body = await readJson(req);
+    const created = service.createAvatar(body);
+    return sendJson(res, 200, created);
+  }
   if (method === "GET" && url.pathname === "/api/webclient-attachments") {
     const rawUrl = url.searchParams.get("url") || "";
     const download = await service.openWebclientAttachmentDownload(rawUrl);
@@ -333,6 +338,7 @@ function serveLocalAttachment(res, download) {
   res.writeHead(200, {
     "content-type": mimeType,
     "content-disposition": `${disposition}; filename=\"${fileName}\"`,
+    "cache-control": "public, max-age=31536000, immutable",
   });
   fs.createReadStream(filePath).pipe(res);
 }
@@ -551,7 +557,6 @@ const ATTACHMENT_UPLOAD_MAX_JSON_BYTES = Number.parseInt(
   process.env.SMALLPHONE_ATTACHMENT_UPLOAD_MAX_JSON_BYTES || "20971520",
   10,
 );
-
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",

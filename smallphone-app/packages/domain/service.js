@@ -49,6 +49,7 @@ const ATTACHMENT_MAX_BYTES = Number.parseInt(
   process.env.SMALLPHONE_ATTACHMENT_MAX_BYTES || "10485760",
   10,
 );
+const AVATAR_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const WORKSPACE_ATTACHMENT_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf", ".txt", ".md", ".csv", ".json"]);
 const WORKSPACE_ATTACHMENT_MIME_TYPES = {
   ".png": "image/png",
@@ -177,7 +178,7 @@ class SmallPhoneService {
     const state = this.store.read();
     this.syncManagedArtifacts(state);
     return state.contacts.map((contact) => {
-      const character = state.characters.find((item) => item.id === contact.characterId) || null;
+      const character = hydrateCharacter(state, state.characters.find((item) => item.id === contact.characterId) || null);
       const thread = state.threads.find((item) => item.contactId === contact.id) || null;
       const routedThread = thread ? attachThreadRouting(thread, this.runtimeInfo.id) : null;
       return {
@@ -214,13 +215,13 @@ class SmallPhoneService {
     this.syncManagedArtifacts(state);
     return state.threads.map((thread) => {
       const contact = state.contacts.find((item) => item.id === thread.contactId) || null;
-      const character = contact ? state.characters.find((item) => item.id === contact.characterId) || null : null;
+      const character = contact ? hydrateCharacter(state, state.characters.find((item) => item.id === contact.characterId) || null) : null;
       const lastMessage = state.messages.filter((item) => item.threadId === thread.id).at(-1) || null;
       const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
       return {
         ...routedThread,
         summary: resolveThreadProfileSummary(routedThread, contact, character),
-        contact,
+        contact: contact ? { ...contact, character } : null,
         lastMessage,
         relationshipState:
           state.relationshipStates.find(
@@ -452,10 +453,69 @@ class SmallPhoneService {
     return this.exposeAttachment(record);
   }
 
+  createAvatar(input) {
+    const parsed = parseBase64Upload(input?.data || input?.content || input?.base64 || "");
+    const mimeType = sanitizeMimeType(input?.mimeType || input?.mime || input?.contentType || parsed.mimeType || "");
+    if (!AVATAR_MIME_TYPES.has(mimeType)) {
+      throw new Error(`Avatar mimeType not allowed: ${mimeType || "missing"}`);
+    }
+
+    const fileName = sanitizeFileName(input?.fileName || input?.filename || input?.name || `avatar.${extensionForMimeType(mimeType)}`);
+    const buffer = Buffer.from(parsed.base64, "base64");
+
+    const id = createId("att");
+    const createdAt = nowIso();
+    const dir = path.join(ATTACHMENTS_ROOT, "avatars", id);
+    ensureDir(dir);
+    const localPath = path.join(dir, fileName);
+    fs.writeFileSync(localPath, buffer);
+
+    const record = {
+      id,
+      threadId: "",
+      messageId: "",
+      role: "",
+      kind: "image",
+      purpose: "avatar",
+      fileName,
+      mimeType,
+      size: buffer.length,
+      source: "smallphone-avatar-upload",
+      localPath,
+      url: "",
+      createdAt,
+    };
+
+    this.store.update((draft) => {
+      if (!Array.isArray(draft.attachments)) {
+        draft.attachments = [];
+      }
+      draft.attachments.push(record);
+      return draft;
+    });
+
+    return this.exposeAttachment(record);
+  }
+
+  assertAvatarAttachmentId(attachmentId) {
+    const id = String(attachmentId || "").trim();
+    if (!id) return;
+    const state = this.store.read();
+    const attachment = state.attachments.find((item) => item.id === id) || null;
+    if (!attachment) {
+      throw new Error(`Avatar attachment not found: ${id}`);
+    }
+    const mimeType = sanitizeMimeType(attachment.mimeType || "");
+    if (attachment.kind !== "image" || !AVATAR_MIME_TYPES.has(mimeType)) {
+      throw new Error(`Avatar attachment must be an image: ${id}`);
+    }
+  }
+
   exposeAttachment(record) {
     return {
       id: record.id,
       kind: record.kind,
+      purpose: record.purpose || "",
       fileName: record.fileName,
       mimeType: record.mimeType,
       size: record.size,
@@ -584,6 +644,7 @@ class SmallPhoneService {
 
   async createCompanion(input) {
     const payload = normalizeCompanionInput(input);
+    this.assertAvatarAttachmentId(payload.avatarAttachmentId);
     const createdAt = nowIso();
     let created = null;
     const nextState = this.store.update((state) => {
@@ -605,6 +666,7 @@ class SmallPhoneService {
         id: ids.characterId,
         name: payload.name,
         avatar: payload.avatar,
+        avatarAttachmentId: payload.avatarAttachmentId,
         persona: payload.persona,
         style: payload.style,
         toolPolicy: {
@@ -795,6 +857,7 @@ class SmallPhoneService {
       worldbookEntry,
       runtimeInfo: this.runtimeInfo,
     });
+    this.assertAvatarAttachmentId(payload.avatarAttachmentId);
     const updatedAt = nowIso();
     const nextState = this.store.update((state) => {
       const liveContact = state.contacts.find((item) => item.id === id);
@@ -805,6 +868,7 @@ class SmallPhoneService {
       }
       liveCharacter.name = payload.name;
       liveCharacter.avatar = payload.avatar;
+      liveCharacter.avatarAttachmentId = payload.avatarAttachmentId;
       liveCharacter.persona = payload.persona;
       liveCharacter.style = payload.style;
       liveCharacter.toolPolicy = {
@@ -2555,6 +2619,47 @@ function slugify(value) {
     .replace(/-+/g, "-");
 }
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function normalizeAvatarAttachmentId(value) {
+  return String(value || "").trim();
+}
+
+function extensionForMimeType(mimeType) {
+  const mt = sanitizeMimeType(mimeType);
+  if (mt === "image/jpeg") return "jpg";
+  if (mt === "image/webp") return "webp";
+  if (mt === "image/gif") return "gif";
+  return "png";
+}
+
+function hydrateCharacter(state, character) {
+  if (!character) return null;
+  const avatarAttachmentId = normalizeAvatarAttachmentId(character.avatarAttachmentId || character.avatarId || "");
+  const attachment = avatarAttachmentId
+    ? (Array.isArray(state.attachments) ? state.attachments : []).find((item) => item.id === avatarAttachmentId) || null
+    : null;
+  const isAvatarImage = attachment?.kind === "image" && AVATAR_MIME_TYPES.has(sanitizeMimeType(attachment.mimeType || ""));
+  return {
+    ...character,
+    avatarAttachmentId: isAvatarImage ? avatarAttachmentId : "",
+    avatarUrl: isAvatarImage ? `/api/attachments/${avatarAttachmentId}` : "",
+    avatarAttachment: isAvatarImage
+      ? {
+          id: attachment.id,
+          kind: attachment.kind,
+          purpose: attachment.purpose || "",
+          fileName: attachment.fileName || "",
+          mimeType: attachment.mimeType || "",
+          size: Number.isFinite(Number(attachment.size)) ? Number(attachment.size) : 0,
+          downloadUrl: `/api/attachments/${attachment.id}`,
+        }
+      : null,
+  };
+}
+
 function normalizeArtifactSyncOptions(input) {
   const configPaths = Array.isArray(input?.configPaths)
     ? input.configPaths.map((item) => String(item).trim()).filter(Boolean)
@@ -2925,6 +3030,7 @@ function normalizeCompanionInput(input) {
     `You are ${displayName}, a dedicated SmallPhone companion in a private 1:1 window.`;
   const style = String(input?.style || "").trim() || "concise, private, mobile-native";
   const avatar = String(input?.avatar || "").trim() || displayName.slice(0, 2).toUpperCase();
+  const avatarAttachmentId = normalizeAvatarAttachmentId(input?.avatarAttachmentId || input?.avatarId || input?.avatar_image_id);
   const roleLevel = normalizeRoleLevel(input?.roleLevel);
   const workspaceScope = normalizeWorkspaceScope(input?.workspaceScope) || workspaceScopeForRole(roleLevel);
   const relationship = normalizeRelationshipBaseline(input?.relationship);
@@ -2942,6 +3048,7 @@ function normalizeCompanionInput(input) {
     persona,
     style,
     avatar,
+    avatarAttachmentId,
     roleLevel,
     workspaceScope,
     relationship,
@@ -3003,8 +3110,11 @@ function normalizeCompanionPatchInput(params) {
     `smallphone:thread:${thread.id}`;
   const worldbookContent =
     String(input?.worldbookContent || "").trim() ||
-    String(worldbookEntry.content || "").trim() ||
+      String(worldbookEntry.content || "").trim() ||
     `${displayName} 是一个独立联系人窗口。回复时保持私有连续性，不共享其他联系人的状态。`;
+  const avatarAttachmentId = hasOwn(input, "avatarAttachmentId") || hasOwn(input, "avatarId") || hasOwn(input, "avatar_image_id")
+    ? normalizeAvatarAttachmentId(input?.avatarAttachmentId ?? input?.avatarId ?? input?.avatar_image_id)
+    : normalizeAvatarAttachmentId(character.avatarAttachmentId || "");
   return {
     name,
     slug: slugify(name) || slugify(displayName) || "companion",
@@ -3015,6 +3125,7 @@ function normalizeCompanionPatchInput(params) {
       `You are ${displayName}, a dedicated SmallPhone companion in a private 1:1 window.`,
     style: String(input?.style || "").trim() || String(character.style || "").trim() || "concise, private, mobile-native",
     avatar: String(input?.avatar || "").trim() || String(character.avatar || "").trim() || displayName.slice(0, 2).toUpperCase(),
+    avatarAttachmentId,
     roleLevel,
     workspaceScope,
     relationship: normalizeRelationshipBaseline(input?.relationship || contact.relationship),

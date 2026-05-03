@@ -36,6 +36,57 @@ test("attachments: createAttachment stores file and metadata", () => {
   fs.rmSync(attDir, { recursive: true, force: true });
 });
 
+test("avatars: createAvatar stores image and companion exposes avatarUrl", async () => {
+  const service = new SmallPhoneService({
+    dataFile: tmpDataFile(),
+    runtime: { mode: "mock" },
+  });
+
+  const avatar = service.createAvatar({
+    fileName: "face.png",
+    mimeType: "image/png",
+    data: Buffer.from("fake-png", "utf8").toString("base64"),
+  });
+  assert.ok(avatar.id);
+  assert.equal(avatar.kind, "image");
+  assert.equal(avatar.purpose, "avatar");
+
+  const updated = await service.updateCompanion("contact-aki", {
+    name: "Aki",
+    displayName: "Aki",
+    avatar: "AK",
+    avatarAttachmentId: avatar.id,
+  });
+
+  assert.equal(updated.contact.character.avatarAttachmentId, avatar.id);
+  assert.equal(updated.contact.character.avatarUrl, `/api/attachments/${avatar.id}`);
+
+  const record = service.getAttachment(avatar.id);
+  const attDir = path.dirname(record.localPath);
+  fs.rmSync(attDir, { recursive: true, force: true });
+});
+
+test("avatars: companion update rejects non-image attachment", async () => {
+  const service = new SmallPhoneService({
+    dataFile: tmpDataFile(),
+    runtime: { mode: "mock" },
+  });
+
+  const attachment = service.createAttachment({
+    fileName: "note.txt",
+    mimeType: "text/plain",
+    data: Buffer.from("not an avatar", "utf8").toString("base64"),
+  });
+
+  await assert.rejects(
+    service.updateCompanion("contact-aki", { avatarAttachmentId: attachment.id }),
+    /Avatar attachment must be an image/,
+  );
+
+  const record = service.getAttachment(attachment.id);
+  fs.rmSync(path.dirname(record.localPath), { recursive: true, force: true });
+});
+
 test("attachments: sendMessage binds attachment to user message and hydrates metadata", async () => {
   const service = new SmallPhoneService({
     dataFile: tmpDataFile(),
