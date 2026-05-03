@@ -49,6 +49,19 @@ const ATTACHMENT_MAX_BYTES = Number.parseInt(
   process.env.SMALLPHONE_ATTACHMENT_MAX_BYTES || "10485760",
   10,
 );
+const WORKSPACE_ATTACHMENT_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf", ".txt", ".md", ".csv", ".json"]);
+const WORKSPACE_ATTACHMENT_MIME_TYPES = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+  ".csv": "text/csv",
+  ".json": "application/json",
+};
 const DEFAULT_PERMISSION_TEMPLATE = "safe";
 const DEFAULT_PERMISSION_CHECKS = [
   "chat.send",
@@ -99,8 +112,19 @@ class SmallPhoneService {
     this.store = new JsonStore(dataFile);
     this.runtime = createRuntimeAdapter(options.runtime || {});
     this.runtimeInfo = this.runtime.describe();
+    this.webclientChat = createWebclientChatClient(options.runtime || {});
     this.permissions = createPermissionClient(options.permissions || {});
     this.permissionInfo = this.permissions.describe();
+    this.ccConnectProjects = createCcConnectProjectClient({
+      ...(options.projectManagement || {}),
+      webclientBaseUrl: options.runtime?.webclientBaseUrl || options.projectManagement?.webclientBaseUrl || "",
+      webclientToken: options.runtime?.webclientToken || options.projectManagement?.webclientToken || "",
+      ccConnectManagementUrl:
+        options.projectManagement?.ccConnectManagementUrl || options.permissions?.ccConnectManagementUrl || "",
+      ccConnectManagementToken:
+        options.projectManagement?.ccConnectManagementToken || options.permissions?.ccConnectManagementToken || "",
+    });
+    this.projectInfo = this.ccConnectProjects.describe();
     this.artifactSync = normalizeArtifactSyncOptions(options.artifactSync);
     this.threadEventSubscribers = new Map();
   }
@@ -116,6 +140,7 @@ class SmallPhoneService {
       },
       runtime: this.runtimeInfo,
       permissions: this.permissionInfo,
+      projects: this.projectInfo,
       stats: {
         contacts: state.contacts.length,
         threads: state.threads.length,
@@ -131,20 +156,55 @@ class SmallPhoneService {
     };
   }
 
+  async bootstrapHydrated() {
+    const payload = this.bootstrap();
+    const threads = await this.listThreadsHydrated();
+    const contacts = payload.contacts.map((contact) => {
+      const thread = threads.find((item) => item.contactId === contact.id) || contact.thread || null;
+      return {
+        ...contact,
+        thread,
+      };
+    });
+    return {
+      ...payload,
+      contacts,
+      threads,
+    };
+  }
+
   listContacts() {
     const state = this.store.read();
     this.syncManagedArtifacts(state);
     return state.contacts.map((contact) => {
       const character = state.characters.find((item) => item.id === contact.characterId) || null;
       const thread = state.threads.find((item) => item.contactId === contact.id) || null;
+      const routedThread = thread ? attachThreadRouting(thread, this.runtimeInfo.id) : null;
       return {
         ...contact,
         character,
-        thread: thread ? attachThreadRouting(thread, this.runtimeInfo.id) : null,
+        thread: routedThread
+          ? {
+              ...routedThread,
+              summary: resolveThreadProfileSummary(routedThread, contact, character),
+            }
+          : null,
         relationshipState:
           state.relationshipStates.find(
             (item) => item.contactId === contact.id && (!thread || item.threadId === thread.id),
           ) || null,
+      };
+    });
+  }
+
+  async listContactsHydrated() {
+    const contacts = this.listContacts();
+    const threads = await this.listThreadsHydrated();
+    return contacts.map((contact) => {
+      const thread = threads.find((item) => item.contactId === contact.id) || contact.thread || null;
+      return {
+        ...contact,
+        thread,
       };
     });
   }
@@ -154,9 +214,12 @@ class SmallPhoneService {
     this.syncManagedArtifacts(state);
     return state.threads.map((thread) => {
       const contact = state.contacts.find((item) => item.id === thread.contactId) || null;
+      const character = contact ? state.characters.find((item) => item.id === contact.characterId) || null : null;
       const lastMessage = state.messages.filter((item) => item.threadId === thread.id).at(-1) || null;
+      const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
       return {
-        ...attachThreadRouting(thread, this.runtimeInfo.id),
+        ...routedThread,
+        summary: resolveThreadProfileSummary(routedThread, contact, character),
         contact,
         lastMessage,
         relationshipState:
@@ -165,6 +228,33 @@ class SmallPhoneService {
           ) || null,
       };
     });
+  }
+
+  async listThreadsHydrated() {
+    const threads = this.listThreads();
+    if (this.runtimeInfo.id !== "cc-webclient") {
+      return threads;
+    }
+    const hydrated = await Promise.all(
+      threads.map(async (thread) => this.hydrateThreadWithWebclientLastMessage(thread)),
+    );
+    return hydrated;
+  }
+
+  async hydrateThreadWithWebclientLastMessage(thread) {
+    if (!thread) {
+      return thread;
+    }
+    try {
+      const messages = await this.getThreadMessages(thread.id);
+      const lastMessage = messages.at(-1) || thread.lastMessage || null;
+      return {
+        ...thread,
+        lastMessage,
+      };
+    } catch {
+      return thread;
+    }
   }
 
   getThread(threadId) {
@@ -185,6 +275,48 @@ class SmallPhoneService {
     return state.messages
       .filter((item) => item.threadId === normalizedThreadId)
       .map((message) => this.hydrateMessage(state, message));
+  }
+
+  async getThreadMessages(threadId) {
+    const state = this.store.read();
+    const normalizedThreadId = String(threadId || "").trim();
+    if (!normalizedThreadId) {
+      throw new Error("Thread id is required.");
+    }
+    const localMessages = state.messages
+      .filter((item) => item.threadId === normalizedThreadId)
+      .map((message) => this.hydrateMessage(state, message));
+    const thread = state.threads.find((item) => item.id === normalizedThreadId) || null;
+    if (this.runtimeInfo.id !== "cc-webclient" || !thread) {
+      return localMessages;
+    }
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const project = resolveWebclientProjectForThread(routedThread, this.runtimeInfo.project);
+    const sessionId = String(thread.runtimeSessionId || "").trim();
+    if (!project || !sessionId) {
+      return localMessages;
+    }
+    try {
+      const sessionData = await this.webclientChat.getSessionHistory({
+        project,
+        sessionId,
+        historyLimit: 200,
+        runEventsLimit: 200,
+      });
+      const assistantMessages = mapWebclientHistoryToAssistantMessages(
+        sessionData.history,
+        normalizedThreadId,
+        sessionId,
+        sessionData.runEvents,
+        routedThread.runtime?.workspaceDir || "",
+      );
+      if (!assistantMessages.length) {
+        return localMessages;
+      }
+      return mergeLocalUserMessagesWithWebclientAssistants(localMessages, assistantMessages);
+    } catch {
+      return localMessages;
+    }
   }
 
   getAttachment(attachmentId) {
@@ -212,25 +344,62 @@ class SmallPhoneService {
       };
     }
     if (attachment.url) {
-      if (typeof this.runtime?.fetchAttachment === "function") {
-        const fetched = await this.runtime.fetchAttachment({ url: attachment.url, attachment });
-        return {
-          kind: "proxied",
-          statusCode: fetched?.statusCode || 200,
-          headers: fetched?.headers || {},
-          body: fetched?.body,
-          fileName: fetched?.fileName || attachment.fileName,
-          mimeType: fetched?.mimeType || attachment.mimeType,
-        };
-      }
-      return {
-        kind: "remote_unproxied",
-        url: attachment.url,
-        fileName: attachment.fileName,
-        mimeType: attachment.mimeType,
-      };
+      return this.openRuntimeAttachmentDownload(attachment.url, attachment);
     }
     throw new Error(`Attachment has no data: ${attachment.id}`);
+  }
+
+  async openWebclientAttachmentDownload(rawUrl) {
+    const url = String(rawUrl || "").trim();
+    if (!url) {
+      throw new Error("Attachment url is required.");
+    }
+    return this.openRuntimeAttachmentDownload(url, {
+      fileName: "attachment",
+      mimeType: "application/octet-stream",
+    });
+  }
+
+  openWorkspaceAttachmentDownload(rawPath, threadId) {
+    const state = this.store.read();
+    const thread = state.threads.find((item) => item.id === String(threadId || "").trim());
+    if (!thread) {
+      throw new Error(`Thread not found: ${threadId}`);
+    }
+    const workspaceDir = String(attachThreadRouting(thread, this.runtimeInfo.id)?.runtime?.workspaceDir || "").trim();
+    const filePath = resolveWorkspaceAttachmentPath(rawPath, workspaceDir);
+    if (!filePath) {
+      throw new Error("Workspace attachment is not allowed.");
+    }
+    const stat = fs.statSync(filePath);
+    const mimeType = mimeTypeForWorkspaceFile(filePath);
+    return {
+      kind: "local",
+      localPath: filePath,
+      fileName: path.basename(filePath),
+      mimeType,
+      size: stat.size,
+    };
+  }
+
+  async openRuntimeAttachmentDownload(url, attachment = {}) {
+    if (typeof this.runtime?.fetchAttachment === "function") {
+      const fetched = await this.runtime.fetchAttachment({ url, attachment });
+      return {
+        kind: "proxied",
+        statusCode: fetched?.statusCode || 200,
+        headers: fetched?.headers || {},
+        body: fetched?.body,
+        fileName: fetched?.fileName || attachment.fileName,
+        mimeType: fetched?.mimeType || attachment.mimeType,
+      };
+    }
+    return {
+      kind: "remote_unproxied",
+      url,
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+    };
   }
 
   createAttachment(input) {
@@ -413,7 +582,7 @@ class SmallPhoneService {
     };
   }
 
-  createCompanion(input) {
+  async createCompanion(input) {
     const payload = normalizeCompanionInput(input);
     const createdAt = nowIso();
     let created = null;
@@ -430,6 +599,7 @@ class SmallPhoneService {
       const windowId = payload.windowId || `window-${slug}`;
       const agentId = payload.agentId || `smallphone-${channelId}`.replace(/[^a-zA-Z0-9:_-]+/g, "-");
       const workspaceDir = payload.workspaceDir || defaultWorkspaceDirForRole(payload.roleLevel, channelId, slug);
+      const runtimeProject = payload.runtimeProject || defaultRuntimeProjectForRole(payload.roleLevel, slug);
       const sessionKey = payload.sessionKey || `smallphone:thread:${ids.threadId}`;
       const character = {
         id: ids.characterId,
@@ -439,6 +609,12 @@ class SmallPhoneService {
         style: payload.style,
         toolPolicy: {
           allow: payload.toolAllow,
+        },
+        permissionPolicy: {
+          agentMode: payload.agentMode,
+          template: templateForAgentMode(payload.agentMode, payload.agentType),
+          rules: {},
+          updatedAt: createdAt,
         },
         createdAt,
         updatedAt: createdAt,
@@ -474,7 +650,7 @@ class SmallPhoneService {
         runtimeSessionId: "",
         runtime: {
           provider: this.runtimeInfo.id || "mock",
-          project: payload.runtimeProject,
+          project: runtimeProject,
           agentType: payload.agentType,
           roleLevel: payload.roleLevel,
           model: payload.model || this.runtimeInfo.model || "",
@@ -562,6 +738,17 @@ class SmallPhoneService {
       return state;
     });
     this.syncManagedArtifacts(nextState);
+    await this.ensureRuntimeProjectForThread({
+      thread: created.thread,
+      contact: created.contact,
+      character: created.character,
+      relationshipState: created.relationshipState,
+    });
+    await this.syncRuntimeProjectMode({
+      thread: created.thread,
+      agentMode: payload.agentMode,
+      agentType: payload.agentType,
+    });
     const hydratedContacts = this.listContacts();
     const hydratedThreads = this.listThreads();
     return {
@@ -572,7 +759,7 @@ class SmallPhoneService {
     };
   }
 
-  updateCompanion(contactId, input) {
+  async updateCompanion(contactId, input) {
     const id = String(contactId || "").trim();
     if (!id) {
       throw new Error("Companion contact id is required.");
@@ -622,6 +809,13 @@ class SmallPhoneService {
       liveCharacter.style = payload.style;
       liveCharacter.toolPolicy = {
         allow: payload.toolAllow,
+      };
+      liveCharacter.permissionPolicy = {
+        ...(liveCharacter.permissionPolicy || {}),
+        agentMode: payload.agentMode,
+        template: templateForAgentMode(payload.agentMode, payload.agentType),
+        rules: normalizePermissionRules(liveCharacter.permissionPolicy?.rules || {}),
+        updatedAt,
       };
       liveCharacter.updatedAt = updatedAt;
 
@@ -717,6 +911,23 @@ class SmallPhoneService {
       return state;
     });
     this.syncManagedArtifacts(nextState);
+    const updatedContact = nextState.contacts.find((item) => item.id === id) || null;
+    const updatedThread = nextState.threads.find((item) => item.contactId === id) || null;
+    const updatedCharacter = updatedContact
+      ? nextState.characters.find((item) => item.id === updatedContact.characterId) || null
+      : null;
+    await this.ensureRuntimeProjectForThread({
+      thread: updatedThread,
+      contact: updatedContact,
+      character: updatedCharacter,
+      relationshipState:
+        nextState.relationshipStates.find((item) => item.threadId === updatedThread?.id || item.contactId === id) || null,
+    });
+    await this.syncRuntimeProjectMode({
+      thread: updatedThread,
+      agentMode: payload.agentMode,
+      agentType: payload.agentType,
+    });
     const hydratedContacts = this.listContacts();
     const hydratedThreads = this.listThreads();
     return {
@@ -853,10 +1064,16 @@ class SmallPhoneService {
 
   async getThreadPermissions(threadId) {
     const target = this.resolvePermissionTarget(threadId);
-    const policy = await this.permissions.upsertPolicy(target);
-    const evaluation = await this.permissions.evaluate(target);
+    const runtimeProjectInfo = await this.getRuntimeProjectPermissionInfo(target);
+    const hydratedTarget = mergeRuntimePermissionTarget(target, runtimeProjectInfo);
+    const agentCapabilities =
+      runtimeProjectInfo?.agentCapabilities || resolveAgentPermissionCapabilities(hydratedTarget.agentType);
+    const policy = await this.permissions.upsertPolicy(hydratedTarget);
+    const evaluation = await this.permissions.evaluate(hydratedTarget);
     return {
-      ...target,
+      ...hydratedTarget,
+      agentCapabilities,
+      runtimeProjectInfo,
       policy,
       templates: await this.permissions.listTemplates(),
       evaluation,
@@ -865,7 +1082,12 @@ class SmallPhoneService {
 
   async saveThreadPermissions(threadId, input = {}) {
     const target = this.resolvePermissionTarget(threadId);
-    const template = normalizePermissionTemplate(input?.template || target.template);
+    const runtimeProjectInfo = await this.getRuntimeProjectPermissionInfo(target);
+    const hydratedTarget = mergeRuntimePermissionTarget(target, runtimeProjectInfo);
+    const agentMode = normalizeAgentPermissionMode(input?.agentMode || input?.mode || hydratedTarget.agentMode, hydratedTarget.agentType);
+    const template = normalizePermissionTemplate(
+      input?.appTemplate || input?.policyTemplate || templateForAgentMode(agentMode, hydratedTarget.agentType) || hydratedTarget.template,
+    );
     const rules = normalizePermissionRules(input?.rules || {});
     const updatedAt = nowIso();
 
@@ -878,6 +1100,7 @@ class SmallPhoneService {
       }
       character.permissionPolicy = {
         ...(character.permissionPolicy || {}),
+        agentMode,
         template,
         rules,
         updatedAt,
@@ -895,14 +1118,61 @@ class SmallPhoneService {
       return state;
     });
 
+    const modeUpdate = await this.ccConnectProjects.updateProjectMode({
+      name: hydratedTarget.runtimeProject || hydratedTarget.project,
+      mode: agentMode,
+    });
+
     const nextTarget = this.resolvePermissionTarget(threadId);
-    const policy = await this.permissions.upsertPolicy(nextTarget);
-    const evaluation = await this.permissions.evaluate(nextTarget);
+    const nextRuntimeProjectInfo = await this.getRuntimeProjectPermissionInfo(nextTarget);
+    const nextHydratedTarget = mergeRuntimePermissionTarget(nextTarget, nextRuntimeProjectInfo);
+    const policy = await this.permissions.upsertPolicy(nextHydratedTarget);
+    const evaluation = await this.permissions.evaluate(nextHydratedTarget);
+    const agentCapabilities =
+      nextRuntimeProjectInfo?.agentCapabilities || resolveAgentPermissionCapabilities(nextHydratedTarget.agentType);
     return {
-      ...nextTarget,
+      ...nextHydratedTarget,
+      agentCapabilities,
+      runtimeProjectInfo: nextRuntimeProjectInfo,
+      modeUpdate,
       policy,
       evaluation,
     };
+  }
+
+  async getRuntimeProjectPermissionInfo(target) {
+    const project = String(target?.runtimeProject || target?.project || "").trim();
+    if (!project || this.runtimeInfo.id !== "cc-webclient") {
+      return null;
+    }
+    try {
+      const data = await this.ccConnectProjects.getProject({ name: project });
+      const agentType = normalizeAgentType(data.agent_type || target.agentType) || target.agentType;
+      const modes = normalizeRuntimePermissionModes(data.permission_modes);
+      const agentCapabilities = modes.length
+        ? {
+            agentType,
+            modes,
+            defaultMode: modes[0]?.key || "default",
+            ruleLevels: ["allow", "ask", "forbid"],
+            permissions: DEFAULT_PERMISSION_CHECKS,
+            source: "cc-connect-project",
+          }
+        : resolveAgentPermissionCapabilities(agentType);
+      return {
+        project,
+        agentType,
+        agentMode: String(data.agent_mode || "").trim(),
+        workDir: String(data.work_dir || "").trim(),
+        agentCapabilities,
+        raw: data,
+      };
+    } catch (error) {
+      return {
+        project,
+        error: String(error?.message || error || ""),
+      };
+    }
   }
 
   resolvePermissionTarget(threadId) {
@@ -919,16 +1189,32 @@ class SmallPhoneService {
     if (!character) {
       throw new Error(`Character not found for contact: ${contact.id}`);
     }
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const runtime = routedThread.runtime || {};
+    const project =
+      resolveWebclientProjectForThread(routedThread, this.runtimeInfo.project) ||
+      String(this.runtimeInfo.project || "").trim();
     const policy = character.permissionPolicy || {};
+    const agentType = normalizeAgentType(runtime.agentType) || "codex";
+    const agentMode = normalizeAgentPermissionMode(policy.agentMode || policy.mode || policy.template, agentType);
     return {
       policyId: buildPermissionPolicyId(this.permissionInfo.clientId, this.permissionInfo.appId, contact.id),
       clientId: this.permissionInfo.clientId,
       appId: this.permissionInfo.appId,
+      threadId: thread.id,
+      threadTitle: thread.title || contact.displayName,
       contactId: contact.id,
       contactName: contact.displayName,
+      agentId: String(contact.agentId || runtime.agentId || "").trim(),
+      agentType,
+      roleLevel: normalizeRoleLevel(contact.roleLevel || thread.roleLevel || runtime.roleLevel),
+      workspaceScope: normalizeWorkspaceScope(runtime.workspaceScope) || workspaceScopeForRole(contact.roleLevel || thread.roleLevel),
+      workspaceDir: String(runtime.workspaceDir || "").trim(),
       userType: "owner",
-      project: this.runtimeInfo.project || "",
-      template: normalizePermissionTemplate(policy.template || DEFAULT_PERMISSION_TEMPLATE),
+      project,
+      runtimeProject: project,
+      agentMode,
+      template: normalizePermissionTemplate(policy.template || templateForAgentMode(agentMode, agentType) || DEFAULT_PERMISSION_TEMPLATE),
       rules: normalizePermissionRules(policy.rules || {}),
       permissions: DEFAULT_PERMISSION_CHECKS,
       configured: this.permissionInfo.configured,
@@ -1327,6 +1613,82 @@ class SmallPhoneService {
     syncOpenClawAgentConfigs(state, this.artifactSync);
   }
 
+  async ensureRuntimeProjectForThread(params = {}) {
+    const thread = params.thread || null;
+    if (!thread) {
+      return { ok: false, skipped: true, reason: "missing thread" };
+    }
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const project = String(routedThread.runtime?.project || "").trim();
+    if (!project || this.runtimeInfo.id !== "cc-webclient") {
+      return { ok: false, skipped: true, reason: "project ensure not required" };
+    }
+    ensureThreadWorkspace({
+      thread: routedThread,
+      contact: params.contact || null,
+      character: params.character || null,
+      relationshipState: params.relationshipState || null,
+    });
+    return this.ccConnectProjects.ensureProject({
+      name: project,
+      displayName: String(params.contact?.displayName || params.character?.name || thread.title || project).trim(),
+      workDir: String(routedThread.runtime?.workspaceDir || "").trim(),
+      agentType: normalizeAgentType(routedThread.runtime?.agentType) || "codex",
+    });
+  }
+
+  async syncRuntimeProjectMode(params = {}) {
+    const thread = params.thread || null;
+    if (!thread || this.runtimeInfo.id !== "cc-webclient") {
+      return { ok: false, skipped: true, reason: "project mode sync not required" };
+    }
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const project = String(routedThread.runtime?.project || "").trim();
+    const agentType = normalizeAgentType(params.agentType || routedThread.runtime?.agentType) || "codex";
+    const mode = normalizeAgentPermissionMode(params.agentMode, agentType);
+    if (!project || !mode) {
+      return { ok: false, skipped: true, reason: "missing project or mode" };
+    }
+    return this.ccConnectProjects.updateProjectMode({ name: project, mode });
+  }
+
+  async sendThreadAction(threadId, input = {}) {
+    const action = String(input?.action || input?.key || input?.value || "").trim();
+    const replyCtx = String(input?.replyCtx || input?.reply_ctx || "").trim();
+    if (!action) {
+      throw new Error("Action is required.");
+    }
+    if (this.runtimeInfo.id !== "cc-webclient") {
+      throw new Error("Thread actions are only supported by cc-webclient runtime.");
+    }
+    const state = this.store.read();
+    const thread = state.threads.find((item) => item.id === threadId);
+    if (!thread) {
+      throw new Error(`Thread not found: ${threadId}`);
+    }
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const project = resolveWebclientProjectForThread(routedThread, this.runtimeInfo.project);
+    const sessionId = String(thread.runtimeSessionId || routedThread.runtimeSessionId || "").trim();
+    const sessionKey = String(routedThread.runtime?.sessionKey || buildThreadSessionKey(thread.id, getSessionGeneration(thread))).trim();
+    if (!project || (!sessionId && !sessionKey)) {
+      throw new Error("Current thread has no cc-webclient project/session.");
+    }
+    const result = await this.webclientChat.sendAction({
+      project,
+      sessionId,
+      sessionKey,
+      action,
+      replyCtx,
+    });
+    this.emitThreadEvent(threadId, {
+      type: "thread.action",
+      action,
+      replyCtx,
+      result,
+    });
+    return { ok: true, action, replyCtx, result };
+  }
+
   async sendMessage(threadId, input) {
     const text = String(input?.text || "").trim();
     const attachmentIds = normalizeAttachmentIds(input?.attachments || input?.attachmentIds || []);
@@ -1395,14 +1757,19 @@ class SmallPhoneService {
     this.emitThreadEvent(threadId, { type: "user.message", message: hydratedUserMessage });
 
     const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const relationshipState =
+      nextState.relationshipStates.find((item) => item.threadId === routedThread.id || item.contactId === contact.id) || null;
     ensureThreadWorkspace({
       thread: routedThread,
       contact,
       character,
-      relationshipState:
-        nextState.relationshipStates.find(
-          (item) => item.threadId === routedThread.id || item.contactId === contact.id,
-        ) || null,
+      relationshipState,
+    });
+    await this.ensureRuntimeProjectForThread({
+      thread: routedThread,
+      contact,
+      character,
+      relationshipState,
     });
 
     const messages = nextState.messages.filter((item) => item.threadId === threadId);
@@ -1669,7 +2036,6 @@ class SmallPhoneService {
           resumeSummary: "",
         };
         liveThread.updatedAt = assistantMessage.createdAt;
-        liveThread.summary = summarizeThread(draft.messages.filter((item) => item.threadId === threadId));
       }
       draft.timeline.push({
         id: createId("tl"),
@@ -2366,6 +2732,34 @@ function summarizeThread(messages) {
   return tail.slice(0, 240);
 }
 
+function resolveThreadProfileSummary(thread, contact, character) {
+  const current = String(thread?.summary || "").trim();
+  if (current && !looksLikeConversationSummary(current)) {
+    return current;
+  }
+  const persona = firstMeaningfulLine(character?.persona);
+  if (persona) {
+    return persona.slice(0, 240);
+  }
+  const displayName = String(contact?.displayName || character?.name || thread?.title || "联系人").trim();
+  return `${displayName} 的独立一对一窗口。`;
+}
+
+function looksLikeConversationSummary(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return false;
+  }
+  return /(?:^|\s|\|)(user|assistant|system):/i.test(text) || isQueuedWebclientPlaceholder(text);
+}
+
+function firstMeaningfulLine(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) || "";
+}
+
 function resolveActiveMask(params) {
   const message = params.messageText.toLowerCase();
   const masks = params.masks.filter((item) => item.enabled !== false);
@@ -2563,9 +2957,8 @@ function normalizeCompanionInput(input) {
     greeting: String(input?.greeting || "").trim(),
     model: String(input?.model || "").trim(),
     agentType: normalizeAgentType(input?.agentType || input?.runtimeAgentType),
-    runtimeProject:
-      String(input?.runtimeProject || input?.project || "").trim() ||
-      defaultRuntimeProjectForRole(roleLevel, String(input?.slug || "").trim() || name),
+    agentMode: normalizeAgentPermissionMode(input?.agentMode || input?.mode, input?.agentType || input?.runtimeAgentType),
+    runtimeProject: String(input?.runtimeProject || input?.project || "").trim(),
     agentId: String(input?.agentId || "").trim(),
     workspaceDir: String(input?.workspaceDir || "").trim(),
     sessionKey: String(input?.sessionKey || "").trim(),
@@ -2643,6 +3036,10 @@ function normalizeCompanionPatchInput(params) {
       String(runtimeInfo.model || "").trim() ||
       "",
     agentType: normalizeAgentType(input?.agentType) || normalizeAgentType(thread.runtime?.agentType),
+    agentMode: normalizeAgentPermissionMode(
+      input?.agentMode || input?.mode || character.permissionPolicy?.agentMode || character.permissionPolicy?.mode || character.permissionPolicy?.template,
+      input?.agentType || thread.runtime?.agentType,
+    ),
     runtimeProject:
       String(input?.runtimeProject || input?.project || "").trim() ||
       (roleLevelChanged ? "" : String(thread.runtime?.project || "").trim()) ||
@@ -2692,6 +3089,105 @@ function normalizeWorkspaceScope(value) {
 
 function workspaceScopeForRole(roleLevel) {
   return normalizeRoleLevel(roleLevel) === "admin" ? "admin" : "contact";
+}
+
+function resolveAgentPermissionCapabilities(agentType) {
+  const type = normalizeAgentType(agentType) || "codex";
+  const modesByAgent = {
+    codex: [
+      { key: "suggest", name: "Suggest", nameZh: "建议", description: "Ask permission for every tool call.", descriptionZh: "每次工具调用都需确认。" },
+      { key: "auto-edit", name: "Auto Edit", nameZh: "自动编辑", description: "Auto-approve file edits, ask for shell commands.", descriptionZh: "自动允许文件编辑，Shell 命令需确认。" },
+      { key: "full-auto", name: "Full Auto", nameZh: "全自动", description: "Auto-approve with workspace sandbox.", descriptionZh: "自动通过，但保留工作区沙箱。" },
+      { key: "yolo", name: "YOLO", nameZh: "YOLO 模式", description: "Bypass all approvals and sandbox.", descriptionZh: "跳过所有审批和沙箱。" },
+    ],
+    claudecode: [
+      { key: "default", name: "Default", nameZh: "默认", description: "Ask permission for every tool call.", descriptionZh: "每次工具调用都需确认。" },
+      { key: "acceptEdits", name: "Accept Edits", nameZh: "接受编辑", description: "Auto-approve file edits, ask for others.", descriptionZh: "自动允许文件编辑，其他需确认。" },
+      { key: "plan", name: "Plan Mode", nameZh: "计划模式", description: "Plan only, no execution until approved.", descriptionZh: "只做规划不执行，审批后再执行。" },
+      { key: "auto", name: "Auto", nameZh: "自动模式", description: "Claude decides when to ask for permission.", descriptionZh: "由 Claude 自动判断何时需要确认。" },
+      { key: "bypassPermissions", name: "YOLO", nameZh: "YOLO 模式", description: "Auto-approve everything.", descriptionZh: "全部自动通过。" },
+      { key: "dontAsk", name: "Don't Ask", nameZh: "静默拒绝", description: "Auto-deny tools unless pre-approved.", descriptionZh: "未预授权的工具自动拒绝，不弹确认。" },
+    ],
+  };
+  const modes = modesByAgent[type] || modesByAgent.codex;
+  return {
+    agentType: type,
+    modes,
+    defaultMode: modes[0]?.key || "default",
+    ruleLevels: ["allow", "ask", "forbid"],
+    permissions: DEFAULT_PERMISSION_CHECKS,
+    source: "smallphone-agent-capability-map",
+  };
+}
+
+function mergeRuntimePermissionTarget(target, info) {
+  if (!info || info.error) {
+    return target;
+  }
+  const agentType = normalizeAgentType(info.agentType || target.agentType) || target.agentType;
+  const agentMode = normalizeAgentPermissionMode(info.agentMode || target.agentMode, agentType);
+  return {
+    ...target,
+    agentType,
+    agentMode,
+    workspaceDir: info.workDir || target.workspaceDir,
+    template: normalizePermissionTemplate(target.template || templateForAgentMode(agentMode, agentType)),
+  };
+}
+
+function normalizeRuntimePermissionModes(input) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input
+    .map((mode) => {
+      const key = String(mode?.key || "").trim();
+      if (!key) return null;
+      return {
+        key,
+        name: String(mode.name || key).trim(),
+        nameZh: String(mode.nameZh || mode.name_zh || mode.name || key).trim(),
+        description: String(mode.description || mode.desc || "").trim(),
+        descriptionZh: String(mode.descriptionZh || mode.descZh || mode.description_zh || mode.desc_zh || mode.desc || "").trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeAgentPermissionMode(value, agentType) {
+  const capabilities = resolveAgentPermissionCapabilities(agentType);
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase().replace(/[_\s]+/g, "-");
+  const alias = {
+    edit: "acceptEdits",
+    autoedit: "auto-edit",
+    "auto-edit": "auto-edit",
+    fullauto: "full-auto",
+    "full-auto": "full-auto",
+    bypasspermissions: "bypassPermissions",
+    "bypass-permissions": "bypassPermissions",
+    yolo: "yolo",
+  };
+  const candidate = alias[normalized.replace(/-/g, "")] || alias[normalized] || raw;
+  const found = capabilities.modes.find((mode) => mode.key === candidate || mode.key.toLowerCase() === normalized);
+  return found?.key || capabilities.defaultMode;
+}
+
+function templateForAgentMode(agentMode, agentType) {
+  const type = normalizeAgentType(agentType) || "codex";
+  const mode = normalizeAgentPermissionMode(agentMode, type);
+  if (type === "codex") {
+    if (mode === "suggest") return "safe";
+    if (mode === "auto-edit") return "developer";
+    if (mode === "full-auto") return "trusted";
+    if (mode === "yolo") return "trusted";
+  }
+  if (type === "claudecode") {
+    if (mode === "default" || mode === "plan" || mode === "dontAsk") return "safe";
+    if (mode === "acceptEdits" || mode === "auto") return "developer";
+    if (mode === "bypassPermissions") return "trusted";
+  }
+  return DEFAULT_PERMISSION_TEMPLATE;
 }
 
 function defaultWorkspaceDirForRole(roleLevel, channelId, slug) {
@@ -2829,6 +3325,446 @@ function createPermissionClient(options = {}) {
       }
     },
   };
+}
+
+function createCcConnectProjectClient(options = {}) {
+  const webclientBaseUrl = String(options.webclientBaseUrl || "").trim().replace(/\/+$/, "");
+  const webclientToken = String(options.webclientToken || "").trim();
+  const managementUrl = String(options.ccConnectManagementUrl || "").trim().replace(/\/+$/, "");
+  const managementToken = String(options.ccConnectManagementToken || "").trim();
+  const useWebclientFacade = Boolean(webclientBaseUrl && webclientToken);
+  const baseUrl = useWebclientFacade ? webclientBaseUrl : managementUrl;
+  const token = useWebclientFacade ? webclientToken : managementToken;
+  const configured = Boolean(baseUrl && token);
+  const via = useWebclientFacade ? "cc-webclient-management-facade" : managementUrl ? "cc-connect-management" : "none";
+
+  return {
+    describe() {
+      return {
+        id: "cc-connect-projects",
+        configured,
+        via,
+        baseUrl: baseUrl ? redactManagementUrl(baseUrl) : "",
+      };
+    },
+    async getProject(input = {}) {
+      const name = String(input.name || "").trim();
+      if (!name) {
+        throw new Error("cc-connect project get requires project name.");
+      }
+      if (!configured) {
+        throw new Error("cc-connect project client is not configured.");
+      }
+      return ccConnectManagementRequest({
+        managementUrl: baseUrl,
+        managementToken: token,
+        path: `/api/v1/projects/${encodeURIComponent(name)}`,
+        method: "GET",
+      });
+    },
+    async updateProjectMode(input = {}) {
+      const name = String(input.name || "").trim();
+      const mode = String(input.mode || "").trim();
+      if (!name || !mode) {
+        return { ok: false, skipped: true, reason: "missing project or mode" };
+      }
+      if (!configured) {
+        return { ok: false, skipped: true, reason: "cc-connect project client is not configured" };
+      }
+      const data = await ccConnectManagementRequest({
+        managementUrl: baseUrl,
+        managementToken: token,
+        path: `/api/v1/projects/${encodeURIComponent(name)}`,
+        method: "PATCH",
+        body: { mode },
+      });
+      return { ok: true, name, mode, data };
+    },
+    async ensureProject(input = {}) {
+      const name = String(input.name || "").trim();
+      const displayName = String(input.displayName || name).trim() || name;
+      const workDir = String(input.workDir || "").trim();
+      const agentType = normalizeAgentType(input.agentType) || "codex";
+      if (!name) {
+        throw new Error("cc-connect project ensure requires project name.");
+      }
+      if (!workDir) {
+        throw new Error(`cc-connect project ${name} requires work_dir.`);
+      }
+      if (!configured) {
+        throw new Error("cc-connect project ensure is not configured: missing webclient/management base URL or token.");
+      }
+      try {
+        await ccConnectManagementRequest({
+          managementUrl: baseUrl,
+          managementToken: token,
+          path: `/api/v1/projects/${encodeURIComponent(name)}`,
+          method: "GET",
+        });
+        return { ok: true, existed: true, name, via };
+      } catch (error) {
+        if (!String(error?.message || "").includes("project not found")) {
+          throw error;
+        }
+      }
+      const data = await ccConnectManagementRequest({
+        managementUrl: baseUrl,
+        managementToken: token,
+        path: "/api/v1/projects",
+        method: "POST",
+        body: {
+          name,
+          display_name: displayName,
+          work_dir: workDir,
+          agent_type: agentType,
+        },
+      });
+      return {
+        ok: true,
+        existed: false,
+        name: String(data.name || name).trim() || name,
+        restartRequired: Boolean(data.restart_required),
+        via,
+      };
+    },
+  };
+}
+
+function createWebclientChatClient(options = {}) {
+  const baseUrl = String(options.webclientBaseUrl || options.baseUrl || "").trim().replace(/\/+$/, "");
+  const token = String(options.webclientToken || options.token || "").trim();
+  const appId = String(options.webclientAppId || options.appId || "").trim();
+  const configured = Boolean(baseUrl && token && appId);
+
+  return {
+    async getSessionHistory(params = {}) {
+      if (!configured) {
+        throw new Error("cc-webclient chat client is not configured.");
+      }
+      const project = String(params.project || "").trim();
+      const sessionId = String(params.sessionId || "").trim();
+      if (!project || !sessionId) {
+        throw new Error("cc-webclient history requires project and session id.");
+      }
+      const historyLimit = Number.isFinite(Number(params.historyLimit)) ? Number(params.historyLimit) : 200;
+      const runEventsLimit = Number.isFinite(Number(params.runEventsLimit)) ? Number(params.runEventsLimit) : 200;
+      const data = await ccConnectManagementRequest({
+        managementUrl: baseUrl,
+        managementToken: token,
+        path: `/apps/${encodeURIComponent(appId)}/api/v1/projects/${encodeURIComponent(project)}/sessions/${encodeURIComponent(sessionId)}?history_limit=${encodeURIComponent(String(historyLimit))}&run_events_limit=${encodeURIComponent(String(runEventsLimit))}`,
+        method: "GET",
+      });
+      return {
+        history: Array.isArray(data.history) ? data.history : [],
+        runEvents: Array.isArray(data.run_events) ? data.run_events : [],
+      };
+    },
+    async sendAction(params = {}) {
+      if (!configured) {
+        throw new Error("cc-webclient chat client is not configured.");
+      }
+      const project = String(params.project || "").trim();
+      const sessionId = String(params.sessionId || "").trim();
+      const sessionKey = String(params.sessionKey || "").trim();
+      const action = String(params.action || "").trim();
+      const replyCtx = String(params.replyCtx || params.reply_ctx || "").trim();
+      if (!project || !action || (!sessionId && !sessionKey)) {
+        throw new Error("cc-webclient action requires project, action, and session id/key.");
+      }
+      return ccConnectManagementRequest({
+        managementUrl: baseUrl,
+        managementToken: token,
+        path: `/apps/${encodeURIComponent(appId)}/api/v1/projects/${encodeURIComponent(project)}/send`,
+        method: "POST",
+        body: {
+          ...(sessionKey ? { session_key: sessionKey } : {}),
+          ...(sessionId ? { session_id: sessionId } : {}),
+          action,
+          ...(replyCtx ? { reply_ctx: replyCtx } : {}),
+        },
+      });
+    },
+  };
+}
+
+function resolveWebclientProjectForThread(thread, fallbackProject = "") {
+  return String(thread?.runtime?.project || fallbackProject || "").trim();
+}
+
+function mapWebclientHistoryToAssistantMessages(history, threadId, sessionId, runEvents = [], workspaceDir = "") {
+  const actionsByUserMessage = buildWebclientActionsByUserMessage(runEvents);
+  const consumedActionKeys = new Set();
+  const assistantMessages = (Array.isArray(history) ? history : [])
+    .filter((item) => String(item?.role || "").trim().toLowerCase() === "assistant")
+    .map((item) => {
+      const userMessageId = String(item.user_message_id || item.userMessageId || "").trim();
+      const attachments = normalizeWebclientHistoryAttachments(item, threadId, workspaceDir, runEvents);
+      const content = normalizePlainTextContent(item.content);
+      const actions = actionsByUserMessage.get(userMessageId) || [];
+      if (actions.length && userMessageId) consumedActionKeys.add(userMessageId);
+      return {
+        id: `wc-${String(item.id || item.seq || createId("msg")).replace(/[^a-zA-Z0-9:_-]+/g, "-")}`,
+        threadId,
+        role: "assistant",
+        content,
+        createdAt: String(item.created_at || item.timestamp || "").trim() || nowIso(),
+        runtime: {
+          sessionId,
+          toolCalls: [],
+          source: "cc-webclient",
+          runId: String(item.run_id || item.runId || "").trim(),
+          userMessageId,
+          actions,
+        },
+        attachmentIds: [],
+        attachments,
+      };
+    })
+    .filter((item) => (item.content || item.attachments.length || item.runtime.actions.length) && !isQueuedWebclientPlaceholder(item.content));
+
+  for (const [userMessageId, actions] of actionsByUserMessage.entries()) {
+    if (consumedActionKeys.has(userMessageId)) continue;
+    const event = findLatestWebclientActionEvent(runEvents, userMessageId);
+    assistantMessages.push({
+      id: `wc-action-${String(userMessageId || createId("msg")).replace(/[^a-zA-Z0-9:_-]+/g, "-")}`,
+      threadId,
+      role: "assistant",
+      content: normalizePlainTextContent(event?.content) || "需要操作确认。",
+      createdAt: String(event?.created_at || event?.timestamp || "").trim() || nowIso(),
+      runtime: {
+        sessionId,
+        toolCalls: [],
+        source: "cc-webclient-run-event",
+        runId: String(event?.run_id || event?.runId || "").trim(),
+        userMessageId,
+        actions,
+      },
+      attachmentIds: [],
+      attachments: normalizeWorkspaceAttachmentsFromText(normalizePlainTextContent(event?.content), threadId, workspaceDir),
+    });
+  }
+  return assistantMessages;
+}
+
+function normalizeWebclientHistoryAttachments(item, threadId = "", workspaceDir = "", runEvents = []) {
+  const out = [];
+  for (const image of Array.isArray(item?.images) ? item.images : []) {
+    const url = String(image?.url || "").trim();
+    if (!url) continue;
+    out.push({
+      id: String(image.id || url).trim(),
+      kind: "image",
+      fileName: String(image.file_name || image.fileName || "image").trim(),
+      mimeType: String(image.mime_type || image.mimeType || "").trim(),
+      size: Number.isFinite(Number(image.size)) ? Number(image.size) : 0,
+      url,
+      downloadUrl: "",
+    });
+  }
+  for (const file of Array.isArray(item?.files) ? item.files : []) {
+    const url = String(file?.url || "").trim();
+    if (!url) continue;
+    out.push({
+      id: String(file.id || url).trim(),
+      kind: "file",
+      fileName: String(file.file_name || file.fileName || "file").trim(),
+      mimeType: String(file.mime_type || file.mimeType || "").trim(),
+      size: Number.isFinite(Number(file.size)) ? Number(file.size) : 0,
+      url,
+      downloadUrl: "",
+    });
+  }
+  const hasFormalAttachments = out.length > 0;
+  const content = normalizePlainTextContent(item?.content);
+  if (!hasFormalAttachments) {
+    out.push(...normalizeWorkspaceAttachmentsFromText(content, threadId, workspaceDir, { source: "assistant" }));
+    const userMessageId = String(item?.user_message_id || item?.userMessageId || "").trim();
+    for (const event of Array.isArray(runEvents) ? runEvents : []) {
+      const id = String(event?.user_message_id || event?.userMessageId || "").trim();
+      if (userMessageId && id && id !== userMessageId) continue;
+      out.push(...normalizeWorkspaceAttachmentsFromText(event?.content, threadId, workspaceDir, { source: "run-event" }));
+    }
+  }
+  return dedupeWorkspaceAttachments(out);
+}
+
+function normalizeWorkspaceAttachmentsFromText(content, threadId, workspaceDir, options = {}) {
+  const text = String(content || "");
+  if (!text || !workspaceDir) return [];
+  const out = [];
+  const candidates = extractWorkspaceAttachmentCandidates(text, options);
+  for (const candidate of candidates) {
+    const filePath = resolveWorkspaceAttachmentPath(candidate, workspaceDir);
+    if (!filePath) continue;
+    const stat = fs.statSync(filePath);
+    const mimeType = mimeTypeForWorkspaceFile(filePath);
+    out.push({
+      id: `workspace:${String(threadId || "thread")}:${path.basename(filePath)}`,
+      kind: inferKind(mimeType),
+      fileName: path.basename(filePath),
+      mimeType,
+      size: stat.size,
+      url: "",
+      downloadUrl: `/api/workspace-attachments/${encodeURIComponent(String(threadId || ""))}?path=${encodeURIComponent(filePath)}`,
+    });
+  }
+  return out;
+}
+
+function extractWorkspaceAttachmentCandidates(text, options = {}) {
+  const candidates = [];
+  const source = String(options?.source || "").trim();
+  const artifactRe = new RegExp("(?:^|\\n)\\s*(?:MEDIA|FILE)\\s*:\\s*([^\\r\\n]+)", "gi");
+  for (const match of text.matchAll(artifactRe)) {
+    candidates.push(cleanWorkspaceAttachmentToken(match[1]));
+  }
+  const absoluteRe = /(?:^|[\s`\x27\x22(])((?:\/[^\s`\x27\x22<>)]*)?[^\s`\x27\x22<>)]*\.(?:png|jpe?g|webp|gif|pdf|html|zip|txt|md|csv|json))/gi;
+  for (const match of text.matchAll(absoluteRe)) {
+    const token = cleanWorkspaceAttachmentToken(match[1]);
+    if (token && shouldExposeWorkspaceAttachmentCandidate(token, source, true)) candidates.push(token);
+  }
+  const backtickRe = new RegExp("`([^`]+\\.(?:png|jpe?g|webp|gif|pdf|html|zip|txt|md|csv|json))`", "gi");
+  for (const match of text.matchAll(backtickRe)) {
+    const token = cleanWorkspaceAttachmentToken(match[1]);
+    if (token && shouldExposeWorkspaceAttachmentCandidate(token, source, false)) candidates.push(token);
+  }
+  return candidates.filter(Boolean);
+}
+
+function shouldExposeWorkspaceAttachmentCandidate(candidate, source, isPathLike) {
+  const ext = path.extname(String(candidate || "")).toLowerCase();
+  if (!ext) return false;
+  if ([".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)) return true;
+  if (isPathLike && path.isAbsolute(String(candidate || ""))) return true;
+  if (source === "assistant" && [".html", ".pdf", ".zip", ".csv"].includes(ext)) return true;
+  return false;
+}
+function cleanWorkspaceAttachmentToken(value) {
+  let text = String(value || "").trim();
+  text = text.replace(/^file:\/\//i, "");
+  text = text.replace(/^['"`<]+|['"`>.,;:，。；：、)]+$/g, "");
+  return text.trim();
+}
+
+function resolveWorkspaceAttachmentPath(candidate, workspaceDir) {
+  const workspace = path.resolve(String(workspaceDir || ""));
+  if (!workspace) return "";
+  const raw = String(candidate || "").trim();
+  if (!raw) return "";
+  const target = path.resolve(path.isAbsolute(raw) ? raw : path.join(workspace, raw));
+  const relative = path.relative(workspace, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return "";
+  const ext = path.extname(target).toLowerCase();
+  if (!WORKSPACE_ATTACHMENT_EXTENSIONS.has(ext)) return "";
+  let stat;
+  try {
+    stat = fs.lstatSync(target);
+  } catch {
+    return "";
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > ATTACHMENT_MAX_BYTES) return "";
+  const workspaceReal = safeRealpath(workspace) || workspace;
+  const targetReal = safeRealpath(target) || target;
+  const realRelative = path.relative(workspaceReal, targetReal);
+  if (!realRelative || realRelative.startsWith("..") || path.isAbsolute(realRelative)) return "";
+  return targetReal;
+}
+
+function mimeTypeForWorkspaceFile(filePath) {
+  return WORKSPACE_ATTACHMENT_MIME_TYPES[path.extname(String(filePath || "")).toLowerCase()] || "application/octet-stream";
+}
+
+function dedupeWorkspaceAttachments(items) {
+  const out = [];
+  const seen = new Set();
+  for (const item of items) {
+    const key = String(item.downloadUrl || item.url || item.id || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function buildWebclientActionsByUserMessage(runEvents) {
+  const map = new Map();
+  for (const event of Array.isArray(runEvents) ? runEvents : []) {
+    const type = String(event?.type || "").trim();
+    if (type !== "buttons" && type !== "card" && type !== "preview_start") continue;
+    const userMessageId = String(event?.user_message_id || event?.userMessageId || "").trim();
+    if (!userMessageId) continue;
+    const actions = normalizeWebclientRunEventActions(event);
+    if (!actions.length) continue;
+    if (!map.has(userMessageId)) map.set(userMessageId, []);
+    map.get(userMessageId).push(...actions);
+  }
+  return map;
+}
+
+function findLatestWebclientActionEvent(runEvents, userMessageId) {
+  const target = String(userMessageId || "").trim();
+  let latest = null;
+  for (const event of Array.isArray(runEvents) ? runEvents : []) {
+    const id = String(event?.user_message_id || event?.userMessageId || "").trim();
+    const type = String(event?.type || "").trim();
+    if (id !== target || (type !== "buttons" && type !== "card" && type !== "preview_start")) continue;
+    latest = event;
+  }
+  return latest;
+}
+
+function normalizeWebclientRunEventActions(event) {
+  const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  const replyCtx = String(metadata.reply_ctx || metadata.replyCtx || metadata.ref_id || metadata.preview_handle || "").trim();
+  const actions = [];
+  const buttons = Array.isArray(metadata.buttons) ? metadata.buttons : [];
+  for (const button of buttons) {
+    const action = String(button?.action || button?.key || button?.value || "").trim();
+    if (!action) continue;
+    actions.push({
+      action,
+      label: String(button.label || button.text || action).trim(),
+      replyCtx,
+      kind: "button",
+    });
+  }
+  const content = String(event?.content || "").trim();
+  const lower = content.toLowerCase();
+  if (!actions.length && (lower.includes("permission") || lower.includes("approve") || content.includes("批准") || content.includes("允许"))) {
+    actions.push(
+      { action: "perm:allow", label: "允许", replyCtx, kind: "permission" },
+      { action: "perm:deny", label: "拒绝", replyCtx, kind: "permission" },
+      { action: "perm:allow_all", label: "本轮全部允许", replyCtx, kind: "permission" },
+    );
+  }
+  return actions;
+}
+
+function mergeLocalUserMessagesWithWebclientAssistants(localMessages, assistantMessages) {
+  const systemMessages = localMessages.filter((item) => item.role === "system");
+  const userMessages = localMessages.filter((item) => item.role === "user");
+  const merged = [...systemMessages, ...userMessages, ...assistantMessages];
+  return merged.sort((a, b) => {
+    const left = Date.parse(String(a.createdAt || ""));
+    const right = Date.parse(String(b.createdAt || ""));
+    if (Number.isFinite(left) && Number.isFinite(right) && left !== right) return left - right;
+    return 0;
+  });
+}
+
+function normalizePlainTextContent(content) {
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content.map((item) => normalizePlainTextContent(item)).filter(Boolean).join("\n\n").trim();
+  }
+  if (content && typeof content === "object") {
+    return normalizePlainTextContent(content.text || content.content || content.message || "");
+  }
+  return "";
+}
+
+function isQueuedWebclientPlaceholder(text) {
+  return /消息已收到，将在当前任务完成后处理/.test(String(text || ""));
 }
 
 async function ccConnectManagementRequest(params) {

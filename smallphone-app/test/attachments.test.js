@@ -164,3 +164,80 @@ test("attachments: assistant localPath outside managed root is not persisted or 
   const download = await service.openAttachmentDownload(attId);
   assert.equal(download.kind, "remote_unproxied");
 });
+
+test("cc-webclient hydration updates thread preview without replacing profile summary", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url, options = {}) => {
+    const parsed = new URL(String(url));
+    assert.equal(String(options.method || "GET").toUpperCase(), "GET");
+    assert.equal(parsed.pathname, "/apps/smallphone/api/v1/projects/proj-preview/sessions/s1");
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          data: {
+            history: [
+              {
+                id: "u1",
+                role: "user",
+                content: "hello",
+                created_at: "2099-01-01T00:00:01.000Z",
+              },
+              {
+                id: "a1",
+                role: "assistant",
+                content: "remote assistant reply",
+                created_at: "2099-01-01T00:00:02.000Z",
+              },
+            ],
+          },
+        });
+      },
+    };
+  };
+
+  try {
+    const service = new SmallPhoneService({
+      dataFile: tmpDataFile(),
+      runtime: {
+        mode: "cc-webclient",
+        webclientBaseUrl: "http://127.0.0.1:9840",
+        webclientToken: "test-token",
+        webclientAppId: "smallphone",
+      },
+    });
+    service.store.update((state) => {
+      const thread = state.threads.find((item) => item.id === "thread-aki");
+      assert.ok(thread);
+      thread.summary = "user: old local chat | assistant: stale local reply";
+      thread.runtimeSessionId = "s1";
+      thread.runtime = {
+        ...(thread.runtime || {}),
+        project: "proj-preview",
+      };
+      state.messages.push({
+        id: "local-assistant-placeholder",
+        threadId: "thread-aki",
+        role: "assistant",
+        content: "📬 消息已收到，将在当前任务完成后处理。",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      return state;
+    });
+
+    const threads = await service.listThreadsHydrated();
+    const thread = threads.find((item) => item.id === "thread-aki");
+    assert.ok(thread);
+    assert.equal(thread.summary, "You are Aki, a sharp but caring small-phone companion. Keep replies concise, concrete, and useful. You track commitments, follow up proactively, and avoid generic assistant phrasing.");
+    assert.equal(thread.lastMessage.content, "remote assistant reply");
+
+    const bootstrap = await service.bootstrapHydrated();
+    const contact = bootstrap.contacts.find((item) => item.id === "contact-aki");
+    assert.ok(contact);
+    assert.equal(contact.thread.lastMessage.content, "remote assistant reply");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

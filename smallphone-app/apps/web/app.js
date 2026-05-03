@@ -25,6 +25,7 @@ const els = {
   runtimeBadge: document.querySelector("#runtime-badge"),
   permissionSummary: document.querySelector("#permission-summary"),
   permissionSourceBadge: document.querySelector("#permission-source-badge"),
+  permissionAgentMeta: document.querySelector("#permission-agent-meta"),
   permissionTemplateList: document.querySelector("#permission-template-list"),
   permissionDecisionList: document.querySelector("#permission-decision-list"),
   threadDebugPanel: document.querySelector("#thread-debug-panel"),
@@ -55,6 +56,9 @@ const els = {
   companionWorldbookContent: document.querySelector("#companion-worldbook-content"),
   companionThreadSummary: document.querySelector("#companion-thread-summary"),
   companionGreeting: document.querySelector("#companion-greeting"),
+  companionAgentType: document.querySelector("#companion-agent-type"),
+  companionRoleLevel: document.querySelector("#companion-role-level"),
+  companionAgentMode: document.querySelector("#companion-agent-mode"),
   companionTrust: document.querySelector("#companion-trust"),
   companionIntimacy: document.querySelector("#companion-intimacy"),
   companionTension: document.querySelector("#companion-tension"),
@@ -91,6 +95,9 @@ els.archiveCompanionButton.addEventListener("click", archiveSelectedCompanion);
 els.deleteCompanionButton.addEventListener("click", deleteSelectedCompanion);
 els.closeCompanionDrawer.addEventListener("click", closeCompanionDrawer);
 els.companionDrawerBackdrop.addEventListener("click", closeCompanionDrawer);
+els.companionAgentType?.addEventListener("change", () => {
+  populateCompanionAgentModeOptions("", els.companionAgentType.value);
+});
 
 els.companionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -335,64 +342,98 @@ function renderPermissions() {
     return;
   }
   const permissions = state.threadPermissions;
-  const templates = state.permissionTemplates || permissions?.templates || {};
   if (!permissions || !state.selectedThreadId) {
     els.permissionSummary.textContent = "请选择一个联系人。";
     els.permissionSourceBadge.textContent = "local";
+    if (els.permissionAgentMeta) els.permissionAgentMeta.innerHTML = "";
     els.permissionTemplateList.innerHTML = "";
     els.permissionDecisionList.innerHTML = "";
     return;
   }
-  els.permissionSummary.textContent = `${permissions.contactName || "当前联系人"} · app=${permissions.appId || "chat"} · contact=${permissions.contactId || "-"}`;
-  els.permissionSourceBadge.textContent = permissions.evaluation?.remote_error
-    ? "local fallback"
-    : permissions.configured
-      ? "cc-connect"
-      : "local";
-  const currentTemplate = permissions.template || "safe";
-  const templateLabels = {
-    safe: ["安全模式", "只允许聊天，项目上下文和工具默认关闭。"],
-    assist: ["协助模式", "允许读取上下文和只读工具，写入与命令需要后端确认。"],
-    developer: ["开发模式", "允许开发协助，写入和命令仍保持谨慎。"],
-    trusted: ["完全信任", "全部权限放行，只适合主人自己的私有联系人。"],
-  };
-  els.permissionTemplateList.innerHTML = Object.keys(templates)
-    .map((template) => {
-      const [title, description] = templateLabels[template] || [template, ""];
-      return `
-        <button class="permission-template ${template === currentTemplate ? "active" : ""}" data-template="${escapeHtml(template)}" type="button">
+  const capabilities = permissions.agentCapabilities || {};
+  const modes = Array.isArray(capabilities.modes) ? capabilities.modes : [];
+  els.permissionSummary.textContent = `${permissions.contactName || "当前联系人"} · agent=${permissions.agentType || "codex"} · project=${permissions.runtimeProject || permissions.project || "-"}`;
+  els.permissionSourceBadge.textContent = capabilities.source === "cc-connect-project"
+    ? "cc-connect project"
+    : permissions.evaluation?.remote_error
+      ? "local fallback"
+      : permissions.configured
+        ? "cc-connect"
+        : "local";
+  const currentAgentMode = permissions.agentMode || capabilities.defaultMode || "default";
+  if (els.permissionAgentMeta) {
+    els.permissionAgentMeta.innerHTML = [
+      renderPermissionMeta("agentId", permissions.agentId || "-"),
+      renderPermissionMeta("role", permissions.roleLevel || "contact"),
+      renderPermissionMeta("workspace", permissions.workspaceDir || "-"),
+    ].join("");
+  }
+  els.permissionTemplateList.innerHTML = modes.length
+    ? modes
+        .map((mode) => {
+          const key = String(mode.key || "");
+          const active = key === currentAgentMode;
+          const title = mode.nameZh || mode.name || key;
+          const description = mode.descriptionZh || mode.description || "";
+          return `
+        <button class="permission-template ${active ? "active" : ""}" data-template="${escapeHtml(key)}" type="button">
           <span class="permission-template-name">${escapeHtml(title)}</span>
           <span class="permission-template-desc">${escapeHtml(description)}</span>
         </button>
       `;
-    })
-    .join("");
+        })
+        .join("")
+    : `<article class="card"><div>当前 agent 没有暴露可选权限模式。</div></article>`;
   els.permissionTemplateList.querySelectorAll("[data-template]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await apiPost(`/api/threads/${state.selectedThreadId}/permissions`, {
-        template: button.dataset.template,
-      });
-      await Promise.all([loadThreadPermissions(), loadThreads()]);
+      await saveThreadPermissionPatch({ agentMode: button.dataset.template });
     });
   });
 
   const decisions = permissions.evaluation?.decisions || {};
-  els.permissionDecisionList.innerHTML = Object.values(decisions).length
-    ? Object.values(decisions)
-        .map((decision) => {
+  const orderedPermissions = capabilities.permissions || Object.keys(decisions);
+  els.permissionDecisionList.innerHTML = orderedPermissions.length
+    ? orderedPermissions
+        .map((permission) => {
+          const key = String(permission || "").trim();
+          const decision = decisions[key] || { permission: key, level: permissions.rules?.[key] || "ask", source: "implicit" };
           const level = String(decision.level || "ask");
           return `
             <article class="permission-row ${escapeHtml(level)}">
               <div>
-                <div class="permission-name">${escapeHtml(decision.permission)}</div>
+                <div class="permission-name">${escapeHtml(key)}</div>
                 <div class="card-meta">source: ${escapeHtml(decision.source || "-")}</div>
               </div>
-              <span class="permission-level">${escapeHtml(level)}</span>
+              <select class="permission-level-select" data-permission="${escapeHtml(key)}">
+                ${["allow", "ask", "forbid"].map((item) => `<option value="${item}" ${item === level ? "selected" : ""}>${item}</option>`).join("")}
+              </select>
             </article>
           `;
         })
         .join("")
     : `<article class="card"><div>暂无权限评估。</div></article>`;
+  els.permissionDecisionList.querySelectorAll("[data-permission]").forEach((select) => {
+    select.addEventListener("change", async () => {
+      await saveThreadPermissionPatch({
+        rules: {
+          ...(state.threadPermissions?.rules || {}),
+          [select.dataset.permission]: select.value,
+        },
+      });
+    });
+  });
+}
+
+function renderPermissionMeta(label, value) {
+  return `<span><strong>${escapeHtml(label)}</strong> ${escapeHtml(value)}</span>`;
+}
+
+async function saveThreadPermissionPatch(patch) {
+  await apiPost(`/api/threads/${state.selectedThreadId}/permissions`, {
+    agentMode: patch.agentMode || state.threadPermissions?.agentMode,
+    rules: patch.rules || state.threadPermissions?.rules || {},
+  });
+  await Promise.all([loadThreadPermissions(), loadThreads()]);
 }
 
 function renderReminders() {
@@ -413,7 +454,7 @@ function renderReminders() {
     : `<article class="card"><div>当前联系人还没有提醒。</div></article>`;
 }
 
-function openCompanionDrawer(mode) {
+async function openCompanionDrawer(mode) {
   state.companionDrawerMode = mode;
   const contact = getSelectedContact();
   const thread = getSelectedThread();
@@ -422,6 +463,14 @@ function openCompanionDrawer(mode) {
   els.companionDrawer.setAttribute("aria-hidden", "false");
   els.companionDrawerTitle.textContent = mode === "edit" ? "编辑角色" : "新建角色";
   if (mode === "edit" && contact && thread) {
+    let permissions = state.threadPermissions;
+    if (!permissions || permissions.threadId !== thread.id) {
+      try {
+        permissions = await apiGet(`/api/threads/${thread.id}/permissions`);
+      } catch {
+        permissions = null;
+      }
+    }
     state.editingContactId = contact.id;
     els.companionName.value = contact.character?.name || contact.displayName || "";
     els.companionDisplayName.value = contact.displayName || "";
@@ -440,9 +489,19 @@ function openCompanionDrawer(mode) {
     els.companionToolAllow.value = Array.isArray(contact.character?.toolPolicy?.allow)
       ? contact.character.toolPolicy.allow.join(",")
       : "";
+    if (els.companionAgentType) els.companionAgentType.value = permissions?.agentType || thread.runtime?.agentType || "codex";
+    if (els.companionRoleLevel) els.companionRoleLevel.value = contact.roleLevel || thread.roleLevel || "contact";
+    populateCompanionAgentModeOptions(
+      permissions?.agentMode || "",
+      els.companionAgentType?.value || "codex",
+      permissions?.agentCapabilities?.modes,
+    );
   } else {
     state.editingContactId = "";
     els.companionForm.reset();
+    if (els.companionAgentType) els.companionAgentType.value = "codex";
+    if (els.companionRoleLevel) els.companionRoleLevel.value = "contact";
+    populateCompanionAgentModeOptions("suggest", "codex");
   }
 }
 
@@ -491,6 +550,9 @@ function buildCompanionPayload() {
     worldbookContent: els.companionWorldbookContent.value.trim(),
     threadSummary: els.companionThreadSummary.value.trim(),
     greeting: els.companionGreeting.value.trim(),
+    agentType: els.companionAgentType?.value || "codex",
+    roleLevel: els.companionRoleLevel?.value || "contact",
+    agentMode: els.companionAgentMode?.value || "",
     toolPolicy: toolAllow.length ? { allow: toolAllow } : undefined,
     relationship:
       trust != null || intimacy != null || tension != null || responsiveness != null
@@ -504,6 +566,50 @@ function buildCompanionPayload() {
           })
         : undefined,
   });
+}
+
+function populateCompanionAgentModeOptions(selectedMode, agentType, runtimeModes) {
+  if (!els.companionAgentMode) return;
+  const modes = normalizeAgentModeOptions(runtimeModes) || getAgentModeOptions(agentType);
+  const selected = selectedMode || modes[0]?.key || "";
+  els.companionAgentMode.innerHTML = modes
+    .map((mode) => `<option value="${escapeHtml(mode.key)}" ${mode.key === selected ? "selected" : ""}>${escapeHtml(mode.label)}</option>`)
+    .join("");
+}
+
+function normalizeAgentModeOptions(runtimeModes) {
+  if (!Array.isArray(runtimeModes) || !runtimeModes.length) return null;
+  return runtimeModes
+    .map((mode) => {
+      const key = String(mode?.key || "").trim();
+      if (!key) return null;
+      const name = mode.nameZh || mode.name || key;
+      const description = mode.descriptionZh || mode.description || "";
+      return {
+        key,
+        label: description ? `${name} · ${description}` : name,
+      };
+    })
+    .filter(Boolean);
+}
+
+function getAgentModeOptions(agentType) {
+  if (agentType === "claudecode") {
+    return [
+      { key: "default", label: "默认 · 每次工具调用确认" },
+      { key: "acceptEdits", label: "接受编辑 · 自动允许文件编辑" },
+      { key: "plan", label: "计划模式 · 只规划不执行" },
+      { key: "auto", label: "自动模式 · Claude 判断何时确认" },
+      { key: "bypassPermissions", label: "YOLO · 全部自动通过" },
+      { key: "dontAsk", label: "静默拒绝 · 未授权工具自动拒绝" },
+    ];
+  }
+  return [
+    { key: "suggest", label: "建议 · 每次工具调用确认" },
+    { key: "auto-edit", label: "自动编辑 · 文件编辑自动通过" },
+    { key: "full-auto", label: "全自动 · 工作区沙箱内自动通过" },
+    { key: "yolo", label: "YOLO · 跳过审批和沙箱" },
+  ];
 }
 
 function getSelectedThread() {

@@ -1,6 +1,6 @@
-import * as dom from './dom.js?v=4';
+import * as dom from './dom.js?v=8';
 import { appModules, appSpaceTemplates, registeredApps } from './app-registry.js?v=3';
-import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=3';
+import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=6';
 import { applyDesktopMode, bindWorld, renderWorld, renderWorldToolbar } from './world.js?v=3';
 
 const DEFAULT_BACKEND_PORT = '3100';
@@ -201,14 +201,76 @@ function normalizeMessageContent(content) {
   return '';
 }
 
+function normalizeAttachmentList(items, fallbackKind = '') {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      if (!item) return null;
+      if (typeof item === 'string') {
+        return {
+          id: item,
+          kind: fallbackKind,
+          fileName: item.split('/').at(-1) || 'attachment',
+          mimeType: '',
+          size: 0,
+          url: item,
+          downloadUrl: '',
+        };
+      }
+      const url = String(item.downloadUrl || item.url || item.href || '').trim();
+      return {
+        id: String(item.id || item.attachmentId || url || `att-${Math.random().toString(16).slice(2)}`).trim(),
+        kind: String(item.kind || fallbackKind || '').trim(),
+        fileName: String(item.fileName || item.file_name || item.name || 'attachment').trim(),
+        mimeType: String(item.mimeType || item.mime_type || item.contentType || '').trim(),
+        size: Number.isFinite(Number(item.size)) ? Number(item.size) : 0,
+        url,
+        downloadUrl: String(item.downloadUrl || '').trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeMessageAttachments(message) {
+  return [
+    ...normalizeAttachmentList(message?.attachments),
+    ...normalizeAttachmentList(message?.images, 'image'),
+    ...normalizeAttachmentList(message?.files, 'file'),
+  ];
+}
+
+function normalizeMessageActions(message) {
+  const direct = Array.isArray(message?.actions) ? message.actions : [];
+  const runtime = Array.isArray(message?.runtime?.actions) ? message.runtime.actions : [];
+  return [...direct, ...runtime]
+    .map((action) => {
+      const key = String(action?.action || action?.key || action?.value || '').trim();
+      if (!key) return null;
+      return {
+        action: key,
+        label: String(action?.label || action?.text || key).trim(),
+        replyCtx: String(action?.replyCtx || action?.reply_ctx || message?.runtime?.replyCtx || '').trim(),
+        kind: String(action?.kind || 'button').trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
 function mapMessagesToChatMessages(messages) {
   return (Array.isArray(messages) ? messages : [])
     .filter((message) => message && message.role !== 'system')
-    .map((message) => ({
-      side: message.role === 'user' ? 'self' : 'other',
-      text: normalizeMessageContent(message.content),
-    }))
-    .filter((message) => message.text);
+    .map((message) => {
+      const attachments = normalizeMessageAttachments(message);
+      const actions = normalizeMessageActions(message);
+      return {
+        id: String(message.id || '').trim(),
+        side: message.role === 'user' ? 'self' : 'other',
+        text: normalizeMessageContent(message.content),
+        attachments,
+        actions,
+        runtime: message.runtime || null,
+      };
+    })
+    .filter((message) => message.text || message.attachments.length || message.actions.length);
 }
 
 function mapWorldbookEntriesToFrontendWorldbook(entries) {
@@ -255,13 +317,15 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
     .map((item) => ({
       side: 'self',
       text: String(item?.text || '').trim(),
+      attachments: normalizeAttachmentList(item?.attachmentMetas || []),
+      actions: [],
       pending: true,
       pendingId: item?.id || '',
     }))
-    .filter((message) => message.text);
-  const latestMessageText = chatMessages.at(-1)?.text || cleanThreadSummary(thread?.summary);
-  const previousDescription = String(previousChat?.description || '').trim();
+    .filter((message) => message.text || message.attachments.length);
   const threadSummary = cleanThreadSummary(thread?.summary);
+  const latestMessageText = threadSummary || chatMessages.at(-1)?.text || (chatMessages.at(-1)?.attachments?.length ? '[附件]' : '');
+  const previousDescription = String(previousChat?.description || '').trim();
   const fallbackDescription = previousDescription && previousDescription !== latestMessageText && previousDescription !== threadSummary
     ? previousDescription
     : '这个联系人正在通过 SmallPhone 后端提供回复。';
@@ -469,7 +533,8 @@ async function loadThreadMessages(threadId, { force = false } = {}) {
   const messages = await requestBackend(`/threads/${encodeURIComponent(key)}/messages`);
   chat.messages = mapMessagesToChatMessages(messages);
   if (chat.messages.length) {
-    chat.summary = chat.messages.at(-1).text;
+    const last = chat.messages.at(-1);
+    chat.summary = last.text || (last.attachments?.length ? '[附件]' : chat.summary);
   }
   saveState();
   return chat.messages;
@@ -490,6 +555,7 @@ async function syncCharacterEdits(threadId, chat) {
     threadSummary: chat.summary || chat.description || chat.name,
     roleLevel: normalizeRoleLevel(chat.roleLevel),
     agentType: normalizeAgentType(chat.agentType),
+    agentMode: normalizeAgentPermissionMode(chat.agentMode, chat.agentType),
   };
   if (chat.backend?.relationship) payload.relationship = chat.backend.relationship;
   if (chat.backend?.relationshipState?.state) {
@@ -536,6 +602,7 @@ function buildCompanionPayload(chat) {
     threadSummary: chat.summary || chat.description || chat.name,
     roleLevel: normalizeRoleLevel(chat.roleLevel),
     agentType: normalizeAgentType(chat.agentType),
+    agentMode: normalizeAgentPermissionMode(chat.agentMode, chat.agentType),
   };
 }
 
@@ -588,8 +655,9 @@ async function syncWorldbookEntry(entry) {
 }
 
 async function loadActivePermissions({ force = false } = {}) {
-  const chat = getActiveChat();
-  const threadId = String(chat?.backend?.threadId || uiState.activeChatKey || '').trim();
+  const targetKey = resolvePermissionTargetChatKey();
+  const chat = getPermissionTargetChat();
+  const threadId = String(chat?.backend?.threadId || targetKey || '').trim();
   if (!backendEnabled || !threadId) {
     uiState.permissionSnapshot = null;
     return null;
@@ -602,17 +670,76 @@ async function loadActivePermissions({ force = false } = {}) {
   return uiState.permissionSnapshot;
 }
 
-async function saveActivePermissionTemplate(template) {
-  const chat = getActiveChat();
-  const threadId = String(chat?.backend?.threadId || uiState.activeChatKey || '').trim();
-  if (!backendEnabled || !threadId || !template) return;
+async function saveActivePermissionMode(agentMode) {
+  const targetKey = resolvePermissionTargetChatKey();
+  const chat = getPermissionTargetChat();
+  const threadId = String(chat?.backend?.threadId || targetKey || '').trim();
+  if (!backendEnabled || !threadId || !agentMode) return;
   const snapshot = await requestBackend(`/threads/${encodeURIComponent(threadId)}/permissions`, {
     method: 'POST',
-    body: JSON.stringify({ template }),
+    body: JSON.stringify({ agentMode, rules: uiState.permissionSnapshot?.rules || {} }),
   });
   uiState.permissionSnapshot = { ...snapshot, threadId };
+  if (chat) chat.agentMode = snapshot.agentMode || agentMode;
   await refreshBackendState(threadId);
   renderAll();
+}
+
+function getAgentModeOptions(agentType) {
+  if (normalizeAgentType(agentType) === 'claudecode') {
+    return [
+      { key: 'default', label: '默认 · 每次工具调用确认' },
+      { key: 'acceptEdits', label: '接受编辑 · 自动允许文件编辑' },
+      { key: 'plan', label: '计划模式 · 只规划不执行' },
+      { key: 'auto', label: '自动模式 · Claude 判断何时确认' },
+      { key: 'bypassPermissions', label: 'YOLO · 全部自动通过' },
+      { key: 'dontAsk', label: '静默拒绝 · 未授权工具自动拒绝' },
+    ];
+  }
+  return [
+    { key: 'suggest', label: '建议 · 每次工具调用确认' },
+    { key: 'auto-edit', label: '自动编辑 · 文件编辑自动通过' },
+    { key: 'full-auto', label: '全自动 · 工作区沙箱内自动通过' },
+    { key: 'yolo', label: 'YOLO · 跳过审批和沙箱' },
+  ];
+}
+
+function normalizeRuntimeModeOptions(modes) {
+  if (!Array.isArray(modes) || !modes.length) return null;
+  return modes
+    .map((mode) => {
+      const key = String(mode?.key || '').trim();
+      if (!key) return null;
+      const name = mode.nameZh || mode.name || key;
+      const description = mode.descriptionZh || mode.description || mode.descZh || mode.desc || '';
+      return { key, label: description ? `${name} · ${description}` : name };
+    })
+    .filter(Boolean);
+}
+
+function normalizeAgentPermissionMode(value, agentType) {
+  const modes = getAgentModeOptions(agentType);
+  const raw = String(value || '').trim();
+  const normalized = raw.toLowerCase().replace(/[\s_]+/g, '-');
+  const aliases = {
+    autoedit: 'auto-edit',
+    fullauto: 'full-auto',
+    bypasspermissions: 'bypassPermissions',
+    bypass: 'bypassPermissions',
+    yolo: normalizeAgentType(agentType) === 'claudecode' ? 'bypassPermissions' : 'yolo',
+  };
+  const candidate = aliases[normalized.replaceAll('-', '')] || aliases[normalized] || raw;
+  const found = modes.find((mode) => mode.key === candidate || mode.key.toLowerCase() === normalized);
+  return found?.key || modes[0]?.key || '';
+}
+
+function renderAgentModeSelect(selectedMode = '', agentType = '', runtimeModes = null) {
+  if (!dom.characterAgentModeSelect) return;
+  const modes = normalizeRuntimeModeOptions(runtimeModes) || getAgentModeOptions(agentType);
+  const selected = selectedMode || modes[0]?.key || '';
+  dom.characterAgentModeSelect.innerHTML = modes
+    .map((mode) => `<option value="${escapeHtml(mode.key)}" ${mode.key === selected ? 'selected' : ''}>${escapeHtml(mode.label)}</option>`)
+    .join('');
 }
 
 function queueStateSync(statusMessage = '') {
@@ -662,6 +789,18 @@ function getActiveChat() {
   return preferredKey ? state.chats[preferredKey] : null;
 }
 
+function resolvePermissionTargetChatKey() {
+  const preferred = uiState.permissionTargetChatKey || uiState.activeChatKey;
+  const key = resolvePreferredChatKey(state.chats, preferred);
+  uiState.permissionTargetChatKey = key;
+  return key;
+}
+
+function getPermissionTargetChat() {
+  const key = resolvePermissionTargetChatKey();
+  return key ? state.chats[key] : null;
+}
+
 function getFallbackChat() {
   return getActiveChat() || getChatEntries()[0]?.[1] || null;
 }
@@ -700,6 +839,38 @@ function getStreamingMessage(chat) {
   return chat.messages.find((message) => message.streaming === true) || null;
 }
 
+function upsertHydratedChatMessage(threadId, rawMessage) {
+  const key = String(threadId || rawMessage?.threadId || '').trim();
+  if (!key || !state.chats?.[key]) return;
+  const mapped = mapMessagesToChatMessages([rawMessage])[0];
+  if (!mapped) return;
+  const chat = state.chats[key];
+  const existingIndex = mapped.id
+    ? chat.messages.findIndex((message) => message.id && message.id === mapped.id)
+    : -1;
+  if (existingIndex >= 0) {
+    chat.messages[existingIndex] = mapped;
+  } else {
+    const pendingIndex = mapped.side === 'self'
+      ? chat.messages.findIndex((message) => message.pending && message.text === mapped.text)
+      : -1;
+    const streamingIndex = mapped.side === 'other'
+      ? chat.messages.findIndex((message) => message.streaming)
+      : -1;
+    const replaceIndex = pendingIndex >= 0 ? pendingIndex : streamingIndex;
+    if (replaceIndex >= 0) {
+      chat.messages[replaceIndex] = mapped;
+    } else {
+      chat.messages.push(mapped);
+    }
+  }
+  chat.summary = mapped.text || (mapped.attachments?.length ? '[附件]' : chat.summary);
+  chat.time = '刚刚';
+  saveState();
+  if (uiState.activeChatKey === key) renderChat();
+  renderMessages();
+}
+
 function updateStreamingAssistant(threadId, content, done = false) {
   const key = String(threadId || '').trim();
   const text = String(content || '').trim();
@@ -729,7 +900,16 @@ function updateStreamingAssistant(threadId, content, done = false) {
 
 function handleThreadStreamEvent(event) {
   const type = String(event?.type || '').trim();
-  if (type === 'assistant.stream' || type === 'assistant.done' || type === 'assistant.persisted') {
+  if (type === 'user.message' && event.message) {
+    upsertHydratedChatMessage(event.threadId, event.message);
+    return;
+  }
+  if (type === 'assistant.persisted' && event.message) {
+    upsertHydratedChatMessage(event.threadId, event.message);
+    setChatStatus('回复已落库。');
+    return;
+  }
+  if (type === 'assistant.stream' || type === 'assistant.done') {
     updateStreamingAssistant(event.threadId, event.content || event.text, type !== 'assistant.stream');
     if (type === 'assistant.stream') {
       setChatStatus('正在实时接收回复...');
@@ -749,7 +929,7 @@ async function openChat(chatKey) {
   saveState();
   if (backendEnabled) {
     try {
-      await loadThreadMessages(key);
+      await loadThreadMessages(key, { force: true });
     } catch {}
     subscribeThreadEvents(key);
   }
@@ -867,32 +1047,139 @@ function getPendingTexts(chat) {
     .filter(Boolean);
 }
 
+function getPendingAttachmentIds(chat) {
+  return getPendingOutbox(chat)
+    .flatMap((item) => Array.isArray(item?.attachments) ? item.attachments : [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
+function formatBytes(size) {
+  const value = Number(size);
+  if (!Number.isFinite(value) || value <= 0) return '未知大小';
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function attachmentDownloadUrl(attachment) {
+  const raw = String(attachment?.downloadUrl || attachment?.url || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('/apps/') || raw.startsWith('/attachments/')) {
+    return `${backendBase}/webclient-attachments?url=${encodeURIComponent(raw)}`;
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    return raw.includes('/attachments/') || raw.includes('/apps/')
+      ? `${backendBase}/webclient-attachments?url=${encodeURIComponent(raw)}`
+      : raw;
+  }
+  if (raw.startsWith('/')) return `${backendBase}${raw.startsWith('/api/') ? raw.slice(4) : raw}`;
+  return raw;
+}
+
+function renderAttachmentStrip() {
+  if (!dom.attachmentStrip) return;
+  const items = Array.isArray(uiState.pendingAttachments) ? uiState.pendingAttachments : [];
+  dom.attachmentStrip.innerHTML = items.map((item) => `
+    <button class="attachment-chip" type="button" data-remove-attachment="${escapeHtml(item.id)}">
+      <span>${escapeHtml(item.kind === 'image' ? '图片' : '文件')}</span>
+      <strong>${escapeHtml(item.fileName || 'attachment')}</strong>
+      <em>${escapeHtml(formatBytes(item.size))}</em>
+    </button>
+  `).join('');
+  dom.attachmentStrip.querySelectorAll('[data-remove-attachment]').forEach((button) => {
+    button.addEventListener('click', () => {
+      uiState.pendingAttachments = items.filter((item) => item.id !== button.dataset.removeAttachment);
+      renderAttachmentStrip();
+      updateMagicWandState();
+    });
+  });
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('读取附件失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadChatAttachments(files) {
+  const chat = getActiveChat();
+  const threadId = String(chat?.backend?.threadId || uiState.activeChatKey || '').trim();
+  if (!backendEnabled || !threadId) throw new Error('附件需要连接 smallphone-app 后端。');
+  const list = Array.from(files || []);
+  for (const file of list) {
+    const data = await fileToBase64(file);
+    const created = await requestBackend('/attachments', {
+      method: 'POST',
+      body: JSON.stringify({
+        threadId,
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        data,
+      }),
+    });
+    uiState.pendingAttachments.push(created);
+  }
+  renderAttachmentStrip();
+  updateMagicWandState();
+}
+
 function updateMagicWandState() {
   if (!dom.magicWandButton) return;
-  const count = getPendingTexts(getActiveChat()).length;
+  const chat = getActiveChat();
+  const textCount = getPendingTexts(chat).length;
+  const attachmentCount = getPendingAttachmentIds(chat).length + (Array.isArray(uiState.pendingAttachments) ? uiState.pendingAttachments.length : 0);
+  const count = textCount + attachmentCount;
   dom.magicWandButton.classList.toggle('magic-wand-ready', count > 0);
   dom.magicWandButton.disabled = uiState.isGenerating || count === 0;
   dom.magicWandButton.title = count > 0
-    ? `魔法棒：送 ${count} 条到后端`
+    ? `魔法棒：送 ${textCount} 条消息 / ${attachmentCount} 个附件到后端`
     : '魔法棒：没有待送消息';
 }
 
 function queueLocalUserMessage(chat, text) {
+  const attachmentMetas = Array.isArray(uiState.pendingAttachments) ? [...uiState.pendingAttachments] : [];
+  const attachmentIds = attachmentMetas.map((item) => String(item.id || '').trim()).filter(Boolean);
+  const cleanText = String(text || '').trim();
+  if (!cleanText && !attachmentIds.length) return null;
   const pendingItem = {
     id: `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    text,
+    text: cleanText,
+    attachments: attachmentIds,
+    attachmentMetas,
   };
   getPendingOutbox(chat).push(pendingItem);
-  chat.messages.push({ side: 'self', text, pending: true, pendingId: pendingItem.id });
-  chat.summary = text;
+  chat.messages.push({
+    side: 'self',
+    text: cleanText,
+    attachments: attachmentMetas,
+    actions: [],
+    pending: true,
+    pendingId: pendingItem.id,
+  });
+  uiState.pendingAttachments = [];
+  chat.summary = cleanText || (attachmentIds.length ? '[附件]' : chat.summary);
   chat.time = '刚刚';
+  renderAttachmentStrip();
+  return pendingItem;
 }
 
 async function flushPendingOutbox() {
   const chat = getActiveChat();
   if (!chat || uiState.isGenerating) return;
+  if (!getPendingOutbox(chat).length && Array.isArray(uiState.pendingAttachments) && uiState.pendingAttachments.length) {
+    queueLocalUserMessage(chat, '');
+  }
   const pendingTexts = getPendingTexts(chat);
-  if (!pendingTexts.length) {
+  const pendingAttachmentIds = getPendingAttachmentIds(chat);
+  if (!pendingTexts.length && !pendingAttachmentIds.length) {
     setChatStatus('没有待送消息。');
     updateMagicWandState();
     return;
@@ -910,10 +1197,10 @@ async function flushPendingOutbox() {
       if (!threadId) throw new Error('当前聊天缺少 thread id，无法发送。');
 
       subscribeThreadEvents(threadId);
-      setChatStatus(`正在把 ${pendingTexts.length} 条待送消息交给 smallphone-app...`);
+      setChatStatus(`正在把 ${pendingTexts.length} 条待送消息 / ${pendingAttachmentIds.length} 个附件交给 smallphone-app...`);
       await requestBackend(`/threads/${encodeURIComponent(threadId)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ text: batchText }),
+        body: JSON.stringify({ text: batchText, attachments: pendingAttachmentIds }),
       });
       chat.pendingOutbox = [];
       saveState();
@@ -1357,6 +1644,63 @@ function renderCharacterHighlight() {
   });
 }
 
+function renderMessageAttachments(message) {
+  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+  if (!attachments.length) return '';
+  return `<div class="bubble-attachments">${attachments.map((attachment) => {
+    const url = attachmentDownloadUrl(attachment);
+    const label = escapeHtml(attachment.fileName || 'attachment');
+    const mime = String(attachment.mimeType || '').toLowerCase();
+    const isImage = attachment.kind === 'image' || mime.startsWith('image/');
+    if (isImage && url) {
+      return `<a class="bubble-image-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><img class="bubble-image" src="${escapeHtml(url)}" alt="${label}"></a>`;
+    }
+    return `<a class="bubble-file" href="${escapeHtml(url || '#')}" target="_blank" rel="noreferrer"><span>${isImage ? '图片' : '文件'}</span><strong>${label}</strong><em>${escapeHtml(formatBytes(attachment.size))}</em></a>`;
+  }).join('')}</div>`;
+}
+
+function renderMessageActions(message) {
+  const actions = Array.isArray(message?.actions) ? message.actions : [];
+  if (!actions.length) return '';
+  return `<div class="approval-card"><p>需要操作确认</p><div class="approval-actions">${actions.map((action) => `
+    <button type="button" data-thread-action="${escapeHtml(action.action)}" data-reply-ctx="${escapeHtml(action.replyCtx || '')}">${escapeHtml(action.label || action.action)}</button>
+  `).join('')}</div></div>`;
+}
+
+function bindMessageActions(container) {
+  container.querySelectorAll('[data-thread-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      void submitThreadAction(button.dataset.threadAction || '', button.dataset.replyCtx || '');
+    });
+  });
+}
+
+async function submitThreadAction(action, replyCtx = '') {
+  const chat = getActiveChat();
+  const threadId = String(chat?.backend?.threadId || uiState.activeChatKey || '').trim();
+  if (!backendEnabled || !threadId || !action) return;
+  uiState.isGenerating = true;
+  updateMagicWandState();
+  try {
+    setChatStatus('正在提交命令审批...');
+    await requestBackend(`/threads/${encodeURIComponent(threadId)}/actions`, {
+      method: 'POST',
+      body: JSON.stringify({ action, replyCtx }),
+    });
+    setChatStatus('审批已提交，正在刷新会话。');
+    window.setTimeout(() => {
+      loadThreadMessages(threadId, { force: true })
+        .then(() => renderAll())
+        .catch((error) => setChatStatus(error instanceof Error ? error.message : '审批后刷新失败', true));
+    }, 1200);
+  } catch (error) {
+    setChatStatus(error instanceof Error ? error.message : '审批提交失败', true);
+  } finally {
+    uiState.isGenerating = false;
+    updateMagicWandState();
+  }
+}
+
 function renderChat() {
   const chat = getActiveChat();
   if (!chat) {
@@ -1364,6 +1708,7 @@ function renderChat() {
     dom.chatSubtitle.textContent = '';
     dom.chatThread.innerHTML = '';
     updatePromptPreview();
+    renderAttachmentStrip();
     return;
   }
   dom.chatTitle.textContent = chat.name;
@@ -1373,11 +1718,17 @@ function renderChat() {
   chat.messages.forEach((message) => {
     const bubble = document.createElement('div');
     bubble.className = `bubble bubble-${message.side}${message.pending ? ' bubble-pending' : ''}${message.streaming ? ' bubble-streaming' : ''}`;
-    bubble.textContent = message.text;
+    bubble.innerHTML = [
+      message.text ? `<div class="bubble-text">${escapeHtml(message.text).replaceAll('\n', '<br>')}</div>` : '',
+      renderMessageAttachments(message),
+      renderMessageActions(message),
+    ].filter(Boolean).join('');
+    bindMessageActions(bubble);
     dom.chatThread.appendChild(bubble);
   });
 
   updatePromptPreview();
+  renderAttachmentStrip();
   updateMagicWandState();
 
   requestAnimationFrame(() => {
@@ -1558,6 +1909,14 @@ function renderCharacterEditor() {
   dom.characterDescriptionInput.value = chat.description;
   if (dom.characterRoleLevelSelect) dom.characterRoleLevelSelect.value = normalizeRoleLevel(chat.roleLevel);
   if (dom.characterAgentTypeSelect) dom.characterAgentTypeSelect.value = normalizeAgentType(chat.agentType);
+  const permissionSnapshot = uiState.permissionSnapshot?.threadId === (chat.backend?.threadId || uiState.editingCharacterKey)
+    ? uiState.permissionSnapshot
+    : null;
+  renderAgentModeSelect(
+    permissionSnapshot?.agentMode || chat.agentMode || chat.backend?.permissionPolicy?.agentMode || '',
+    permissionSnapshot?.agentType || chat.agentType,
+    permissionSnapshot?.agentCapabilities?.modes,
+  );
   dom.characterSubtitleInput.value = chat.subtitle;
   dom.characterSummaryInput.value = chat.summary;
   dom.characterPersonalityInput.value = chat.personality || '';
@@ -1571,9 +1930,42 @@ function renderCharacterEditor() {
   }
 }
 
+dom.characterAgentTypeSelect?.addEventListener('change', () => {
+  const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
+  renderAgentModeSelect('', dom.characterAgentTypeSelect.value || chat?.agentType || 'codex');
+});
+
+dom.permissionContactSelect?.addEventListener('change', () => {
+  uiState.permissionTargetChatKey = dom.permissionContactSelect.value;
+  uiState.permissionSnapshot = null;
+  renderPermissionPanel();
+  loadActivePermissions({ force: true })
+    .then(() => renderPermissionPanel())
+    .catch((error) => {
+      uiState.permissionSnapshot = null;
+      renderPermissionPanel(error instanceof Error ? error.message : String(error));
+    });
+});
+
+function renderPermissionContactSelect() {
+  if (!dom.permissionContactSelect) return;
+  const selectedKey = resolvePermissionTargetChatKey();
+  dom.permissionContactSelect.innerHTML = getChatEntries()
+    .map(([key, chat]) => {
+      const threadId = String(chat?.backend?.threadId || key || '').trim();
+      const label = chat?.name || key;
+      const project = chat?.backend?.runtimeProject || chat?.backend?.project || threadId;
+      return `<option value="${escapeHtml(key)}" ${key === selectedKey ? 'selected' : ''}>${escapeHtml(label)} · ${escapeHtml(project)}</option>`;
+    })
+    .join('');
+}
+
+
 function renderPermissionPanel(errorMessage = '') {
+  renderPermissionContactSelect();
   if (!dom.permissionTemplateGrid || !dom.permissionDecisionStack) return;
-  const chat = getActiveChat();
+  const targetKey = resolvePermissionTargetChatKey();
+  const chat = getPermissionTargetChat();
   const snapshot = uiState.permissionSnapshot;
   if (!backendEnabled) {
     dom.permissionPanelSummary.textContent = '当前为本地前端模式，权限需要连接 smallphone-app 后端。';
@@ -1597,34 +1989,31 @@ function renderPermissionPanel(errorMessage = '') {
     return;
   }
 
-  const templates = snapshot.templates || {};
-  const currentTemplate = snapshot.template || 'safe';
-  const labels = {
-    safe: ['安全模式', '只允许聊天，项目上下文和工具默认关闭。'],
-    assist: ['协助模式', '允许读取上下文和只读工具，写入与命令保持确认。'],
-    developer: ['开发模式', '适合主人开发使用，写入和命令仍保持谨慎。'],
-    trusted: ['完全信任', '全部权限放行，只适合私有可信联系人。'],
-  };
-  dom.permissionPanelSummary.textContent = `${snapshot.contactName || chat.name} · ${snapshot.appId || 'chat'} · ${snapshot.contactId || ''}`;
-  dom.permissionPanelSource.textContent = snapshot.evaluation?.remote_error
-    ? 'local fallback'
-    : snapshot.configured
-      ? 'cc-connect'
-      : 'local';
-  dom.permissionTemplateGrid.innerHTML = Object.keys(templates)
-    .map((template) => {
-      const [title, description] = labels[template] || [template, ''];
+  const capabilities = snapshot.agentCapabilities || {};
+  const modes = normalizeRuntimeModeOptions(capabilities.modes) || getAgentModeOptions(snapshot.agentType || chat.agentType);
+  const currentMode = snapshot.agentMode || chat.agentMode || modes[0]?.key || '';
+  dom.permissionPanelSummary.textContent = `${snapshot.contactName || chat.name} · agent=${snapshot.agentType || chat.agentType || 'codex'} · project=${snapshot.runtimeProject || snapshot.project || ''}`;
+  dom.permissionPanelSource.textContent = capabilities.source === 'cc-connect-project'
+    ? 'cc-connect project'
+    : snapshot.evaluation?.remote_error
+      ? 'local fallback'
+      : snapshot.configured
+        ? 'cc-connect'
+        : 'local';
+  dom.permissionTemplateGrid.innerHTML = modes
+    .map((mode) => {
+      const [title, description] = String(mode.label || mode.key).split(' · ');
       return `
-        <button class="permission-mode ${template === currentTemplate ? 'permission-mode-active' : ''}" data-permission-template="${escapeHtml(template)}" type="button">
+        <button class="permission-mode ${mode.key === currentMode ? 'permission-mode-active' : ''}" data-permission-mode="${escapeHtml(mode.key)}" type="button">
           <strong>${escapeHtml(title)}</strong>
-          <span>${escapeHtml(description)}</span>
+          <span>${escapeHtml(description || '')}</span>
         </button>
       `;
     })
     .join('');
-  dom.permissionTemplateGrid.querySelectorAll('[data-permission-template]').forEach((button) => {
+  dom.permissionTemplateGrid.querySelectorAll('[data-permission-mode]').forEach((button) => {
     button.addEventListener('click', () => {
-      saveActivePermissionTemplate(button.dataset.permissionTemplate).catch((error) => {
+      saveActivePermissionMode(button.dataset.permissionMode).catch((error) => {
         renderPermissionPanel(error instanceof Error ? error.message : String(error));
       });
     });
@@ -1945,6 +2334,27 @@ dom.continueGenerateButton.addEventListener('click', () => {
   generateAssistantReply('', { continueOnly: true });
 });
 
+if (dom.attachmentButton) {
+  dom.attachmentButton.addEventListener('click', () => {
+    if (!backendEnabled) {
+      setChatStatus('附件需要连接 smallphone-app 后端。', true);
+      return;
+    }
+    dom.chatAttachmentInput?.click();
+  });
+}
+
+if (dom.chatAttachmentInput) {
+  dom.chatAttachmentInput.addEventListener('change', () => {
+    const files = dom.chatAttachmentInput.files;
+    dom.chatAttachmentInput.value = '';
+    if (!files?.length) return;
+    uploadChatAttachments(files).catch((error) => {
+      setChatStatus(error instanceof Error ? error.message : '附件上传失败', true);
+    });
+  });
+}
+
 if (dom.magicWandButton) {
   dom.magicWandButton.addEventListener('click', () => {
     void flushPendingOutbox();
@@ -1954,13 +2364,14 @@ if (dom.magicWandButton) {
 dom.chatForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const value = dom.chatInput.value.trim();
-  if (!value) return;
+  const hasAttachments = Array.isArray(uiState.pendingAttachments) && uiState.pendingAttachments.length > 0;
+  if (!value && !hasAttachments) return;
 
   const chat = getActiveChat();
   if (!chat) return;
   queueLocalUserMessage(chat, value);
 
-  if (state.memories.length < 12) {
+  if (value && state.memories.length < 12) {
     state.memories.unshift({
       title: '聊天碎片',
       text: value,
@@ -2066,6 +2477,7 @@ dom.characterForm.addEventListener('submit', async (event) => {
   chat.avatarText = chat.name.slice(0, 1) || chat.avatarText || '新';
   chat.roleLevel = normalizeRoleLevel(dom.characterRoleLevelSelect?.value || chat.roleLevel);
   chat.agentType = normalizeAgentType(dom.characterAgentTypeSelect?.value || chat.agentType);
+  chat.agentMode = normalizeAgentPermissionMode(dom.characterAgentModeSelect?.value || chat.agentMode, chat.agentType);
   chat.subtitle = dom.characterSubtitleInput.value.trim() || chat.subtitle;
   chat.summary = dom.characterSummaryInput.value.trim() || chat.summary;
   chat.personality = dom.characterPersonalityInput.value.trim();

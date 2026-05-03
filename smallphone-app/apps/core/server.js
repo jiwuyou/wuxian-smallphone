@@ -121,12 +121,23 @@ async function handleApi(req, res, url) {
   const method = req.method || "GET";
 
   if (method === "GET" && url.pathname === "/api/bootstrap") {
-    return sendJson(res, 200, service.bootstrap());
+    return sendJson(res, 200, await service.bootstrapHydrated());
   }
   if (method === "POST" && url.pathname === "/api/attachments") {
     const body = await readJsonWithLimit(req, ATTACHMENT_UPLOAD_MAX_JSON_BYTES);
     const created = service.createAttachment(body);
     return sendJson(res, 200, created);
+  }
+  if (method === "GET" && url.pathname === "/api/webclient-attachments") {
+    const rawUrl = url.searchParams.get("url") || "";
+    const download = await service.openWebclientAttachmentDownload(rawUrl);
+    return serveProxiedAttachment(res, download);
+  }
+  const workspaceAttachmentMatch = url.pathname.match(/^\/api\/workspace-attachments\/([^/]+)$/);
+  if (workspaceAttachmentMatch && method === "GET") {
+    const rawPath = url.searchParams.get("path") || "";
+    const download = service.openWorkspaceAttachmentDownload(rawPath, workspaceAttachmentMatch[1]);
+    return serveWorkspaceAttachment(res, download);
   }
   const attachmentDetailMatch = url.pathname.match(/^\/api\/attachments\/([^/]+)$/);
   if (attachmentDetailMatch && method === "GET") {
@@ -142,19 +153,19 @@ async function handleApi(req, res, url) {
     return;
   }
   if (method === "GET" && url.pathname === "/api/contacts") {
-    return sendJson(res, 200, service.listContacts());
+    return sendJson(res, 200, await service.listContactsHydrated());
   }
   if (method === "GET" && url.pathname === "/api/openclaw/agents") {
     return sendJson(res, 200, service.exportOpenClawAgentRegistry());
   }
   if (method === "POST" && url.pathname === "/api/companions") {
     const body = await readJson(req);
-    return sendJson(res, 200, service.createCompanion(body));
+    return sendJson(res, 200, await service.createCompanion(body));
   }
   const companionDetailMatch = url.pathname.match(/^\/api\/companions\/([^/]+)$/);
   if (companionDetailMatch && (method === "PUT" || method === "PATCH")) {
     const body = await readJson(req);
-    return sendJson(res, 200, service.updateCompanion(companionDetailMatch[1], body));
+    return sendJson(res, 200, await service.updateCompanion(companionDetailMatch[1], body));
   }
   const companionArchiveMatch = url.pathname.match(/^\/api\/companions\/([^/]+)\/archive$/);
   if (companionArchiveMatch && method === "POST") {
@@ -164,7 +175,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, service.deleteCompanion(companionDetailMatch[1]));
   }
   if (method === "GET" && url.pathname === "/api/threads") {
-    return sendJson(res, 200, service.listThreads());
+    return sendJson(res, 200, await service.listThreadsHydrated());
   }
   if (method === "GET" && url.pathname === "/api/reminders") {
     return sendJson(res, 200, service.listReminders());
@@ -230,11 +241,18 @@ async function handleApi(req, res, url) {
 
   const threadMessageMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/messages$/);
   if (threadMessageMatch && method === "GET") {
-    return sendJson(res, 200, service.getMessages(threadMessageMatch[1]));
+    return sendJson(res, 200, await service.getThreadMessages(threadMessageMatch[1]));
   }
   if (threadMessageMatch && method === "POST") {
     const body = await readJson(req);
     const result = await service.sendMessage(threadMessageMatch[1], body);
+    return sendJson(res, 200, result);
+  }
+
+  const threadActionMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/actions$/);
+  if (threadActionMatch && method === "POST") {
+    const body = await readJson(req);
+    const result = await service.sendThreadAction(threadActionMatch[1], body);
     return sendJson(res, 200, result);
   }
 
@@ -314,6 +332,30 @@ function serveLocalAttachment(res, download) {
   const disposition = mimeType.startsWith("image/") ? "inline" : "attachment";
   res.writeHead(200, {
     "content-type": mimeType,
+    "content-disposition": `${disposition}; filename=\"${fileName}\"`,
+  });
+  fs.createReadStream(filePath).pipe(res);
+}
+
+function serveWorkspaceAttachment(res, download) {
+  const filePath = path.resolve(download.localPath);
+  let stat;
+  try {
+    stat = fs.lstatSync(filePath);
+  } catch {
+    sendText(res, 404, "Not found");
+    return;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    sendText(res, 404, "Not found");
+    return;
+  }
+  const mimeType = String(download.mimeType || "").trim() || "application/octet-stream";
+  const fileName = sanitizeHeaderFileName(download.fileName || path.basename(filePath));
+  const disposition = mimeType.startsWith("image/") ? "inline" : "attachment";
+  res.writeHead(200, {
+    "content-type": mimeType,
+    "content-length": stat.size,
     "content-disposition": `${disposition}; filename=\"${fileName}\"`,
   });
   fs.createReadStream(filePath).pipe(res);

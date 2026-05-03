@@ -89,10 +89,11 @@
           <div class="panel-head permission-head">
             <div>
               <h2>权限</h2>
-              <div id="permission-summary" class="card-meta">当前联系人使用的 SmallPhone 权限模板。</div>
+              <div id="permission-summary" class="card-meta">当前联系人对应执行引擎的权限模式。</div>
             </div>
             <div id="permission-source-badge" class="runtime-badge">local</div>
           </div>
+          <div id="permission-agent-meta" class="permission-agent-meta"></div>
           <div id="permission-template-list" class="permission-template-list"></div>
           <div id="permission-decision-list" class="permission-decision-list"></div>
         </section>
@@ -116,6 +117,29 @@
           <textarea id="companion-worldbook-content" rows="4" placeholder="默认世界书内容"></textarea>
           <textarea id="companion-thread-summary" rows="3" placeholder="线程摘要"></textarea>
           <textarea id="companion-greeting" rows="3" placeholder="初始问候（仅创建时使用）"></textarea>
+          <section class="form-section">
+            <div class="form-section-title">执行引擎</div>
+            <div class="grid-two">
+              <label class="form-field">
+                <span>Agent</span>
+                <select id="companion-agent-type">
+                  <option value="codex">Codex</option>
+                  <option value="claudecode">Claude Code</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>角色级别</span>
+                <select id="companion-role-level">
+                  <option value="contact">联系人</option>
+                  <option value="admin">管理员</option>
+                </select>
+              </label>
+            </div>
+            <label class="form-field">
+              <span>权限模式</span>
+              <select id="companion-agent-mode"></select>
+            </label>
+          </section>
           <div class="grid-two">
             <input id="companion-trust" type="number" min="0" max="1" step="0.01" placeholder="trust" />
             <input id="companion-intimacy" type="number" min="0" max="1" step="0.01" placeholder="intimacy" />

@@ -226,6 +226,8 @@ export const uiState = {
   desktopTouchStartY: 0,
   isGenerating: false,
   permissionSnapshot: null,
+  permissionTargetChatKey: '',
+  pendingAttachments: [],
 };
 
 export function saveState() {

@@ -327,6 +327,28 @@ body {
   margin-bottom: 18px;
 }
 
+.permission-agent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.permission-agent-meta span {
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.54);
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.permission-agent-meta strong {
+  color: var(--ink);
+}
+
 .permission-template {
   display: grid;
   gap: 6px;
@@ -395,6 +417,16 @@ body {
   text-align: center;
 }
 
+.permission-level-select {
+  min-width: 112px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
 .message {
   max-width: 72%;
   padding: 14px 16px;
@@ -442,6 +474,26 @@ body {
   gap: 12px;
 }
 
+.form-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.form-section-title {
+  font-weight: 700;
+}
+
+.form-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .grid-two > * {
   flex: 1;
 }
@@ -476,12 +528,14 @@ body {
 
 textarea,
 input,
+select,
 button {
   font: inherit;
 }
 
 textarea,
-input {
+input,
+select {
   width: 100%;
   border: 0;
   background: white;

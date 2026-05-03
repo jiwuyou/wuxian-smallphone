@@ -799,6 +799,34 @@ body[data-theme="mint"] .ios-dock {
   margin-bottom: 14px;
 }
 
+.permission-contact-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.permission-contact-field span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.permission-contact-field select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  outline: none;
+}
+
+.permission-panel-summary {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .permission-panel-head p {
   margin: 0;
   color: var(--muted);
@@ -1269,6 +1297,147 @@ p {
 .bubble-streaming {
   opacity: 0.72;
   outline: 1px dashed rgba(111, 101, 138, 0.32);
+}
+
+.bubble-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.bubble-attachments {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bubble-image-link {
+  display: block;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.bubble-image {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  max-height: 260px;
+  object-fit: cover;
+}
+
+.bubble-file {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: center;
+  min-width: 180px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.bubble-file span {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.bubble-file strong,
+.attachment-chip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bubble-file em,
+.attachment-chip em {
+  color: currentColor;
+  font-size: 11px;
+  font-style: normal;
+  opacity: 0.68;
+}
+
+.approval-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(111, 101, 138, 0.18);
+}
+
+.approval-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.approval-actions button,
+.attachment-button {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.approval-actions button {
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: var(--surface-strong);
+  background: var(--primary);
+}
+
+.attachment-strip {
+  display: flex;
+  gap: 8px;
+  min-height: 0;
+  overflow-x: auto;
+}
+
+.attachment-strip:empty {
+  display: none;
+}
+
+.attachment-chip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1px 7px;
+  align-items: center;
+  max-width: 180px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 14px;
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.attachment-chip span {
+  grid-row: span 2;
+  font-size: 12px;
+}
+
+.attachment-button {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  color: var(--primary);
+  background: var(--primary-soft);
+  font-size: 22px;
+  line-height: 1;
 }
 
 .chat-tools {
