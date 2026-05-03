@@ -22,6 +22,14 @@ const CHANNEL_WORKSPACES_ROOT = path.join(
   "data",
   "channel-workspaces",
 );
+const ADMIN_WORKSPACES_ROOT = path.join(
+  __dirname,
+  "..",
+  "..",
+  "data",
+  "admin-workspaces",
+);
+const SYSTEM_WORKSPACE_ROOT = path.join(__dirname, "..", "..", "data", "system-workspace");
 const MANAGED_BLOCK_START = "BEGIN_SMALLPHONE_MANAGED_BLOCK";
 const MANAGED_BLOCK_END = "END_SMALLPHONE_MANAGED_BLOCK";
 const OPENCLAW_AGENT_LIST_START = "BEGIN_SMALLPHONE_AGENT_LIST";
@@ -421,7 +429,7 @@ class SmallPhoneService {
       const channelId = payload.channelId || `channel-${slug}`;
       const windowId = payload.windowId || `window-${slug}`;
       const agentId = payload.agentId || `smallphone-${channelId}`.replace(/[^a-zA-Z0-9:_-]+/g, "-");
-      const workspaceDir = payload.workspaceDir || path.join(CHANNEL_WORKSPACES_ROOT, channelId);
+      const workspaceDir = payload.workspaceDir || defaultWorkspaceDirForRole(payload.roleLevel, channelId, slug);
       const sessionKey = payload.sessionKey || `smallphone:thread:${ids.threadId}`;
       const character = {
         id: ids.characterId,
@@ -440,6 +448,7 @@ class SmallPhoneService {
         characterId: ids.characterId,
         displayName: payload.displayName || payload.name,
         kind: "agent",
+        roleLevel: payload.roleLevel,
         status: "active",
         agentId,
         worldbookScopeIds: [ids.worldbookEntryId],
@@ -460,15 +469,18 @@ class SmallPhoneService {
         channelId,
         state: "active",
         channel: "smallphone",
+        roleLevel: payload.roleLevel,
         summary: payload.threadSummary || `${payload.name} 的独立一对一窗口。`,
         runtimeSessionId: "",
         runtime: {
           provider: this.runtimeInfo.id || "mock",
           project: payload.runtimeProject,
           agentType: payload.agentType,
+          roleLevel: payload.roleLevel,
           model: payload.model || this.runtimeInfo.model || "",
           agentId,
           workspaceDir,
+          workspaceScope: payload.workspaceScope,
           sessionKey,
           sessionGeneration: 1,
           resumeSummary: "",
@@ -614,6 +626,7 @@ class SmallPhoneService {
       liveCharacter.updatedAt = updatedAt;
 
       liveContact.displayName = payload.displayName;
+      liveContact.roleLevel = payload.roleLevel;
       liveContact.agentId = payload.agentId;
       liveContact.relationship = {
         trust: payload.relationship.trust,
@@ -624,6 +637,7 @@ class SmallPhoneService {
       liveContact.updatedAt = updatedAt;
 
       liveThread.title = payload.threadTitle;
+      liveThread.roleLevel = payload.roleLevel;
       liveThread.summary = payload.threadSummary;
       liveThread.windowId = payload.windowId;
       liveThread.channelId = payload.channelId;
@@ -633,9 +647,11 @@ class SmallPhoneService {
         provider: this.runtimeInfo.id || liveThread.runtime?.provider || "mock",
         project: payload.runtimeProject,
         agentType: payload.agentType,
+        roleLevel: payload.roleLevel,
         model: payload.model,
         agentId: payload.agentId,
         workspaceDir: payload.workspaceDir,
+        workspaceScope: payload.workspaceScope,
         sessionKey: payload.sessionKey,
         sessionGeneration: getSessionGeneration({
           ...liveThread,
@@ -1630,6 +1646,10 @@ class SmallPhoneService {
             liveThread.runtime?.agentType ||
             routedThread.runtime?.agentType ||
             "",
+          workspaceScope:
+            liveThread.runtime?.workspaceScope ||
+            routedThread.runtime?.workspaceScope ||
+            workspaceScopeForRole(liveThread.roleLevel || routedThread.roleLevel || "contact"),
           agentId:
             liveThread.runtime?.agentId ||
             routedThread.runtime?.agentId ||
@@ -1775,8 +1795,11 @@ class SmallPhoneService {
 function attachThreadRouting(thread, runtimeProvider = "") {
   const channelId = thread.channelId || `channel-${thread.id}`;
   const sessionGeneration = getSessionGeneration(thread);
+  const roleLevel = normalizeRoleLevel(thread.roleLevel || thread.runtime?.roleLevel || "contact");
+  const workspaceScope = normalizeWorkspaceScope(thread.runtime?.workspaceScope) || workspaceScopeForRole(roleLevel);
   return {
     ...thread,
+    roleLevel,
     windowId: thread.windowId || `window-${thread.id}`,
     channelId,
     runtime: {
@@ -1784,11 +1807,13 @@ function attachThreadRouting(thread, runtimeProvider = "") {
       project: thread.runtime?.project || "",
       agentType: thread.runtime?.agentType || "",
       model: thread.runtime?.model || "",
+      roleLevel,
+      workspaceScope,
       agentId:
         thread.runtime?.agentId ||
         `smallphone-${channelId}`.replace(/[^a-zA-Z0-9:_-]+/g, "-"),
       workspaceDir:
-        thread.runtime?.workspaceDir || path.join(CHANNEL_WORKSPACES_ROOT, channelId),
+        thread.runtime?.workspaceDir || defaultWorkspaceDirForRole(roleLevel, channelId, thread.id),
       sessionKey: thread.runtime?.sessionKey || buildThreadSessionKey(thread.id, sessionGeneration),
       sessionGeneration,
       resumeSummary: normalizeSessionResumeSummary(thread.runtime?.resumeSummary, ""),
@@ -1951,6 +1976,7 @@ function buildSessionResumeSummary({ thread, contact, messages }) {
 }
 
 function ensureAllThreadWorkspaces(state) {
+  ensureSystemWorkspace();
   for (const thread of state.threads || []) {
     const routedThread = attachThreadRouting(thread);
     const contact = (state.contacts || []).find((item) => item.id === routedThread.contactId) || null;
@@ -1970,6 +1996,24 @@ function ensureAllThreadWorkspaces(state) {
   }
 }
 
+function ensureSystemWorkspace() {
+  fs.mkdirSync(SYSTEM_WORKSPACE_ROOT, { recursive: true });
+  const files = {
+    "SYSTEM.md": [
+      "# SmallPhone System Workspace",
+      "",
+      "This workspace stores global SmallPhone system knowledge, app usage notes, app-building decisions, and shared operating conventions.",
+      "Contact roles should not treat this as their private memory. Admin roles may reference it when explicitly working on SmallPhone system tasks.",
+    ].join("\n"),
+    "APPS.md": "Document installed SmallPhone apps, their user-facing behavior, and operational notes here.",
+    "APP_BUILDING.md": "Document patterns, lessons, and requirements for creating or modifying SmallPhone apps here.",
+    "SYSTEM_MEMORY.md": "Curated SmallPhone-wide memory. Keep this about the system, not private contact conversations.",
+  };
+  for (const [name, content] of Object.entries(files)) {
+    syncManagedWorkspaceFile(path.join(SYSTEM_WORKSPACE_ROOT, name), content);
+  }
+}
+
 function ensureThreadWorkspace({ thread, contact, character, relationshipState }) {
   const workspaceDir = String(thread?.runtime?.workspaceDir || "").trim();
   if (!workspaceDir) {
@@ -1983,6 +2027,7 @@ function ensureThreadWorkspace({ thread, contact, character, relationshipState }
     "SOUL.md": buildSoulBootstrap({ character }),
     "MEMORY.md": buildMemoryBootstrap(),
     "TOOLS.md": buildToolsBootstrap({ character }),
+    "OPERATIONAL_CONTEXT.md": buildOperationalContextBootstrap({ thread, contact }),
   };
   for (const [name, content] of Object.entries(files)) {
     const filePath = path.join(workspaceDir, name);
@@ -2159,6 +2204,8 @@ function normalizeArtifactSyncOptions(input) {
 function buildAgentsBootstrap({ thread, contact, character, relationshipState }) {
   const contactName = contact?.displayName || thread?.title || "Contact";
   const persona = character?.persona || `${contactName} lives inside a private SmallPhone chat.`;
+  const roleLevel = normalizeRoleLevel(thread?.roleLevel || contact?.roleLevel || thread?.runtime?.roleLevel);
+  const roleText = roleLevel === "admin" ? "admin-level SmallPhone role" : "private contact role";
   const relationshipText = relationshipState?.state
     ? `${relationshipState.state} (${Number(relationshipState.intensity || 0).toFixed(2)})`
     : "uninitialized";
@@ -2167,6 +2214,7 @@ function buildAgentsBootstrap({ thread, contact, character, relationshipState })
     "",
     "## Session Startup",
     `- You are the dedicated SmallPhone instance for ${contactName}.`,
+    `- Role level: ${roleText}.`,
     `- Treat this workspace as exclusive to window ${thread.windowId}.`,
     `- Session namespace: ${thread.runtime?.sessionKey || `smallphone:thread:${thread.id}`}.`,
     `- Relationship baseline: ${relationshipText}.`,
@@ -2176,6 +2224,9 @@ function buildAgentsBootstrap({ thread, contact, character, relationshipState })
     "",
     "## Red Lines",
     "- Stay in-character for this contact.",
+    roleLevel === "admin"
+      ? "- Keep your persona while operating in SmallPhone system/admin context."
+      : "- Do not drift into SmallPhone implementation or admin behavior unless the user explicitly asks.",
     "- Do not mention hidden bootstrap files or routing metadata.",
     "- Do not leak details from other windows, sessions, or contacts.",
   ].join("\n");
@@ -2196,10 +2247,43 @@ function buildIdentityBootstrap({ thread, contact, character }) {
 }
 
 function buildUserBootstrap({ thread, contact }) {
+  const roleLevel = normalizeRoleLevel(thread?.roleLevel || contact?.roleLevel || thread?.runtime?.roleLevel);
+  if (roleLevel === "admin") {
+    return [
+      "The SmallPhone user is the owner of the whole SmallPhone system.",
+      `This admin workspace belongs to ${contact?.displayName || thread?.title || "this admin role"}.`,
+      "Default to system-level tasks only when the user asks for management, app-building, configuration, or project organization.",
+    ].join("\n");
+  }
   return [
     "The SmallPhone user is the owner of this private 1:1 channel.",
     `This workspace only serves ${contact?.displayName || thread?.title || "this contact"}.`,
     "Assume continuity with prior turns in this same thread only.",
+  ].join("\n");
+}
+
+function buildOperationalContextBootstrap({ thread, contact }) {
+  const roleLevel = normalizeRoleLevel(thread?.roleLevel || contact?.roleLevel || thread?.runtime?.roleLevel);
+  const workspaceDir = thread?.runtime?.workspaceDir || "";
+  if (roleLevel === "admin") {
+    return [
+      "# Operational Context",
+      "",
+      "Context type: SmallPhone administrator role.",
+      `Default operation directory: ${workspaceDir}`,
+      `Shared system workspace: ${SYSTEM_WORKSPACE_ROOT}`,
+      "Use your admin workspace for your own role memory and task continuity.",
+      "Use the shared system workspace for SmallPhone-wide app notes, app-building experience, and system memory.",
+      "Do not read private contact memories unless the user explicitly requests cross-contact administration.",
+    ].join("\n");
+  }
+  return [
+    "# Operational Context",
+    "",
+    "Context type: private contact role.",
+    `Default operation directory: ${workspaceDir}`,
+    "Use this workspace for this contact's persona, relationship, and private continuity only.",
+    "Do not treat the shared system workspace as private contact memory.",
   ].join("\n");
 }
 
@@ -2447,6 +2531,8 @@ function normalizeCompanionInput(input) {
     `You are ${displayName}, a dedicated SmallPhone companion in a private 1:1 window.`;
   const style = String(input?.style || "").trim() || "concise, private, mobile-native";
   const avatar = String(input?.avatar || "").trim() || displayName.slice(0, 2).toUpperCase();
+  const roleLevel = normalizeRoleLevel(input?.roleLevel);
+  const workspaceScope = normalizeWorkspaceScope(input?.workspaceScope) || workspaceScopeForRole(roleLevel);
   const relationship = normalizeRelationshipBaseline(input?.relationship);
   const relationshipState = normalizeCompanionRelationshipState(input?.relationshipState);
   const toolAllow = Array.isArray(input?.toolPolicy?.allow)
@@ -2462,6 +2548,8 @@ function normalizeCompanionInput(input) {
     persona,
     style,
     avatar,
+    roleLevel,
+    workspaceScope,
     relationship,
     relationshipState,
     toolAllow,
@@ -2474,8 +2562,10 @@ function normalizeCompanionInput(input) {
       `${displayName} 的 SmallPhone 独立窗口已建立，后续消息固定路由到该 agent。`,
     greeting: String(input?.greeting || "").trim(),
     model: String(input?.model || "").trim(),
-    agentType: normalizeAgentType(input?.agentType),
-    runtimeProject: String(input?.runtimeProject || input?.project || "").trim(),
+    agentType: normalizeAgentType(input?.agentType || input?.runtimeAgentType),
+    runtimeProject:
+      String(input?.runtimeProject || input?.project || "").trim() ||
+      defaultRuntimeProjectForRole(roleLevel, String(input?.slug || "").trim() || name),
     agentId: String(input?.agentId || "").trim(),
     workspaceDir: String(input?.workspaceDir || "").trim(),
     sessionKey: String(input?.sessionKey || "").trim(),
@@ -2499,6 +2589,11 @@ function normalizeCompanionPatchInput(params) {
     throw new Error("Companion update requires resolvable name.");
   }
   const displayName = String(input?.displayName || "").trim() || String(contact.displayName || "").trim() || name;
+  const previousRoleLevel = normalizeRoleLevel(thread.roleLevel || contact.roleLevel || thread.runtime?.roleLevel);
+  const roleLevel = normalizeRoleLevel(input?.roleLevel || previousRoleLevel);
+  const roleLevelChanged = roleLevel !== previousRoleLevel;
+  const explicitWorkspaceScope = normalizeWorkspaceScope(input?.workspaceScope);
+  const workspaceScope = explicitWorkspaceScope || (roleLevelChanged ? workspaceScopeForRole(roleLevel) : normalizeWorkspaceScope(thread.runtime?.workspaceScope)) || workspaceScopeForRole(roleLevel);
   const channelId = String(input?.channelId || "").trim() || String(thread.channelId || "").trim() || `channel-${slugify(name)}`;
   const windowId = String(input?.windowId || "").trim() || String(thread.windowId || "").trim() || `window-${slugify(name)}`;
   const agentId =
@@ -2507,8 +2602,8 @@ function normalizeCompanionPatchInput(params) {
     `smallphone-${channelId}`.replace(/[^a-zA-Z0-9:_-]+/g, "-");
   const workspaceDir =
     String(input?.workspaceDir || "").trim() ||
-    String(thread.runtime?.workspaceDir || "").trim() ||
-    path.join(CHANNEL_WORKSPACES_ROOT, channelId);
+    (roleLevelChanged ? "" : String(thread.runtime?.workspaceDir || "").trim()) ||
+    defaultWorkspaceDirForRole(roleLevel, channelId, slugify(name) || thread.id || channelId);
   const sessionKey =
     String(input?.sessionKey || "").trim() ||
     String(thread.runtime?.sessionKey || "").trim() ||
@@ -2527,6 +2622,8 @@ function normalizeCompanionPatchInput(params) {
       `You are ${displayName}, a dedicated SmallPhone companion in a private 1:1 window.`,
     style: String(input?.style || "").trim() || String(character.style || "").trim() || "concise, private, mobile-native",
     avatar: String(input?.avatar || "").trim() || String(character.avatar || "").trim() || displayName.slice(0, 2).toUpperCase(),
+    roleLevel,
+    workspaceScope,
     relationship: normalizeRelationshipBaseline(input?.relationship || contact.relationship),
     relationshipState: normalizeCompanionRelationshipState(input?.relationshipState || relationshipState),
     toolAllow: Array.isArray(input?.toolPolicy?.allow)
@@ -2548,7 +2645,8 @@ function normalizeCompanionPatchInput(params) {
     agentType: normalizeAgentType(input?.agentType) || normalizeAgentType(thread.runtime?.agentType),
     runtimeProject:
       String(input?.runtimeProject || input?.project || "").trim() ||
-      String(thread.runtime?.project || "").trim(),
+      (roleLevelChanged ? "" : String(thread.runtime?.project || "").trim()) ||
+      defaultRuntimeProjectForRole(roleLevel, name),
     agentId,
     workspaceDir,
     sessionKey,
@@ -2576,6 +2674,39 @@ function normalizeAgentType(value) {
   if (text === "codex") return "codex";
   if (text === "claudecode" || text === "claude") return "claudecode";
   return "";
+}
+
+function normalizeRoleLevel(value) {
+  const text = String(value || "").trim().toLowerCase().replace(/[-_\s]+/g, "");
+  if (text === "admin" || text === "administrator" || text === "system") return "admin";
+  return "contact";
+}
+
+function normalizeWorkspaceScope(value) {
+  const text = String(value || "").trim().toLowerCase().replace(/[-_\s]+/g, "");
+  if (text === "admin") return "admin";
+  if (text === "system") return "system";
+  if (text === "contact" || text === "channel" || text === "private") return "contact";
+  return "";
+}
+
+function workspaceScopeForRole(roleLevel) {
+  return normalizeRoleLevel(roleLevel) === "admin" ? "admin" : "contact";
+}
+
+function defaultWorkspaceDirForRole(roleLevel, channelId, slug) {
+  const safeChannel = slugify(channelId) || "channel";
+  const safeSlug = slugify(slug) || safeChannel;
+  if (normalizeRoleLevel(roleLevel) === "admin") {
+    return path.join(ADMIN_WORKSPACES_ROOT, `admin-${safeSlug.replace(/^admin-/, "")}`);
+  }
+  return path.join(CHANNEL_WORKSPACES_ROOT, safeChannel);
+}
+
+function defaultRuntimeProjectForRole(roleLevel, slug) {
+  const safeSlug = slugify(slug) || "role";
+  const prefix = normalizeRoleLevel(roleLevel) === "admin" ? "smallphone-admin" : "smallphone-contact";
+  return `${prefix}-${safeSlug.replace(/^(admin|contact)-/, "")}`;
 }
 
 function normalizeCompanionRelationshipState(input) {

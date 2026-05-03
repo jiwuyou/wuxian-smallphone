@@ -275,6 +275,8 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
     summary: latestMessageText,
     time: formatRelativeThreadTime(thread?.updatedAt),
     description: String(character?.persona || fallbackDescription).trim(),
+    roleLevel: normalizeRoleLevel(thread?.roleLevel || contact?.roleLevel || thread?.runtime?.roleLevel || previousChat?.roleLevel),
+    agentType: normalizeAgentType(thread?.runtime?.agentType || previousChat?.agentType),
     personality: String(character?.style || previousChat?.personality || '').trim(),
     scenario: String(relationshipState?.guidance?.join(' / ') || previousChat?.scenario || '').trim(),
     systemPrompt: String(scopedWorldbook?.content || previousChat?.systemPrompt || '').trim(),
@@ -287,8 +289,23 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
       relationshipState: relationshipState || null,
       toolPolicy: character?.toolPolicy || null,
       permissionPolicy: character?.permissionPolicy || null,
+      runtimeProject: thread?.runtime?.project || '',
+      workspaceDir: thread?.runtime?.workspaceDir || '',
+      workspaceScope: thread?.runtime?.workspaceScope || '',
     },
   };
+}
+
+function normalizeRoleLevel(value) {
+  const text = String(value || '').trim().toLowerCase().replace(/[-_\s]+/g, '');
+  return text === 'admin' || text === 'administrator' || text === 'system' ? 'admin' : 'contact';
+}
+
+function normalizeAgentType(value) {
+  const text = String(value || '').trim().toLowerCase().replace(/[-_\s]+/g, '');
+  if (text === 'codex') return 'codex';
+  if (text === 'claudecode' || text === 'claude') return 'claudecode';
+  return '';
 }
 
 function mapBootstrapToFrontendState(snapshot, previousState = state) {
@@ -430,6 +447,8 @@ async function syncCharacterEdits(threadId, chat) {
     persona: [chat.description, chat.scenario].filter(Boolean).join('\n\n') || chat.description || chat.name,
     worldbookContent: [chat.systemPrompt, chat.scenario, chat.description].filter(Boolean).join('\n\n') || chat.description || chat.name,
     threadSummary: chat.summary || chat.description || chat.name,
+    roleLevel: normalizeRoleLevel(chat.roleLevel),
+    agentType: normalizeAgentType(chat.agentType),
   };
   if (chat.backend?.relationship) payload.relationship = chat.backend.relationship;
   if (chat.backend?.relationshipState?.state) {
@@ -1439,6 +1458,8 @@ function renderCharacterEditor() {
   if (!chat) return;
   dom.characterNameInput.value = chat.name;
   dom.characterDescriptionInput.value = chat.description;
+  if (dom.characterRoleLevelSelect) dom.characterRoleLevelSelect.value = normalizeRoleLevel(chat.roleLevel);
+  if (dom.characterAgentTypeSelect) dom.characterAgentTypeSelect.value = normalizeAgentType(chat.agentType);
   dom.characterSubtitleInput.value = chat.subtitle;
   dom.characterSummaryInput.value = chat.summary;
   dom.characterPersonalityInput.value = chat.personality || '';
@@ -1579,6 +1600,8 @@ function importCharacter(payload) {
     summary: firstLine || description.slice(0, 34) || '已导入角色卡',
     time: '刚刚',
     description,
+    roleLevel: 'contact',
+    agentType: '',
     personality: String(data.personality || '').trim(),
     scenario: String(data.scenario || '').trim(),
     systemPrompt: String(data.system_prompt || data.systemPrompt || '').trim(),
@@ -1638,6 +1661,8 @@ function importChat(payload, mode) {
       summary: messages[messages.length - 1]?.text || '已导入聊天记录',
       time: '刚刚',
       description: '由聊天记录导入生成',
+      roleLevel: 'contact',
+      agentType: '',
       messages,
     };
   } else {
@@ -1925,6 +1950,8 @@ dom.characterForm.addEventListener('submit', async (event) => {
   const editingKey = String(chat.backend?.threadId || uiState.editingCharacterKey || '').trim() || uiState.editingCharacterKey;
   chat.name = dom.characterNameInput.value.trim() || chat.name;
   chat.description = dom.characterDescriptionInput.value.trim() || chat.description;
+  chat.roleLevel = normalizeRoleLevel(dom.characterRoleLevelSelect?.value || chat.roleLevel);
+  chat.agentType = normalizeAgentType(dom.characterAgentTypeSelect?.value || chat.agentType);
   chat.subtitle = dom.characterSubtitleInput.value.trim() || chat.subtitle;
   chat.summary = dom.characterSummaryInput.value.trim() || chat.summary;
   chat.personality = dom.characterPersonalityInput.value.trim();

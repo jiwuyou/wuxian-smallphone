@@ -571,30 +571,34 @@ function normalizeThreads(threads, messages, createdAt) {
       channel: "smallphone",
       windowId: defaultWindowId(thread),
       channelId: defaultChannelId(thread),
-    runtime: {
-      provider: ACTIVE_RUNTIME_PROVIDER,
-      model: "",
-      agentId: defaultAgentId(thread),
-      workspaceDir: defaultWorkspaceDir(thread),
-      sessionKey: defaultSessionKey(thread),
-      sessionGeneration: defaultSessionGeneration(thread),
-      resumeSummary: "",
-    },
-    ...thread,
-    summary,
-    runtime: {
-      provider: ACTIVE_RUNTIME_PROVIDER,
-      model: thread.runtime?.model || "",
-      agentId: thread.runtime?.agentId || defaultAgentId(thread),
-      workspaceDir: thread.runtime?.workspaceDir || defaultWorkspaceDir(thread),
-      sessionKey: thread.runtime?.sessionKey || defaultSessionKey(thread),
-      sessionGeneration: defaultSessionGeneration(thread),
-      resumeSummary:
-        typeof thread.runtime?.resumeSummary === "string" ? thread.runtime.resumeSummary.trim() : "",
-    },
-    createdAt: thread.createdAt || createdAt,
-    updatedAt: thread.updatedAt || createdAt,
-  };
+      runtime: {
+        provider: ACTIVE_RUNTIME_PROVIDER,
+        model: "",
+        agentId: defaultAgentId(thread),
+        workspaceDir: defaultWorkspaceDir(thread),
+        sessionKey: defaultSessionKey(thread),
+        sessionGeneration: defaultSessionGeneration(thread),
+        resumeSummary: "",
+      },
+      ...thread,
+      summary,
+      runtime: {
+        provider: ACTIVE_RUNTIME_PROVIDER,
+        project: typeof thread.runtime?.project === "string" ? thread.runtime.project.trim() : "",
+        agentType: typeof thread.runtime?.agentType === "string" ? thread.runtime.agentType.trim() : "",
+        roleLevel: typeof thread.runtime?.roleLevel === "string" ? thread.runtime.roleLevel.trim() : "",
+        workspaceScope: typeof thread.runtime?.workspaceScope === "string" ? thread.runtime.workspaceScope.trim() : "",
+        model: thread.runtime?.model || "",
+        agentId: thread.runtime?.agentId || defaultAgentId(thread),
+        workspaceDir: thread.runtime?.workspaceDir || defaultWorkspaceDir(thread),
+        sessionKey: thread.runtime?.sessionKey || defaultSessionKey(thread),
+        sessionGeneration: defaultSessionGeneration(thread),
+        resumeSummary:
+          typeof thread.runtime?.resumeSummary === "string" ? thread.runtime.resumeSummary.trim() : "",
+      },
+      createdAt: thread.createdAt || createdAt,
+      updatedAt: thread.updatedAt || createdAt,
+    };
   });
 }
 
