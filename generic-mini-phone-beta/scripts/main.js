@@ -1,5 +1,11 @@
-import * as dom from './dom.js?v=10';
-import { appModules, appSpaceTemplates, registeredApps } from './app-registry.js?v=7';
+import * as dom from './dom.js?v=13';
+import {
+  appModules,
+  appSpaceTemplates,
+  fetchDynamicAppRegistry,
+  mergeStaticAndDynamicDesktopApps,
+  registeredApps,
+} from './app-registry.js?v=8';
 import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=7';
 import { applyDesktopMode, bindWorld, renderWorld, renderWorldToolbar } from './world.js?v=3';
 
@@ -12,6 +18,24 @@ let backendBase = DEFAULT_BACKEND_BASE;
 let threadEventSource = null;
 let threadEventSourceKey = '';
 let characterCreateDraftKey = '';
+let dynamicAppRegistry = { dynamicAppEntries: [] };
+let dynamicRegistryStatus = {
+  text: '后端未连接，使用内置 App。',
+  isError: false,
+  loading: false,
+};
+let activeDynamicApp = null;
+let characterRuntimeSettingsState = {
+  threadId: '',
+  phase: 'idle',
+  available: false,
+  project: '',
+  reason: '',
+  error: '',
+  settings: null,
+};
+let characterRuntimeSettingsRequestId = 0;
+let characterRuntimeSettingsSaving = false;
 
 const CORE_DESKTOP_APPS = [
   { id: 'messages', name: '消息', shortName: '聊', orbClass: 'orb-chat', target: 'messages', badge: 'unread' },
@@ -22,7 +46,25 @@ const CORE_DESKTOP_APPS = [
   { id: 'permissions', name: '权限', shortName: '权', orbClass: 'orb-permission', panel: 'permissions' },
 ];
 
+const CORE_DESKTOP_APP_ALIASES = [
+  { backendId: 'chat', nativeId: 'messages' },
+];
+
 const DESKTOP_APPS_PER_PAGE = 8;
+const SLASH_COMMANDS = [
+  { command: '/help', label: '帮助' },
+  { command: '/status', label: '状态' },
+  { command: '/model', label: '模型' },
+  { command: '/clear', label: '清空' },
+  { command: '/new', label: '新会话' },
+  { command: '/compact', label: '压缩' },
+  { command: '/resume', label: '恢复' },
+];
+const slashCommandState = {
+  open: false,
+  activeIndex: 0,
+  matches: SLASH_COMMANDS,
+};
 
 function escapeHtml(value) {
   return String(value)
@@ -567,10 +609,13 @@ function disableBackendWithStatus(message) {
 }
 
 async function requestBackend(path, init = {}) {
+  const { preserveBackendOnError = false, ...requestInit } = init || {};
   try {
-    return await apiRequest(path, init);
+    return await apiRequest(path, requestInit);
   } catch (error) {
-    disableBackendWithStatus(error instanceof Error ? `${error.message}，已回退本地模式。` : '后端请求失败，已回退本地模式。');
+    if (!preserveBackendOnError) {
+      disableBackendWithStatus(error instanceof Error ? `${error.message}，已回退本地模式。` : '后端请求失败，已回退本地模式。');
+    }
     throw error;
   }
 }
@@ -790,6 +835,324 @@ function normalizeAgentPermissionMode(value, agentType) {
   const candidate = aliases[normalized.replaceAll('-', '')] || aliases[normalized] || raw;
   const found = modes.find((mode) => mode.key === candidate || mode.key.toLowerCase() === normalized);
   return found?.key || modes[0]?.key || '';
+}
+
+function normalizeRuntimeBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  const text = String(value ?? '').trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(text)) return true;
+  if (['false', '0', 'no', 'off'].includes(text)) return false;
+  return false;
+}
+
+function parseRuntimeCommandList(value) {
+  const list = Array.isArray(value) ? value : String(value || '').split(',');
+  const seen = new Set();
+  return list
+    .map((item) => String(item || '').trim())
+    .filter((item) => {
+      if (!item || seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+}
+
+function normalizeRuntimeProjectSettings(settings = {}) {
+  const source = settings && typeof settings === 'object' ? settings : {};
+  const mode = String(source.mode || source.agentMode || '').trim();
+  return {
+    mode,
+    agentMode: String(source.agentMode || mode).trim(),
+    workDir: String(source.workDir || '').trim(),
+    showContextIndicator: source.showContextIndicator === undefined ? true : normalizeRuntimeBoolean(source.showContextIndicator),
+    replyFooter: source.replyFooter === undefined ? true : normalizeRuntimeBoolean(source.replyFooter),
+    adminFrom: String(source.adminFrom ?? '').trim(),
+    disabledCommands: parseRuntimeCommandList(source.disabledCommands),
+  };
+}
+
+function getCharacterRuntimeThreadId(chat = null, key = uiState.editingCharacterKey) {
+  const source = chat || state.chats[key] || null;
+  const threadId = String(source?.backend?.threadId || '').trim();
+  if (threadId) return threadId;
+  const contactId = String(source?.backend?.contactId || '').trim();
+  return backendEnabled && contactId ? String(key || '').trim() : '';
+}
+
+function setCharacterRuntimeSettingsState(nextState) {
+  characterRuntimeSettingsState = {
+    threadId: '',
+    phase: 'idle',
+    available: false,
+    project: '',
+    reason: '',
+    error: '',
+    settings: null,
+    ...nextState,
+  };
+}
+
+function getLoadedCharacterRuntimeSettings(threadId = '') {
+  const targetThreadId = String(threadId || '').trim();
+  if (!targetThreadId || characterRuntimeSettingsState.threadId !== targetThreadId) return null;
+  if (!characterRuntimeSettingsState.available || !characterRuntimeSettingsState.settings) return null;
+  return characterRuntimeSettingsState.settings;
+}
+
+function getCharacterRuntimeControls() {
+  return [
+    dom.characterRuntimeReplyFooterToggle,
+    dom.characterRuntimeContextIndicatorToggle,
+    dom.characterRuntimeWorkDirInput,
+    dom.characterRuntimeDisabledCommandsInput,
+    dom.characterRuntimeAdminFromInput,
+  ].filter(Boolean);
+}
+
+function setRuntimeInputValue(input, value) {
+  if (!input || document.activeElement === input) return;
+  input.value = value;
+}
+
+function syncCharacterAgentModeFromRuntimeSettings(settings, chat = null) {
+  const mode = String(settings?.mode || settings?.agentMode || '').trim();
+  if (!mode || !dom.characterAgentModeSelect) return;
+  const agentType = dom.characterAgentTypeSelect?.value || chat?.agentType || '';
+  const selectedMode = normalizeAgentPermissionMode(mode, agentType);
+  const hasOption = Array.from(dom.characterAgentModeSelect.options || [])
+    .some((option) => option.value === selectedMode);
+  if (hasOption) {
+    dom.characterAgentModeSelect.value = selectedMode;
+  }
+}
+
+function renderCharacterRuntimeSettings({ preserveControlValues = false } = {}) {
+  if (!dom.characterRuntimeStatus) return;
+  const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
+  const isCreating = characterCreateDraftKey === uiState.editingCharacterKey;
+  const threadId = getCharacterRuntimeThreadId(chat);
+  const runtimeState = characterRuntimeSettingsState.threadId === threadId ? characterRuntimeSettingsState : null;
+  const settings = runtimeState?.settings || null;
+  const project = String(runtimeState?.project || chat?.backend?.runtimeProject || '').trim();
+  let phase = runtimeState?.phase || 'idle';
+  let statusText = '未加载';
+
+  if (isCreating) {
+    phase = 'creating';
+    statusText = '创建后可用';
+  } else if (!backendEnabled) {
+    phase = 'unavailable';
+    statusText = '后端未连接';
+  } else if (!threadId) {
+    phase = 'unavailable';
+    statusText = '缺少 thread';
+  } else if (phase === 'loading') {
+    statusText = project ? `加载中 · ${project}` : '加载中';
+  } else if (phase === 'available' && settings) {
+    statusText = project ? `已加载 · ${project}` : '已加载';
+  } else if (phase === 'error') {
+    statusText = runtimeState?.error ? `错误 · ${runtimeState.error}` : '读取失败';
+  } else if (phase === 'unavailable') {
+    statusText = runtimeState?.reason || 'Runtime 项目不可用';
+  }
+
+  dom.characterRuntimeStatus.textContent = statusText;
+  dom.characterRuntimeStatus.classList.toggle('runtime-status-ready', phase === 'available');
+  dom.characterRuntimeStatus.classList.toggle('runtime-status-loading', phase === 'loading' || characterRuntimeSettingsSaving);
+  dom.characterRuntimeStatus.classList.toggle('runtime-status-error', phase === 'error');
+  dom.characterRuntimeStatus.classList.toggle('runtime-status-unavailable', phase === 'unavailable' || phase === 'creating');
+
+  if (!preserveControlValues) {
+    if (dom.characterRuntimeReplyFooterToggle) {
+      dom.characterRuntimeReplyFooterToggle.checked = Boolean(settings?.replyFooter);
+    }
+    if (dom.characterRuntimeContextIndicatorToggle) {
+      dom.characterRuntimeContextIndicatorToggle.checked = Boolean(settings?.showContextIndicator);
+    }
+    setRuntimeInputValue(dom.characterRuntimeWorkDirInput, settings?.workDir || chat?.backend?.workspaceDir || '');
+    setRuntimeInputValue(dom.characterRuntimeDisabledCommandsInput, settings?.disabledCommands?.join(', ') || '');
+    setRuntimeInputValue(dom.characterRuntimeAdminFromInput, settings?.adminFrom || '');
+  }
+
+  const runtimeControlsDisabled = characterRuntimeSettingsSaving
+    || isCreating
+    || phase === 'loading'
+    || phase !== 'available'
+    || !settings;
+  getCharacterRuntimeControls().forEach((control) => {
+    control.disabled = runtimeControlsDisabled;
+  });
+  if (dom.characterAgentModeSelect) {
+    dom.characterAgentModeSelect.disabled = characterRuntimeSettingsSaving || isCreating || phase === 'loading';
+  }
+}
+
+async function loadCharacterRuntimeSettingsForCurrent({ force = false } = {}) {
+  const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
+  const isCreating = characterCreateDraftKey === uiState.editingCharacterKey;
+  const threadId = getCharacterRuntimeThreadId(chat);
+  const requestId = characterRuntimeSettingsRequestId + 1;
+
+  if (isCreating) {
+    characterRuntimeSettingsRequestId = requestId;
+    setCharacterRuntimeSettingsState({
+      threadId: '',
+      phase: 'creating',
+      reason: '创建联系人后可编辑 9840 Runtime。',
+    });
+    renderCharacterRuntimeSettings();
+    return characterRuntimeSettingsState;
+  }
+
+  if (!backendEnabled || !threadId) {
+    characterRuntimeSettingsRequestId = requestId;
+    setCharacterRuntimeSettingsState({
+      threadId,
+      phase: 'unavailable',
+      reason: backendEnabled ? '当前联系人缺少后端 thread。' : '后端未连接，无法读取 9840 Runtime。',
+    });
+    renderCharacterRuntimeSettings();
+    return characterRuntimeSettingsState;
+  }
+
+  if (!force
+    && characterRuntimeSettingsState.threadId === threadId
+    && ['available', 'unavailable', 'error'].includes(characterRuntimeSettingsState.phase)) {
+    renderCharacterRuntimeSettings();
+    return characterRuntimeSettingsState;
+  }
+
+  characterRuntimeSettingsRequestId = requestId;
+  const previousSettings = characterRuntimeSettingsState.threadId === threadId
+    ? characterRuntimeSettingsState.settings
+    : null;
+  setCharacterRuntimeSettingsState({
+    threadId,
+    phase: 'loading',
+    project: chat?.backend?.runtimeProject || '',
+    settings: previousSettings,
+  });
+  renderCharacterRuntimeSettings();
+
+  try {
+    const result = await requestBackend(`/threads/${encodeURIComponent(threadId)}/runtime-project-settings`, {
+      preserveBackendOnError: true,
+    });
+    if (characterRuntimeSettingsRequestId !== requestId) return null;
+
+    if (result?.available && result?.settings) {
+      const settings = normalizeRuntimeProjectSettings(result.settings);
+      setCharacterRuntimeSettingsState({
+        threadId,
+        phase: 'available',
+        available: true,
+        project: String(result.project || chat?.backend?.runtimeProject || '').trim(),
+        settings,
+      });
+      const currentChat = state.chats[uiState.editingCharacterKey] || chat;
+      if (currentChat) {
+        currentChat.agentMode = settings.agentMode || settings.mode || currentChat.agentMode;
+      }
+      syncCharacterAgentModeFromRuntimeSettings(settings, currentChat);
+      renderCharacterRuntimeSettings();
+      return characterRuntimeSettingsState;
+    }
+
+    setCharacterRuntimeSettingsState({
+      threadId,
+      phase: 'unavailable',
+      project: String(result?.project || chat?.backend?.runtimeProject || '').trim(),
+      reason: String(result?.reason || '9840 Runtime 项目不可用。').trim(),
+      settings: null,
+    });
+    renderCharacterRuntimeSettings();
+    return characterRuntimeSettingsState;
+  } catch (error) {
+    if (characterRuntimeSettingsRequestId !== requestId) return null;
+    setCharacterRuntimeSettingsState({
+      threadId,
+      phase: 'error',
+      project: chat?.backend?.runtimeProject || '',
+      error: error instanceof Error ? error.message : String(error),
+      settings: previousSettings,
+    });
+    renderCharacterRuntimeSettings();
+    return characterRuntimeSettingsState;
+  }
+}
+
+function buildCharacterRuntimeSettingsPayload(chat = null) {
+  const threadId = getCharacterRuntimeThreadId(chat);
+  const settings = getLoadedCharacterRuntimeSettings(threadId);
+  const mode = String(dom.characterAgentModeSelect?.value || chat?.agentMode || '').trim();
+  return {
+    mode,
+    workDir: dom.characterRuntimeWorkDirInput?.value.trim() || '',
+    showContextIndicator: Boolean(dom.characterRuntimeContextIndicatorToggle?.checked),
+    replyFooter: Boolean(dom.characterRuntimeReplyFooterToggle?.checked),
+    adminFrom: dom.characterRuntimeAdminFromInput?.value.trim() || '',
+    disabledCommands: parseRuntimeCommandList(dom.characterRuntimeDisabledCommandsInput?.value || ''),
+  };
+}
+
+async function saveCharacterRuntimeSettingsIfAvailable(threadId, chat = null) {
+  const targetThreadId = String(threadId || '').trim();
+  if (!backendEnabled || !targetThreadId) return false;
+  if (characterRuntimeSettingsState.threadId !== targetThreadId || !characterRuntimeSettingsState.available) {
+    return false;
+  }
+
+  const payload = buildCharacterRuntimeSettingsPayload(chat);
+  let preserveControlValues = true;
+  characterRuntimeSettingsSaving = true;
+  renderCharacterRuntimeSettings({ preserveControlValues: true });
+  try {
+    const result = await requestBackend(`/threads/${encodeURIComponent(targetThreadId)}/runtime-project-settings`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+      preserveBackendOnError: true,
+    });
+    if (result?.available && result?.settings) {
+      const settings = normalizeRuntimeProjectSettings(result.settings);
+      preserveControlValues = false;
+      setCharacterRuntimeSettingsState({
+        threadId: targetThreadId,
+        phase: 'available',
+        available: true,
+        project: String(result.project || characterRuntimeSettingsState.project || '').trim(),
+        settings,
+      });
+      if (chat) chat.agentMode = settings.agentMode || settings.mode || chat.agentMode;
+      syncCharacterAgentModeFromRuntimeSettings(settings, chat);
+      return true;
+    }
+
+    preserveControlValues = false;
+    setCharacterRuntimeSettingsState({
+      threadId: targetThreadId,
+      phase: 'unavailable',
+      project: String(result?.project || characterRuntimeSettingsState.project || '').trim(),
+      reason: String(result?.reason || '9840 Runtime 项目不可用。').trim(),
+      settings: null,
+    });
+    return false;
+  } catch (error) {
+    setCharacterRuntimeSettingsState({
+      threadId: targetThreadId,
+      phase: 'error',
+      project: characterRuntimeSettingsState.project || '',
+      error: error instanceof Error ? error.message : String(error),
+      settings: characterRuntimeSettingsState.settings,
+    });
+    throw error;
+  } finally {
+    characterRuntimeSettingsSaving = false;
+    renderCharacterRuntimeSettings({ preserveControlValues });
+  }
 }
 
 function renderAgentModeSelect(selectedMode = '', agentType = '', runtimeModes = null) {
@@ -1189,23 +1552,172 @@ function setChatStatus(message, isError = false) {
   dom.chatStatus.classList.toggle('chat-status-error', Boolean(isError));
 }
 
+function isSingleSlashRuntimeText(text) {
+  const cleanText = String(text || '').trim();
+  return cleanText.startsWith('/') && !cleanText.startsWith('//');
+}
+
+function getSlashCommandQuery(value) {
+  const text = String(value || '');
+  if (!text.startsWith('/') || text.startsWith('//')) return null;
+  return text.slice(1).trimStart().toLowerCase();
+}
+
+function filterSlashCommands(value) {
+  const query = getSlashCommandQuery(value);
+  if (query === null) return [];
+  if (!query) return SLASH_COMMANDS;
+  return SLASH_COMMANDS.filter((item) => {
+    const command = item.command.toLowerCase();
+    const label = item.label.toLowerCase();
+    return command.includes(query) || command.slice(1).includes(query) || label.includes(query);
+  });
+}
+
+function closeSlashCommandPalette() {
+  slashCommandState.open = false;
+  slashCommandState.activeIndex = 0;
+  slashCommandState.matches = SLASH_COMMANDS;
+  if (dom.slashCommandPalette) {
+    dom.slashCommandPalette.hidden = true;
+    dom.slashCommandPalette.innerHTML = '';
+  }
+  dom.chatInput?.setAttribute('aria-expanded', 'false');
+  dom.chatInput?.removeAttribute('aria-activedescendant');
+}
+
+function submitSlashCommand(command) {
+  const value = String(command || '').trim();
+  if (!value || !dom.chatInput) return;
+  dom.chatInput.value = value;
+  dom.chatInput.focus();
+  closeSlashCommandPalette();
+  if (dom.chatForm?.requestSubmit) {
+    dom.chatForm.requestSubmit();
+    return;
+  }
+  dom.chatForm?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+}
+
+function renderSlashCommandPalette() {
+  if (!dom.slashCommandPalette || !slashCommandState.open) {
+    closeSlashCommandPalette();
+    return;
+  }
+
+  const matches = slashCommandState.matches;
+  dom.slashCommandPalette.hidden = false;
+  dom.chatInput?.setAttribute('aria-expanded', 'true');
+
+  if (!matches.length) {
+    dom.chatInput?.removeAttribute('aria-activedescendant');
+    dom.slashCommandPalette.innerHTML = '<div class="slash-command-empty">没有命令</div>';
+    return;
+  }
+
+  slashCommandState.activeIndex = Math.max(0, Math.min(slashCommandState.activeIndex, matches.length - 1));
+  dom.slashCommandPalette.innerHTML = matches.map((item, index) => {
+    const active = index === slashCommandState.activeIndex;
+    return `
+      <button class="slash-command-option${active ? ' slash-command-option-active' : ''}" type="button" role="option" id="slash-command-${index}" aria-selected="${active ? 'true' : 'false'}" data-slash-command="${escapeHtml(item.command)}">
+        <strong>${escapeHtml(item.command)}</strong>
+        <span>${escapeHtml(item.label)}</span>
+      </button>
+    `;
+  }).join('');
+  dom.chatInput?.setAttribute('aria-activedescendant', `slash-command-${slashCommandState.activeIndex}`);
+
+  dom.slashCommandPalette.querySelectorAll('[data-slash-command]').forEach((button) => {
+    button.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+    });
+    button.addEventListener('click', () => {
+      submitSlashCommand(button.dataset.slashCommand);
+    });
+  });
+}
+
+function updateSlashCommandPalette() {
+  if (!dom.chatInput) return;
+  const query = getSlashCommandQuery(dom.chatInput.value);
+  if (query === null) {
+    closeSlashCommandPalette();
+    return;
+  }
+
+  slashCommandState.matches = filterSlashCommands(dom.chatInput.value);
+  slashCommandState.activeIndex = Math.min(slashCommandState.activeIndex, Math.max(0, slashCommandState.matches.length - 1));
+  slashCommandState.open = true;
+  renderSlashCommandPalette();
+}
+
+function moveSlashCommandSelection(delta) {
+  if (!slashCommandState.open || !slashCommandState.matches.length) return;
+  const count = slashCommandState.matches.length;
+  slashCommandState.activeIndex = (slashCommandState.activeIndex + delta + count) % count;
+  renderSlashCommandPalette();
+}
+
+function prepareChatSubmit(rawText, hasAttachments) {
+  const trimmedText = String(rawText || '').trim();
+  const escapedSlash = trimmedText.startsWith('//');
+  const text = escapedSlash ? trimmedText.slice(1) : trimmedText;
+  const runtimePassThrough = !hasAttachments
+    && Boolean(text)
+    && !escapedSlash
+    && (isSingleSlashRuntimeText(trimmedText) || Boolean(uiState.runtimePassThroughEnabled));
+
+  return { text, runtimePassThrough };
+}
+
+function updateRuntimePassThroughToggle() {
+  if (!dom.runtimePassThroughToggle) return;
+  const enabled = Boolean(uiState.runtimePassThroughEnabled);
+  const hasAttachments = Array.isArray(uiState.pendingAttachments) && uiState.pendingAttachments.length > 0;
+  dom.runtimePassThroughToggle.classList.toggle('runtime-pass-through-active', enabled);
+  dom.runtimePassThroughToggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  dom.runtimePassThroughToggle.disabled = Boolean(uiState.isGenerating);
+  dom.runtimePassThroughToggle.title = enabled
+    ? (hasAttachments ? '肘击 AI：附件走普通模式' : '肘击 AI：开启')
+    : '肘击 AI：关闭';
+}
+
 function getPendingOutbox(chat) {
   if (!chat) return [];
   if (!Array.isArray(chat.pendingOutbox)) chat.pendingOutbox = [];
   return chat.pendingOutbox;
 }
 
+function getPendingItemAttachmentIds(item) {
+  return (Array.isArray(item?.attachments) ? item.attachments : [])
+    .map((attachmentId) => String(attachmentId || '').trim())
+    .filter(Boolean);
+}
+
+function getPendingSendItems(chat) {
+  return getPendingOutbox(chat).filter((item) => {
+    const text = String(item?.text || '').trim();
+    return Boolean(text) || getPendingItemAttachmentIds(item).length > 0;
+  });
+}
+
 function getPendingTexts(chat) {
-  return getPendingOutbox(chat)
+  return getPendingSendItems(chat)
     .map((item) => String(item?.text || '').trim())
     .filter(Boolean);
 }
 
 function getPendingAttachmentIds(chat) {
-  return getPendingOutbox(chat)
-    .flatMap((item) => Array.isArray(item?.attachments) ? item.attachments : [])
-    .map((item) => String(item || '').trim())
-    .filter(Boolean);
+  return getPendingSendItems(chat).flatMap((item) => getPendingItemAttachmentIds(item));
+}
+
+function shouldUseRuntimePassThroughForFlush(chat) {
+  const pendingItems = getPendingSendItems(chat);
+  if (pendingItems.length !== 1) return false;
+  const pendingItem = pendingItems[0];
+  if (getPendingItemAttachmentIds(pendingItem).length) return false;
+  const text = String(pendingItem?.text || '').trim();
+  return Boolean(text && pendingItem?.runtimePassThrough && !text.startsWith('//'));
 }
 
 function formatBytes(size) {
@@ -1246,6 +1758,7 @@ function renderAttachmentStrip() {
       uiState.pendingAttachments = items.filter((item) => item.id !== button.dataset.removeAttachment);
       renderAttachmentStrip();
       updateMagicWandState();
+      updateRuntimePassThroughToggle();
     });
   });
 }
@@ -1283,6 +1796,7 @@ async function uploadChatAttachments(files) {
   }
   renderAttachmentStrip();
   updateMagicWandState();
+  updateRuntimePassThroughToggle();
 }
 
 function updateMagicWandState() {
@@ -1298,7 +1812,7 @@ function updateMagicWandState() {
     : '魔法棒：没有待送消息';
 }
 
-function queueLocalUserMessage(chat, text) {
+function queueLocalUserMessage(chat, text, options = {}) {
   const attachmentMetas = Array.isArray(uiState.pendingAttachments) ? [...uiState.pendingAttachments] : [];
   const attachmentIds = attachmentMetas.map((item) => String(item.id || '').trim()).filter(Boolean);
   const cleanText = String(text || '').trim();
@@ -1309,6 +1823,9 @@ function queueLocalUserMessage(chat, text) {
     attachments: attachmentIds,
     attachmentMetas,
   };
+  if (options.runtimePassThrough && !attachmentIds.length) {
+    pendingItem.runtimePassThrough = true;
+  }
   getPendingOutbox(chat).push(pendingItem);
   chat.messages.push({
     side: 'self',
@@ -1322,6 +1839,7 @@ function queueLocalUserMessage(chat, text) {
   chat.summary = cleanText || (attachmentIds.length ? '[附件]' : chat.summary);
   chat.time = '刚刚';
   renderAttachmentStrip();
+  updateRuntimePassThroughToggle();
   return pendingItem;
 }
 
@@ -1333,9 +1851,11 @@ async function flushPendingOutbox() {
   }
   const pendingTexts = getPendingTexts(chat);
   const pendingAttachmentIds = getPendingAttachmentIds(chat);
+  const runtimePassThrough = shouldUseRuntimePassThroughForFlush(chat);
   if (!pendingTexts.length && !pendingAttachmentIds.length) {
     setChatStatus('没有待送消息。');
     updateMagicWandState();
+    updateRuntimePassThroughToggle();
     return;
   }
 
@@ -1344,6 +1864,7 @@ async function flushPendingOutbox() {
   dom.chatInput.disabled = true;
   dom.continueGenerateButton.disabled = true;
   updateMagicWandState();
+  updateRuntimePassThroughToggle();
 
   try {
     if (backendEnabled) {
@@ -1351,10 +1872,14 @@ async function flushPendingOutbox() {
       if (!threadId) throw new Error('当前聊天缺少 thread id，无法发送。');
 
       subscribeThreadEvents(threadId);
-      setChatStatus(`正在把 ${pendingTexts.length} 条待送消息 / ${pendingAttachmentIds.length} 个附件交给 smallphone-app...`);
+      setChatStatus(runtimePassThrough
+        ? '正在肘击 AI，经由 smallphone-app 直送 runtime...'
+        : `正在把 ${pendingTexts.length} 条待送消息 / ${pendingAttachmentIds.length} 个附件交给 smallphone-app...`);
+      const requestBody = { text: batchText, attachments: pendingAttachmentIds };
+      if (runtimePassThrough) requestBody.runtimePassThrough = true;
       await requestBackend(`/threads/${encodeURIComponent(threadId)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ text: batchText, attachments: pendingAttachmentIds }),
+        body: JSON.stringify(requestBody),
       });
       chat.pendingOutbox = [];
       saveState();
@@ -1380,6 +1905,7 @@ async function flushPendingOutbox() {
     dom.chatInput.disabled = false;
     dom.continueGenerateButton.disabled = false;
     updateMagicWandState();
+    updateRuntimePassThroughToggle();
   }
 }
 
@@ -1508,7 +2034,7 @@ function applyPhoneShell() {
   dom.appExitButton.classList.toggle('app-exit-visible', mode === 'app');
 }
 
-function getDesktopAppEntries() {
+function getStaticDesktopAppEntries() {
   return [
     ...CORE_DESKTOP_APPS,
     ...registeredApps.map((app) => ({
@@ -1520,6 +2046,20 @@ function getDesktopAppEntries() {
       manifest: app,
     })),
   ];
+}
+
+function getStaticDesktopAppIds() {
+  return [
+    ...getStaticDesktopAppEntries().map((app) => app.id),
+    ...CORE_DESKTOP_APP_ALIASES.map((alias) => alias.backendId),
+  ];
+}
+
+function getDesktopAppEntries() {
+  return mergeStaticAndDynamicDesktopApps(
+    getStaticDesktopAppEntries(),
+    dynamicAppRegistry.dynamicAppEntries,
+  );
 }
 
 function getDesktopPageCount() {
@@ -1559,6 +2099,10 @@ function openPanel(panelName) {
 
   dom.panel.classList.add('panel-open');
   dom.panel.setAttribute('aria-hidden', 'false');
+  if (panelName === 'character') {
+    renderCharacterEditor();
+    void loadCharacterRuntimeSettingsForCurrent({ force: true });
+  }
   if (panelName === 'permissions') {
     loadActivePermissions({ force: true })
       .then(() => renderPermissionPanel())
@@ -1574,7 +2118,182 @@ function closePanel() {
   dom.panel.setAttribute('aria-hidden', 'true');
 }
 
+function getDynamicEntryKey(entry) {
+  return String(entry?.instanceId || entry?.id || '').trim();
+}
+
+function getDynamicAppTitle(entry) {
+  return String(entry?.name || entry?.title || entry?.instanceId || entry?.id || '动态 App').trim() || '动态 App';
+}
+
+function getDynamicAppHost(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
+}
+
+function renderDynamicRegistryStatus() {
+  if (dom.appRegistryStatus) {
+    dom.appRegistryStatus.textContent = dynamicRegistryStatus.text;
+    dom.appRegistryStatus.classList.toggle('registry-status-error', Boolean(dynamicRegistryStatus.isError));
+  }
+  if (dom.appRegistryRefreshButton) {
+    dom.appRegistryRefreshButton.disabled = Boolean(dynamicRegistryStatus.loading);
+    dom.appRegistryRefreshButton.textContent = dynamicRegistryStatus.loading ? '刷新中...' : '刷新 App 注册表';
+  }
+}
+
+function setDynamicRegistryStatus(text, isError = false, loading = false) {
+  dynamicRegistryStatus = { text, isError, loading };
+  renderDynamicRegistryStatus();
+}
+
+function summarizeDynamicRegistry(registry) {
+  const visibleCount = Array.isArray(registry?.dynamicAppEntries) ? registry.dynamicAppEntries.length : 0;
+  if (visibleCount) return `已载入 ${visibleCount} 个动态 App。`;
+  const instanceCount = Array.isArray(registry?.appInstances) ? registry.appInstances.length : 0;
+  return instanceCount ? '注册表已同步，暂无可显示 App。' : '未发现动态 App。';
+}
+
+function setDynamicAppFrameStatus(message, isError = false) {
+  if (!dom.dynamicAppStatus) return;
+  dom.dynamicAppStatus.textContent = message;
+  dom.dynamicAppStatus.classList.toggle('dynamic-app-status-error', Boolean(isError));
+}
+
+function showDynamicAppEmpty(message = '', isError = false) {
+  if (!dom.dynamicAppEmpty) return;
+  dom.dynamicAppEmpty.textContent = message;
+  dom.dynamicAppEmpty.classList.toggle('dynamic-app-empty-visible', Boolean(message));
+  dom.dynamicAppEmpty.classList.toggle('dynamic-app-empty-error', Boolean(isError));
+}
+
+function renderDynamicAppView(message = '', isError = false) {
+  const entry = activeDynamicApp;
+  const url = String(entry?.launchUrl || '').trim();
+  const title = getDynamicAppTitle(entry);
+  const appId = String(entry?.appId || 'Dynamic App').trim();
+  const instanceId = getDynamicEntryKey(entry);
+
+  if (dom.dynamicAppTitle) dom.dynamicAppTitle.textContent = title;
+  if (dom.dynamicAppEyebrow) {
+    dom.dynamicAppEyebrow.textContent = entry
+      ? [appId, instanceId].filter(Boolean).join(' · ')
+      : 'Dynamic App';
+  }
+  if (dom.dynamicAppFrame) dom.dynamicAppFrame.title = title;
+
+  if (!entry) {
+    if (dom.dynamicAppFrame) {
+      dom.dynamicAppFrame.removeAttribute('src');
+      delete dom.dynamicAppFrame.dataset.launchUrl;
+    }
+    setDynamicAppFrameStatus('未打开');
+    showDynamicAppEmpty('选择桌面上的 App 图标后打开。');
+    return;
+  }
+
+  if (!url) {
+    if (dom.dynamicAppFrame) {
+      dom.dynamicAppFrame.removeAttribute('src');
+      delete dom.dynamicAppFrame.dataset.launchUrl;
+    }
+    setDynamicAppFrameStatus(message || '暂无入口', true);
+    showDynamicAppEmpty(message || '这个 App 暂无可用入口。', true);
+    return;
+  }
+
+  const host = getDynamicAppHost(url);
+  setDynamicAppFrameStatus(message || (host ? `打开 ${host}` : '打开 App'), isError);
+  showDynamicAppEmpty('');
+
+  if (dom.dynamicAppFrame && dom.dynamicAppFrame.dataset.launchUrl !== url) {
+    dom.dynamicAppFrame.dataset.launchUrl = url;
+    dom.dynamicAppFrame.src = url;
+    setDynamicAppFrameStatus(host ? `正在打开 ${host}` : '正在打开 App');
+  }
+}
+
+function syncActiveDynamicAppAfterRegistryRefresh() {
+  if (!activeDynamicApp) return;
+  const activeKey = getDynamicEntryKey(activeDynamicApp);
+  const nextEntry = (dynamicAppRegistry.dynamicAppEntries || [])
+    .find((entry) => getDynamicEntryKey(entry) === activeKey);
+
+  if (!nextEntry) {
+    activeDynamicApp = {
+      ...activeDynamicApp,
+      launchUrl: '',
+    };
+    renderDynamicAppView('App 已从注册表移除。', true);
+    return;
+  }
+
+  activeDynamicApp = nextEntry;
+  renderDynamicAppView();
+}
+
+async function refreshDynamicAppRegistry({ manual = false } = {}) {
+  if (dynamicRegistryStatus.loading) return false;
+  setDynamicRegistryStatus('正在刷新 App 注册表...', false, true);
+
+  if (!backendEnabled && manual) {
+    try {
+      await bootstrapState();
+    } catch {}
+  }
+
+  if (!backendEnabled) {
+    dynamicAppRegistry = { dynamicAppEntries: [] };
+    setDynamicRegistryStatus('后端未连接，使用内置 App。');
+    renderDesktopApps();
+    renderDesktopBadge();
+    syncActiveDynamicAppAfterRegistryRefresh();
+    return false;
+  }
+
+  try {
+    dynamicAppRegistry = await fetchDynamicAppRegistry({
+      apiBase: backendBase,
+      staticAppIds: getStaticDesktopAppIds(),
+    });
+    setDynamicRegistryStatus(summarizeDynamicRegistry(dynamicAppRegistry));
+    renderDesktopApps();
+    renderDesktopBadge();
+    syncActiveDynamicAppAfterRegistryRefresh();
+    return true;
+  } catch {
+    const hasExistingEntries = Boolean(dynamicAppRegistry.dynamicAppEntries?.length);
+    setDynamicRegistryStatus(
+      hasExistingEntries ? '注册表刷新失败，保留当前图标。' : '注册表刷新失败，使用内置 App。',
+      true,
+    );
+    if (!hasExistingEntries) {
+      dynamicAppRegistry = { dynamicAppEntries: [] };
+      renderDesktopApps();
+      renderDesktopBadge();
+    }
+    return false;
+  }
+}
+
+function openDynamicApp(entry) {
+  activeDynamicApp = entry || null;
+  uiState.previousView = 'dynamic-app';
+  closePanel();
+  setPhoneShell('app');
+  renderDynamicAppView();
+  setActiveView('dynamic-app');
+}
+
 function openDesktopApp(entry) {
+  if (entry.dynamic) {
+    openDynamicApp(entry);
+    return;
+  }
+
   if (entry.panel) {
     setPhoneShell('app');
     openPanel(entry.panel);
@@ -1870,6 +2589,7 @@ function renderChat() {
     dom.chatThread.innerHTML = '';
     updatePromptPreview();
     renderAttachmentStrip();
+    updateRuntimePassThroughToggle();
     return;
   }
   dom.chatTitle.textContent = chat.name;
@@ -1898,6 +2618,7 @@ function renderChat() {
   updatePromptPreview();
   renderAttachmentStrip();
   updateMagicWandState();
+  updateRuntimePassThroughToggle();
 
   requestAnimationFrame(() => {
     dom.chatThread.scrollTop = dom.chatThread.scrollHeight;
@@ -2082,11 +2803,13 @@ function renderCharacterEditor() {
   dom.characterDescriptionInput.value = chat.description;
   if (dom.characterRoleLevelSelect) dom.characterRoleLevelSelect.value = normalizeRoleLevel(chat.roleLevel);
   if (dom.characterAgentTypeSelect) dom.characterAgentTypeSelect.value = normalizeAgentType(chat.agentType);
+  const runtimeThreadId = getCharacterRuntimeThreadId(chat);
+  const runtimeSettings = getLoadedCharacterRuntimeSettings(runtimeThreadId);
   const permissionSnapshot = uiState.permissionSnapshot?.threadId === (chat.backend?.threadId || uiState.editingCharacterKey)
     ? uiState.permissionSnapshot
     : null;
   renderAgentModeSelect(
-    permissionSnapshot?.agentMode || chat.agentMode || chat.backend?.permissionPolicy?.agentMode || '',
+    runtimeSettings?.mode || runtimeSettings?.agentMode || permissionSnapshot?.agentMode || chat.agentMode || chat.backend?.permissionPolicy?.agentMode || '',
     permissionSnapshot?.agentType || chat.agentType,
     permissionSnapshot?.agentCapabilities?.modes,
   );
@@ -2101,11 +2824,13 @@ function renderCharacterEditor() {
   if (dom.characterSubmitButton) {
     dom.characterSubmitButton.textContent = characterCreateDraftKey === uiState.editingCharacterKey ? '创建联系人' : '保存角色';
   }
+  renderCharacterRuntimeSettings();
 }
 
 dom.characterAgentTypeSelect?.addEventListener('change', () => {
   const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
   renderAgentModeSelect('', dom.characterAgentTypeSelect.value || chat?.agentType || 'codex');
+  renderCharacterRuntimeSettings();
 });
 
 dom.characterAvatarTextInput?.addEventListener('input', () => {
@@ -2446,12 +3171,15 @@ function renderAll() {
   renderWorldbook();
   renderJournals();
   refreshRegisteredApps();
+  renderDynamicRegistryStatus();
+  renderDynamicAppView();
   renderProfile();
   renderDesktopBadge();
   renderLockNotification();
   renderCharacterEditor();
   renderPermissionPanel();
   updatePromptPreview();
+  updateRuntimePassThroughToggle();
 }
 
 dom.tabs.forEach((tab) => {
@@ -2516,6 +3244,19 @@ dom.appExitButton.addEventListener('click', () => {
   closeThreadEventStream();
   closePanel();
   setPhoneShell('desktop');
+});
+
+dom.dynamicAppFrame?.addEventListener('load', () => {
+  const url = String(activeDynamicApp?.launchUrl || '').trim();
+  if (!url) return;
+  const host = getDynamicAppHost(url);
+  setDynamicAppFrameStatus(host ? `已打开 ${host}` : '已打开');
+  showDynamicAppEmpty('');
+});
+
+dom.dynamicAppFrame?.addEventListener('error', () => {
+  setDynamicAppFrameStatus('无法加载 App', true);
+  showDynamicAppEmpty('无法加载 App，请检查服务是否正在运行。', true);
 });
 
 [dom.desktopCameraApp, dom.dockCameraApp].filter(Boolean).forEach((button) => {
@@ -2598,15 +3339,61 @@ if (dom.magicWandButton) {
   });
 }
 
+dom.chatInput?.addEventListener('input', () => {
+  updateSlashCommandPalette();
+});
+
+dom.chatInput?.addEventListener('focus', () => {
+  updateSlashCommandPalette();
+});
+
+dom.chatInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && slashCommandState.open) {
+    event.preventDefault();
+    closeSlashCommandPalette();
+    return;
+  }
+
+  if (!slashCommandState.open) return;
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    moveSlashCommandSelection(1);
+    return;
+  }
+
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    moveSlashCommandSelection(-1);
+    return;
+  }
+
+  if (event.key === 'Enter' && slashCommandState.matches.length) {
+    event.preventDefault();
+    submitSlashCommand(slashCommandState.matches[slashCommandState.activeIndex]?.command);
+  }
+});
+
+document.addEventListener('click', (event) => {
+  if (!slashCommandState.open) return;
+  if (dom.chatInputShell?.contains(event.target)) return;
+  closeSlashCommandPalette();
+});
+
+dom.runtimePassThroughToggle?.addEventListener('click', () => {
+  uiState.runtimePassThroughEnabled = !uiState.runtimePassThroughEnabled;
+  updateRuntimePassThroughToggle();
+});
+
 dom.chatForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const value = dom.chatInput.value.trim();
   const hasAttachments = Array.isArray(uiState.pendingAttachments) && uiState.pendingAttachments.length > 0;
+  const { text: value, runtimePassThrough } = prepareChatSubmit(dom.chatInput.value, hasAttachments);
   if (!value && !hasAttachments) return;
 
   const chat = getActiveChat();
   if (!chat) return;
-  queueLocalUserMessage(chat, value);
+  queueLocalUserMessage(chat, value, { runtimePassThrough });
 
   if (value && state.memories.length < 12) {
     state.memories.unshift({
@@ -2617,10 +3404,13 @@ dom.chatForm.addEventListener('submit', async (event) => {
   }
 
   dom.chatInput.value = '';
+  closeSlashCommandPalette();
   saveState();
   renderAll();
   if (backendEnabled) {
-    setChatStatus('正在发送到 smallphone-app 后端...');
+    setChatStatus(runtimePassThrough
+      ? '正在通过 smallphone-app 肘击 AI...'
+      : '正在发送到 smallphone-app 后端...');
     void flushPendingOutbox();
     return;
   }
@@ -2690,6 +3480,7 @@ dom.characterSelect.addEventListener('change', () => {
   }
   renderCharacterEditor();
   renderCharacterHighlight();
+  void loadCharacterRuntimeSettingsForCurrent({ force: true });
   if (backendEnabled) {
     void loadThreadMessages(uiState.editingCharacterKey).then(() => {
       renderChat();
@@ -2729,10 +3520,23 @@ dom.characterForm.addEventListener('submit', async (event) => {
         characterCreateDraftKey = '';
         uiState.activeChatKey = createdKey || resolvePreferredChatKey(state.chats, uiState.activeChatKey) || uiState.activeChatKey;
         uiState.editingCharacterKey = uiState.activeChatKey;
-        setChatStatus('联系人已创建。');
+        await loadCharacterRuntimeSettingsForCurrent({ force: true });
+        setChatStatus('联系人已创建，9840 Runtime 已刷新。');
       } else {
-        await syncCharacterEdits(editingKey, chat);
-        setChatStatus('角色卡已同步到 smallphone-app。');
+        const syncedCharacter = await syncCharacterEdits(editingKey, chat);
+        if (syncedCharacter) {
+          const savedRuntimeSettings = await saveCharacterRuntimeSettingsIfAvailable(editingKey, chat);
+          await refreshBackendState(editingKey);
+          if (savedRuntimeSettings) {
+            await loadCharacterRuntimeSettingsForCurrent({ force: true });
+          }
+          setChatStatus(savedRuntimeSettings
+            ? '角色卡和 9840 Runtime 已同步到 smallphone-app。'
+            : '角色卡已同步到 smallphone-app，9840 Runtime 当前不可用。');
+        } else {
+          await loadCharacterRuntimeSettingsForCurrent({ force: true });
+          setChatStatus('角色卡已保存，当前联系人还没有后端项目。');
+        }
       }
     } else {
       characterCreateDraftKey = '';
@@ -2740,7 +3544,7 @@ dom.characterForm.addEventListener('submit', async (event) => {
     }
     renderAll();
   } catch (error) {
-    setChatStatus(error instanceof Error ? error.message : '角色同步失败', true);
+    setChatStatus(error instanceof Error ? error.message : '角色或 9840 Runtime 同步失败', true);
   }
 });
 
@@ -2780,6 +3584,10 @@ dom.settingsForm.addEventListener('submit', (event) => {
   applyTheme();
   updatePromptPreview();
   queueStateSync('设置已保存。之后发送消息会按当前角色卡、人设、记忆和世界书拼装上下文。');
+});
+
+dom.appRegistryRefreshButton?.addEventListener('click', () => {
+  void refreshDynamicAppRegistry({ manual: true });
 });
 
 dom.appManagerForm?.addEventListener('submit', (event) => {
@@ -2934,11 +3742,13 @@ updateClock();
 window.setInterval(updateClock, 60 * 1000);
 setActiveView('messages');
 
-bootstrapState().finally(() => {
-  renderAll();
-  setChatStatus(
-    backendEnabled
-      ? '已连接小手机后端。角色、记忆、世界书和聊天会通过后端统一管理。'
-      : '当前为纯前端模式。可直接编辑角色卡、世界书、记忆；配置 OpenAI 兼容接口后即可真实聊天。',
-  );
-});
+bootstrapState()
+  .then(() => refreshDynamicAppRegistry())
+  .finally(() => {
+    renderAll();
+    setChatStatus(
+      backendEnabled
+        ? '已连接小手机后端。角色、记忆、世界书和聊天会通过后端统一管理。'
+        : '当前为纯前端模式。可直接编辑角色卡、世界书、记忆；配置 OpenAI 兼容接口后即可真实聊天。',
+    );
+  });

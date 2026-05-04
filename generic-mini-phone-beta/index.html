@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>手机桌面</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <div class="app-shell">
@@ -176,6 +176,19 @@
 
         <div id="registered-app-views"></div>
 
+        <section class="view dynamic-app-workspace" data-view="dynamic-app">
+          <div class="app-view-topline dynamic-app-topline">
+            <div>
+              <p class="eyebrow" id="dynamic-app-eyebrow">Dynamic App</p>
+              <h2 id="dynamic-app-title">动态 App</h2>
+            </div>
+            <span class="app-view-pill" id="dynamic-app-status">未打开</span>
+          </div>
+          <div class="dynamic-app-frame-shell">
+            <iframe id="dynamic-app-frame" title="动态 App" loading="lazy" referrerpolicy="no-referrer"></iframe>
+            <div class="dynamic-app-empty dynamic-app-empty-visible" id="dynamic-app-empty">选择桌面上的 App 图标后打开。</div>
+          </div>
+        </section>
 
         <section class="view chat-view" data-view="chat">
           <div class="chat-header">
@@ -203,7 +216,11 @@
           <form class="input-bar" id="chat-form">
             <input id="chat-attachment-input" type="file" multiple hidden>
             <button type="button" class="attachment-button" id="attachment-button" aria-label="添加图片或文件" title="添加图片或文件">+</button>
-            <input id="chat-input" type="text" placeholder="发一条消息...">
+            <div class="chat-input-shell">
+              <div class="slash-command-palette" id="slash-command-palette" role="listbox" aria-label="Slash commands" hidden></div>
+              <input id="chat-input" type="text" placeholder="发一条消息..." autocomplete="off" aria-controls="slash-command-palette">
+            </div>
+            <button type="button" class="runtime-pass-through-toggle" id="runtime-pass-through-toggle" aria-pressed="false" title="肘击 AI：关闭">肘击 AI</button>
             <button type="button" class="magic-wand-button" id="magic-wand-button" aria-label="魔法棒：送到后端" title="魔法棒：送到后端">✦</button>
             <button type="submit" class="send-button">发送</button>
           </form>
@@ -335,6 +352,10 @@
                 <button type="button" class="soft-button small-button" id="like-girl-clone-open-public">进入 LikeGirl 分身前台</button>
                 <button type="button" class="secondary-button small-button" id="like-girl-clone-open-admin">进入 LikeGirl 分身后台</button>
               </div>
+              <div class="app-registry-controls">
+                <button type="button" class="secondary-button small-button" id="app-registry-refresh">刷新 App 注册表</button>
+                <p class="registry-status" id="app-registry-status">后端未连接，使用内置 App。</p>
+              </div>
               <article class="info-card">
                 <p class="eyebrow">运行说明</p>
                 <strong>LikeGirl 是独立 Node/SQLite 服务</strong>
@@ -456,15 +477,52 @@
                     <option value="claudecode">Claude Code</option>
                   </select>
                 </label>
-                <label>
-                  <span>权限模式</span>
-                  <select id="character-agent-mode">
-                    <option value="suggest">建议 · 每次工具调用确认</option>
-                    <option value="auto-edit">自动编辑 · 文件编辑自动通过</option>
-                    <option value="full-auto">全自动 · 工作区沙箱内自动通过</option>
-                    <option value="yolo">YOLO · 跳过审批和沙箱</option>
-                  </select>
-                </label>
+                <section class="runtime-settings-section" aria-labelledby="character-runtime-heading">
+                  <div class="runtime-settings-head">
+                    <div>
+                      <p class="eyebrow">9840 Runtime</p>
+                      <strong id="character-runtime-heading">项目设置</strong>
+                    </div>
+                    <span class="runtime-settings-status" id="character-runtime-status">未加载</span>
+                  </div>
+                  <label>
+                    <span>权限模式</span>
+                    <select id="character-agent-mode">
+                      <option value="suggest">建议 · 每次工具调用确认</option>
+                      <option value="auto-edit">自动编辑 · 文件编辑自动通过</option>
+                      <option value="full-auto">全自动 · 工作区沙箱内自动通过</option>
+                      <option value="yolo">YOLO · 跳过审批和沙箱</option>
+                    </select>
+                  </label>
+                  <div class="runtime-toggle-grid">
+                    <label>
+                      <span>Reply footer</span>
+                      <div class="toggle-row">
+                        <input type="checkbox" id="character-runtime-reply-footer">
+                        <span>回复后缀</span>
+                      </div>
+                    </label>
+                    <label>
+                      <span>Context indicator</span>
+                      <div class="toggle-row">
+                        <input type="checkbox" id="character-runtime-context-indicator">
+                        <span>上下文标记</span>
+                      </div>
+                    </label>
+                  </div>
+                  <label>
+                    <span>Work dir</span>
+                    <input type="text" id="character-runtime-work-dir" placeholder="/workspace/project">
+                  </label>
+                  <label>
+                    <span>Disabled commands</span>
+                    <input type="text" id="character-runtime-disabled-commands" placeholder="rm, shutdown">
+                  </label>
+                  <label>
+                    <span>Admin from</span>
+                    <input type="text" id="character-runtime-admin-from" placeholder="admin@example.test">
+                  </label>
+                </section>
                 <label>
                   <span>状态文案</span>
                   <input type="text" id="character-subtitle" placeholder="例如：在线 · 海风很轻">
@@ -513,6 +571,6 @@
     </div>
   </div>
 
-  <script type="module" src="scripts/main.js?v=11"></script>
+  <script type="module" src="scripts/main.js?v=14"></script>
 </body>
 </html>

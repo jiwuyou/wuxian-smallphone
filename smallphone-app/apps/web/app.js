@@ -13,7 +13,19 @@ const state = {
   editingContactId: "",
   archivedExpanded: false,
   threadDebug: null,
+  companionRuntimeSettings: {
+    threadId: "",
+    phase: "idle",
+    available: false,
+    project: "",
+    reason: "",
+    error: "",
+    settings: null,
+  },
 };
+
+let companionRuntimeRequestId = 0;
+let companionRuntimeSaving = false;
 
 const els = {
   contactListActive: document.querySelector("#contact-list-active"),
@@ -59,6 +71,12 @@ const els = {
   companionAgentType: document.querySelector("#companion-agent-type"),
   companionRoleLevel: document.querySelector("#companion-role-level"),
   companionAgentMode: document.querySelector("#companion-agent-mode"),
+  companionRuntimeStatus: document.querySelector("#companion-runtime-status"),
+  companionRuntimeReplyFooter: document.querySelector("#companion-runtime-reply-footer"),
+  companionRuntimeContextIndicator: document.querySelector("#companion-runtime-context-indicator"),
+  companionRuntimeWorkDir: document.querySelector("#companion-runtime-work-dir"),
+  companionRuntimeDisabledCommands: document.querySelector("#companion-runtime-disabled-commands"),
+  companionRuntimeAdminFrom: document.querySelector("#companion-runtime-admin-from"),
   companionTrust: document.querySelector("#companion-trust"),
   companionIntimacy: document.querySelector("#companion-intimacy"),
   companionTension: document.querySelector("#companion-tension"),
@@ -97,6 +115,7 @@ els.closeCompanionDrawer.addEventListener("click", closeCompanionDrawer);
 els.companionDrawerBackdrop.addEventListener("click", closeCompanionDrawer);
 els.companionAgentType?.addEventListener("change", () => {
   populateCompanionAgentModeOptions("", els.companionAgentType.value);
+  renderCompanionRuntimeSettings();
 });
 
 els.companionForm.addEventListener("submit", async (event) => {
@@ -105,8 +124,11 @@ els.companionForm.addEventListener("submit", async (event) => {
   if (!payload.name) {
     return;
   }
+  const runtimeThreadId = state.companionDrawerMode === "edit" ? String(state.selectedThreadId || "") : "";
+  const runtimePayload = buildCompanionRuntimeSettingsPayload();
   if (state.companionDrawerMode === "edit" && state.editingContactId) {
     await apiPatch(`/api/companions/${state.editingContactId}`, payload);
+    await saveCompanionRuntimeSettingsIfAvailable(runtimeThreadId, runtimePayload);
   } else {
     const created = await apiPost("/api/companions", payload);
     state.selectedThreadId = created.thread?.id || state.selectedThreadId;
@@ -436,6 +458,285 @@ async function saveThreadPermissionPatch(patch) {
   await Promise.all([loadThreadPermissions(), loadThreads()]);
 }
 
+function normalizeRuntimeBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  const text = String(value ?? "").trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(text)) return true;
+  if (["false", "0", "no", "off"].includes(text)) return false;
+  return false;
+}
+
+function parseRuntimeCommandList(value) {
+  const list = Array.isArray(value) ? value : String(value || "").split(",");
+  const seen = new Set();
+  return list
+    .map((item) => String(item || "").trim())
+    .filter((item) => {
+      if (!item || seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+}
+
+function normalizeRuntimeProjectSettings(settings = {}) {
+  const source = settings && typeof settings === "object" ? settings : {};
+  const mode = String(source.mode || source.agentMode || "").trim();
+  return {
+    mode,
+    agentMode: String(source.agentMode || mode).trim(),
+    workDir: String(source.workDir || source.work_dir || "").trim(),
+    showContextIndicator: (source.showContextIndicator ?? source.show_context_indicator) === undefined
+      ? true
+      : normalizeRuntimeBoolean(source.showContextIndicator ?? source.show_context_indicator),
+    replyFooter: (source.replyFooter ?? source.reply_footer) === undefined
+      ? true
+      : normalizeRuntimeBoolean(source.replyFooter ?? source.reply_footer),
+    adminFrom: String(source.adminFrom ?? source.admin_from ?? "").trim(),
+    disabledCommands: parseRuntimeCommandList(source.disabledCommands ?? source.disabled_commands),
+  };
+}
+
+function setCompanionRuntimeSettings(nextState) {
+  state.companionRuntimeSettings = {
+    threadId: "",
+    phase: "idle",
+    available: false,
+    project: "",
+    reason: "",
+    error: "",
+    settings: null,
+    ...nextState,
+  };
+}
+
+function getCompanionRuntimeControls() {
+  return [
+    els.companionRuntimeReplyFooter,
+    els.companionRuntimeContextIndicator,
+    els.companionRuntimeWorkDir,
+    els.companionRuntimeDisabledCommands,
+    els.companionRuntimeAdminFrom,
+  ].filter(Boolean);
+}
+
+function setRuntimeInputValue(input, value) {
+  if (!input || document.activeElement === input) return;
+  input.value = value;
+}
+
+function syncCompanionAgentModeFromRuntimeSettings(settings) {
+  const mode = String(settings?.mode || settings?.agentMode || "").trim();
+  if (!mode || !els.companionAgentMode) return;
+  const agentType = els.companionAgentType?.value || getSelectedThread()?.runtime?.agentType || "codex";
+  const selectedMode = normalizeAgentPermissionMode(mode, agentType);
+  const option = Array.from(els.companionAgentMode.options || [])
+    .find((item) => item.value === selectedMode || item.value === mode);
+  if (option) {
+    els.companionAgentMode.value = option.value;
+  }
+}
+
+function renderCompanionRuntimeSettings({ preserveControlValues = false } = {}) {
+  if (!els.companionRuntimeStatus) return;
+  const isCreating = state.companionDrawerMode === "create";
+  const thread = getSelectedThread();
+  const threadId = isCreating ? "" : String(thread?.id || state.selectedThreadId || "").trim();
+  const runtimeState = state.companionRuntimeSettings.threadId === threadId ? state.companionRuntimeSettings : null;
+  const settings = runtimeState?.settings || null;
+  const project = String(runtimeState?.project || thread?.runtime?.project || "").trim();
+  let phase = runtimeState?.phase || "idle";
+  let statusText = "未加载";
+
+  if (isCreating) {
+    phase = "creating";
+    statusText = "创建后可用";
+  } else if (!threadId) {
+    phase = "unavailable";
+    statusText = "缺少 thread";
+  } else if (phase === "loading") {
+    statusText = project ? `加载中 · ${project}` : "加载中";
+  } else if (phase === "available" && settings) {
+    statusText = project ? `已加载 · ${project}` : "已加载";
+  } else if (phase === "error") {
+    statusText = runtimeState?.error ? `错误 · ${runtimeState.error}` : "读取失败";
+  } else if (phase === "unavailable") {
+    statusText = runtimeState?.reason || "Runtime 项目不可用";
+  }
+
+  els.companionRuntimeStatus.textContent = statusText;
+  els.companionRuntimeStatus.classList.toggle("runtime-status-ready", phase === "available");
+  els.companionRuntimeStatus.classList.toggle("runtime-status-loading", phase === "loading" || companionRuntimeSaving);
+  els.companionRuntimeStatus.classList.toggle("runtime-status-error", phase === "error");
+  els.companionRuntimeStatus.classList.toggle("runtime-status-unavailable", phase === "unavailable" || phase === "creating");
+
+  if (!preserveControlValues) {
+    if (els.companionRuntimeReplyFooter) {
+      els.companionRuntimeReplyFooter.checked = Boolean(settings?.replyFooter);
+    }
+    if (els.companionRuntimeContextIndicator) {
+      els.companionRuntimeContextIndicator.checked = Boolean(settings?.showContextIndicator);
+    }
+    setRuntimeInputValue(els.companionRuntimeWorkDir, settings?.workDir || thread?.runtime?.workspaceDir || "");
+    setRuntimeInputValue(els.companionRuntimeDisabledCommands, settings?.disabledCommands?.join(", ") || "");
+    setRuntimeInputValue(els.companionRuntimeAdminFrom, settings?.adminFrom || "");
+  }
+
+  const runtimeControlsDisabled = companionRuntimeSaving
+    || isCreating
+    || phase === "loading"
+    || phase !== "available"
+    || !settings;
+  getCompanionRuntimeControls().forEach((control) => {
+    control.disabled = runtimeControlsDisabled;
+  });
+  if (els.companionAgentMode) {
+    els.companionAgentMode.disabled = companionRuntimeSaving || isCreating || phase === "loading";
+  }
+}
+
+async function loadCompanionRuntimeSettings(threadId, { force = false } = {}) {
+  const targetThreadId = String(threadId || "").trim();
+  const requestId = companionRuntimeRequestId + 1;
+
+  if (!targetThreadId) {
+    companionRuntimeRequestId = requestId;
+    setCompanionRuntimeSettings({
+      threadId: "",
+      phase: "unavailable",
+      reason: "当前联系人缺少 thread。",
+    });
+    renderCompanionRuntimeSettings();
+    return state.companionRuntimeSettings;
+  }
+
+  if (!force
+    && state.companionRuntimeSettings.threadId === targetThreadId
+    && ["available", "unavailable", "error"].includes(state.companionRuntimeSettings.phase)) {
+    renderCompanionRuntimeSettings();
+    return state.companionRuntimeSettings;
+  }
+
+  companionRuntimeRequestId = requestId;
+  const thread = state.threads.find((item) => item.id === targetThreadId) || getSelectedThread();
+  const previousSettings = state.companionRuntimeSettings.threadId === targetThreadId
+    ? state.companionRuntimeSettings.settings
+    : null;
+  setCompanionRuntimeSettings({
+    threadId: targetThreadId,
+    phase: "loading",
+    project: thread?.runtime?.project || "",
+    settings: previousSettings,
+  });
+  renderCompanionRuntimeSettings();
+
+  try {
+    const result = await apiGet(`/api/threads/${encodeURIComponent(targetThreadId)}/runtime-project-settings`);
+    if (companionRuntimeRequestId !== requestId) return null;
+
+    if (result?.available && result?.settings) {
+      const settings = normalizeRuntimeProjectSettings(result.settings);
+      setCompanionRuntimeSettings({
+        threadId: targetThreadId,
+        phase: "available",
+        available: true,
+        project: String(result.project || thread?.runtime?.project || "").trim(),
+        settings,
+      });
+      syncCompanionAgentModeFromRuntimeSettings(settings);
+      renderCompanionRuntimeSettings();
+      return state.companionRuntimeSettings;
+    }
+
+    setCompanionRuntimeSettings({
+      threadId: targetThreadId,
+      phase: "unavailable",
+      project: String(result?.project || thread?.runtime?.project || "").trim(),
+      reason: String(result?.reason || "9840 Runtime 项目不可用。").trim(),
+      settings: null,
+    });
+    renderCompanionRuntimeSettings();
+    return state.companionRuntimeSettings;
+  } catch (error) {
+    if (companionRuntimeRequestId !== requestId) return null;
+    setCompanionRuntimeSettings({
+      threadId: targetThreadId,
+      phase: "error",
+      project: thread?.runtime?.project || "",
+      error: error instanceof Error ? error.message : String(error),
+      settings: previousSettings,
+    });
+    renderCompanionRuntimeSettings();
+    return state.companionRuntimeSettings;
+  }
+}
+
+function buildCompanionRuntimeSettingsPayload() {
+  const settings = state.companionRuntimeSettings.available
+    ? state.companionRuntimeSettings.settings
+    : null;
+  return {
+    mode: String(els.companionAgentMode?.value || "").trim(),
+    workDir: els.companionRuntimeWorkDir?.value.trim() || "",
+    showContextIndicator: Boolean(els.companionRuntimeContextIndicator?.checked),
+    replyFooter: Boolean(els.companionRuntimeReplyFooter?.checked),
+    adminFrom: els.companionRuntimeAdminFrom?.value.trim() || "",
+    disabledCommands: parseRuntimeCommandList(els.companionRuntimeDisabledCommands?.value || ""),
+  };
+}
+
+async function saveCompanionRuntimeSettingsIfAvailable(threadId, payload) {
+  const targetThreadId = String(threadId || "").trim();
+  if (!targetThreadId || state.companionRuntimeSettings.threadId !== targetThreadId || !state.companionRuntimeSettings.available) {
+    return false;
+  }
+
+  let preserveControlValues = true;
+  companionRuntimeSaving = true;
+  renderCompanionRuntimeSettings({ preserveControlValues: true });
+  try {
+    const result = await apiPatch(`/api/threads/${encodeURIComponent(targetThreadId)}/runtime-project-settings`, payload);
+    if (result?.available && result?.settings) {
+      const settings = normalizeRuntimeProjectSettings(result.settings);
+      preserveControlValues = false;
+      setCompanionRuntimeSettings({
+        threadId: targetThreadId,
+        phase: "available",
+        available: true,
+        project: String(result.project || state.companionRuntimeSettings.project || "").trim(),
+        settings,
+      });
+      syncCompanionAgentModeFromRuntimeSettings(settings);
+      return true;
+    }
+
+    preserveControlValues = false;
+    setCompanionRuntimeSettings({
+      threadId: targetThreadId,
+      phase: "unavailable",
+      project: String(result?.project || state.companionRuntimeSettings.project || "").trim(),
+      reason: String(result?.reason || "9840 Runtime 项目不可用。").trim(),
+      settings: null,
+    });
+    return false;
+  } catch (error) {
+    setCompanionRuntimeSettings({
+      threadId: targetThreadId,
+      phase: "error",
+      project: state.companionRuntimeSettings.project || "",
+      error: error instanceof Error ? error.message : String(error),
+      settings: state.companionRuntimeSettings.settings,
+    });
+    throw error;
+  } finally {
+    companionRuntimeSaving = false;
+    renderCompanionRuntimeSettings({ preserveControlValues });
+  }
+}
+
 function renderReminders() {
   const reminders = state.selectedThreadId
     ? state.reminders.filter((item) => item.threadId === state.selectedThreadId)
@@ -463,6 +764,13 @@ async function openCompanionDrawer(mode) {
   els.companionDrawer.setAttribute("aria-hidden", "false");
   els.companionDrawerTitle.textContent = mode === "edit" ? "编辑角色" : "新建角色";
   if (mode === "edit" && contact && thread) {
+    setCompanionRuntimeSettings({
+      threadId: thread.id,
+      phase: "loading",
+      project: thread.runtime?.project || "",
+      settings: state.companionRuntimeSettings.threadId === thread.id ? state.companionRuntimeSettings.settings : null,
+    });
+    renderCompanionRuntimeSettings();
     let permissions = state.threadPermissions;
     if (!permissions || permissions.threadId !== thread.id) {
       try {
@@ -496,12 +804,19 @@ async function openCompanionDrawer(mode) {
       els.companionAgentType?.value || "codex",
       permissions?.agentCapabilities?.modes,
     );
+    await loadCompanionRuntimeSettings(thread.id, { force: true });
   } else {
     state.editingContactId = "";
     els.companionForm.reset();
     if (els.companionAgentType) els.companionAgentType.value = "codex";
     if (els.companionRoleLevel) els.companionRoleLevel.value = "contact";
     populateCompanionAgentModeOptions("suggest", "codex");
+    setCompanionRuntimeSettings({
+      threadId: "",
+      phase: "creating",
+      reason: "创建联系人后可编辑 9840 Runtime。",
+    });
+    renderCompanionRuntimeSettings();
   }
 }
 
@@ -575,6 +890,22 @@ function populateCompanionAgentModeOptions(selectedMode, agentType, runtimeModes
   els.companionAgentMode.innerHTML = modes
     .map((mode) => `<option value="${escapeHtml(mode.key)}" ${mode.key === selected ? "selected" : ""}>${escapeHtml(mode.label)}</option>`)
     .join("");
+}
+
+function normalizeAgentPermissionMode(value, agentType) {
+  const modes = getAgentModeOptions(agentType);
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase().replace(/[\s_]+/g, "-");
+  const aliases = {
+    autoedit: "auto-edit",
+    fullauto: "full-auto",
+    bypasspermissions: "bypassPermissions",
+    bypass: "bypassPermissions",
+    yolo: agentType === "claudecode" ? "bypassPermissions" : "yolo",
+  };
+  const candidate = aliases[normalized.replaceAll("-", "")] || aliases[normalized] || raw;
+  const found = modes.find((mode) => mode.key === candidate || mode.key.toLowerCase() === normalized);
+  return found?.key || raw;
 }
 
 function normalizeAgentModeOptions(runtimeModes) {

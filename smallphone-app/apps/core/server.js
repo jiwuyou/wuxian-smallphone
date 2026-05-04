@@ -322,6 +322,15 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await service.saveThreadPermissions(threadPermissionsMatch[1], body));
   }
 
+  const threadRuntimeProjectSettingsMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/runtime-project-settings$/);
+  if (threadRuntimeProjectSettingsMatch && method === "GET") {
+    return sendJson(res, 200, await service.getThreadRuntimeProjectSettings(threadRuntimeProjectSettingsMatch[1]));
+  }
+  if (threadRuntimeProjectSettingsMatch && method === "PATCH") {
+    const body = await readJson(req);
+    return sendJson(res, 200, await service.saveThreadRuntimeProjectSettings(threadRuntimeProjectSettingsMatch[1], body));
+  }
+
   const worldbookDetailMatch = url.pathname.match(/^\/api\/worldbook\/([^/]+)$/);
   if (worldbookDetailMatch && method === "DELETE") {
     return sendJson(res, 200, service.deleteWorldbookEntry(worldbookDetailMatch[1]));

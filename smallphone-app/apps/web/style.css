@@ -487,6 +487,72 @@ body {
   font-weight: 700;
 }
 
+.form-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runtime-project-eyebrow {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.runtime-settings-status {
+  max-width: 58%;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.54);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.runtime-status-ready {
+  color: #4d743d;
+  background: rgba(83, 128, 75, 0.12);
+}
+
+.runtime-status-loading {
+  cursor: progress;
+}
+
+.runtime-status-error {
+  color: #9b2c1a;
+  border-color: rgba(155, 44, 26, 0.28);
+}
+
+.runtime-status-unavailable {
+  color: var(--muted);
+}
+
+.runtime-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.runtime-toggle-row {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.companion-form input[type="checkbox"] {
+  width: auto;
+  flex: none;
+}
+
 .form-field {
   display: grid;
   gap: 6px;

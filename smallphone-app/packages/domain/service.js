@@ -1317,6 +1317,130 @@ class SmallPhoneService {
     };
   }
 
+  async getThreadRuntimeProjectSettings(threadId) {
+    const target = this.resolveRuntimeProjectSettingsTarget(threadId);
+    if (!target.available) {
+      return target;
+    }
+    try {
+      const data = await this.ccConnectProjects.getProject({ name: target.project });
+      return buildRuntimeProjectSettingsResponse(target, data);
+    } catch (error) {
+      return unavailableRuntimeProjectSettings(threadId, {
+        reason: String(error?.message || error || ""),
+        project: target.project,
+      });
+    }
+  }
+
+  async saveThreadRuntimeProjectSettings(threadId, input = {}) {
+    const target = this.resolveRuntimeProjectSettingsTarget(threadId);
+    if (!target.available) {
+      return target;
+    }
+    const patch = normalizeRuntimeProjectSettingsPatch(input);
+    if (Object.keys(patch).length) {
+      try {
+        await this.ccConnectProjects.updateProjectSettings({
+          name: target.project,
+          settings: patch,
+        });
+      } catch (error) {
+        return unavailableRuntimeProjectSettings(threadId, {
+          reason: String(error?.message || error || ""),
+          project: target.project,
+        });
+      }
+    }
+    let data;
+    try {
+      data = await this.ccConnectProjects.getProject({ name: target.project });
+    } catch (error) {
+      return unavailableRuntimeProjectSettings(threadId, {
+        reason: String(error?.message || error || ""),
+        project: target.project,
+      });
+    }
+    const response = buildRuntimeProjectSettingsResponse(target, data);
+    this.syncLocalRuntimeProjectSettings(threadId, response.settings, patch);
+    return response;
+  }
+
+  resolveRuntimeProjectSettingsTarget(threadId) {
+    const target = this.resolvePermissionTarget(threadId);
+    if (this.runtimeInfo.id !== "cc-webclient") {
+      return unavailableRuntimeProjectSettings(threadId, {
+        reason: "runtime project settings are only available for cc-webclient runtime",
+      });
+    }
+    const project = normalizeRuntimeProjectName(target.runtimeProject || target.project);
+    if (!project) {
+      return unavailableRuntimeProjectSettings(threadId, {
+        reason: "thread has no cc-webclient runtime project",
+      });
+    }
+    if (!this.projectInfo.configured) {
+      return unavailableRuntimeProjectSettings(threadId, {
+        reason: "cc-connect project client is not configured",
+        project,
+      });
+    }
+    return {
+      ok: true,
+      available: true,
+      skipped: false,
+      threadId: target.threadId,
+      project,
+      agentType: target.agentType,
+    };
+  }
+
+  syncLocalRuntimeProjectSettings(threadId, settings = {}, patch = {}) {
+    const shouldSyncMode = hasOwn(patch, "mode") && String(settings.mode || "").trim();
+    const shouldSyncWorkDir = hasOwn(patch, "work_dir") && String(settings.workDir || "").trim();
+    if (!shouldSyncMode && !shouldSyncWorkDir) {
+      return { ok: true, changed: false };
+    }
+    const updatedAt = nowIso();
+    let changed = false;
+    this.store.update((state) => {
+      const thread = state.threads.find((item) => item.id === threadId);
+      const contact = state.contacts.find((item) => item.id === thread?.contactId);
+      const character = state.characters.find((item) => item.id === contact?.characterId);
+      if (!thread || !contact || !character) {
+        throw new Error(`Runtime project settings target became unavailable: ${threadId}`);
+      }
+      if (shouldSyncMode) {
+        const mode = String(settings.mode || "").trim();
+        const agentType = normalizeAgentType(thread.runtime?.agentType) || "codex";
+        if (String(character.permissionPolicy?.agentMode || "").trim() !== mode) {
+          character.permissionPolicy = {
+            ...(character.permissionPolicy || {}),
+            agentMode: mode,
+            template: templateForAgentMode(mode, agentType),
+            rules: normalizePermissionRules(character.permissionPolicy?.rules || {}),
+            updatedAt,
+          };
+          character.updatedAt = updatedAt;
+          changed = true;
+        }
+      }
+      if (shouldSyncWorkDir) {
+        const workDir = String(settings.workDir || "").trim();
+        if (String(thread.runtime?.workspaceDir || "").trim() !== workDir) {
+          thread.runtime = {
+            ...(thread.runtime || {}),
+            workspaceDir: workDir,
+          };
+          thread.updatedAt = updatedAt;
+          changed = true;
+        }
+      }
+      return state;
+    });
+    return { ok: true, changed, updatedAt: changed ? updatedAt : "" };
+  }
+
   async getRuntimeProjectPermissionInfo(target) {
     const project = String(target?.runtimeProject || target?.project || "").trim();
     if (!project || this.runtimeInfo.id !== "cc-webclient") {
@@ -1869,8 +1993,12 @@ class SmallPhoneService {
   }
 
   async sendMessage(threadId, input) {
-    const text = String(input?.text || "").trim();
     const attachmentIds = normalizeAttachmentIds(input?.attachments || input?.attachmentIds || []);
+    const rawText = input?.text == null ? "" : String(input.text);
+    const displayText = rawText.trim();
+    const escapedPassThrough = displayText.startsWith("//");
+    const text = escapedPassThrough ? displayText.slice(1) : displayText;
+    const runtimePassThrough = Boolean(input?.runtimePassThrough) && !escapedPassThrough && attachmentIds.length === 0;
     if (!text && !attachmentIds.length) {
       throw new Error("Message text cannot be empty.");
     }
@@ -1980,6 +2108,8 @@ class SmallPhoneService {
         relationship: contact.relationship,
         memories,
         messages,
+        runtimePassThrough,
+        ...(runtimePassThrough ? { runtimePassThroughText: rawText } : {}),
         attachments: attachmentIds
           .map((id) => nextState.attachments.find((item) => item.id === id) || null)
           .filter(Boolean)
@@ -3446,6 +3576,155 @@ function normalizeRuntimePermissionModes(input) {
     .filter(Boolean);
 }
 
+function normalizeRuntimeProjectName(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "(unset)") {
+    return "";
+  }
+  return text;
+}
+
+function normalizeRuntimeProjectSettingsPatch(input = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const patch = {};
+  const mode = firstOwnSetting(source, ["mode", "agentMode", "agent_mode"]);
+  if (mode.found) {
+    const value = String(mode.value || "").trim();
+    if (value) {
+      patch.mode = value;
+    }
+  }
+  const workDir = firstOwnSetting(source, ["workDir", "work_dir"]);
+  if (workDir.found) {
+    const value = String(workDir.value || "").trim();
+    if (value) {
+      patch.work_dir = value;
+    }
+  }
+  const showContextIndicator = firstOwnSetting(source, ["showContextIndicator", "show_context_indicator"]);
+  if (showContextIndicator.found) {
+    const value = normalizeBooleanSetting(showContextIndicator.value);
+    if (value !== null) {
+      patch.show_context_indicator = value;
+    }
+  }
+  const replyFooter = firstOwnSetting(source, ["replyFooter", "reply_footer"]);
+  if (replyFooter.found) {
+    const value = normalizeBooleanSetting(replyFooter.value);
+    if (value !== null) {
+      patch.reply_footer = value;
+    }
+  }
+  const adminFrom = firstOwnSetting(source, ["adminFrom", "admin_from"]);
+  if (adminFrom.found) {
+    patch.admin_from = String(adminFrom.value ?? "").trim();
+  }
+  const disabledCommands = firstOwnSetting(source, ["disabledCommands", "disabled_commands"]);
+  if (disabledCommands.found && Array.isArray(disabledCommands.value)) {
+    patch.disabled_commands = dedupeStrings(disabledCommands.value);
+  }
+  return patch;
+}
+
+function firstOwnSetting(source, keys) {
+  for (const key of keys) {
+    if (hasOwn(source, key)) {
+      return { found: true, value: source[key] };
+    }
+  }
+  return { found: false, value: undefined };
+}
+
+function normalizeBooleanSetting(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  const text = String(value ?? "").trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(text)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(text)) {
+    return false;
+  }
+  return null;
+}
+
+function buildRuntimeProjectSettingsResponse(target = {}, data = {}) {
+  const project = unwrapRuntimeProjectData(data);
+  return {
+    ok: true,
+    available: true,
+    skipped: false,
+    threadId: String(target.threadId || "").trim(),
+    project: normalizeRuntimeProjectName(project.name || target.project),
+    settings: sanitizeRuntimeProjectSettings(project),
+  };
+}
+
+function unavailableRuntimeProjectSettings(threadId, options = {}) {
+  return {
+    ok: false,
+    available: false,
+    skipped: true,
+    reason: sanitizeRuntimeProjectSettingsReason(options.reason || "runtime project settings unavailable"),
+    threadId: String(threadId || "").trim(),
+    project: normalizeRuntimeProjectName(options.project || ""),
+    settings: null,
+  };
+}
+
+function sanitizeRuntimeProjectSettingsReason(value) {
+  return String(value || "")
+    .trim()
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/([?&](?:token|access_token|authorization)=)[^&\s]+/gi, "$1[redacted]");
+}
+
+function unwrapRuntimeProjectData(data = {}) {
+  if (data?.project && typeof data.project === "object") {
+    return data.project;
+  }
+  return data && typeof data === "object" ? data : {};
+}
+
+function sanitizeRuntimeProjectSettings(project = {}) {
+  const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
+  const mode = String(readRuntimeProjectField(project, settings, "mode", "agent_mode", "agentMode") || "").trim();
+  const showContextIndicator = normalizeBooleanSetting(
+    readRuntimeProjectField(project, settings, "show_context_indicator", "showContextIndicator"),
+  );
+  const disabledCommands = readRuntimeProjectField(project, settings, "disabled_commands", "disabledCommands");
+  return {
+    mode,
+    agentMode: mode,
+    workDir: String(readRuntimeProjectField(project, settings, "work_dir", "workDir") || "").trim(),
+    showContextIndicator: showContextIndicator === null ? true : showContextIndicator,
+    replyFooter: normalizeBooleanSetting(
+      readRuntimeProjectField(project, settings, "reply_footer", "replyFooter"),
+    ) !== false,
+    adminFrom: String(readRuntimeProjectField(project, settings, "admin_from", "adminFrom") ?? "").trim(),
+    disabledCommands: Array.isArray(disabledCommands) ? dedupeStrings(disabledCommands) : [],
+  };
+}
+
+function readRuntimeProjectField(project, settings, ...keys) {
+  for (const key of keys) {
+    if (hasOwn(project, key)) {
+      return project[key];
+    }
+  }
+  for (const key of keys) {
+    if (hasOwn(settings, key)) {
+      return settings[key];
+    }
+  }
+  return undefined;
+}
+
 function normalizeAgentPermissionMode(value, agentType) {
   const capabilities = resolveAgentPermissionCapabilities(agentType);
   const raw = String(value || "").trim();
@@ -3666,6 +3945,25 @@ function createCcConnectProjectClient(options = {}) {
       if (!name || !mode) {
         return { ok: false, skipped: true, reason: "missing project or mode" };
       }
+      const result = await this.updateProjectSettings({
+        name,
+        settings: { mode },
+      });
+      return {
+        ok: result.ok,
+        skipped: result.skipped,
+        reason: result.reason,
+        name,
+        mode,
+        data: result.data,
+      };
+    },
+    async updateProjectSettings(input = {}) {
+      const name = String(input.name || "").trim();
+      const settings = normalizeRuntimeProjectSettingsPatch(input.settings || input);
+      if (!name || !Object.keys(settings).length) {
+        return { ok: false, skipped: true, reason: "missing project or settings" };
+      }
       if (!configured) {
         return { ok: false, skipped: true, reason: "cc-connect project client is not configured" };
       }
@@ -3674,9 +3972,9 @@ function createCcConnectProjectClient(options = {}) {
         managementToken: token,
         path: `/api/v1/projects/${encodeURIComponent(name)}`,
         method: "PATCH",
-        body: { mode },
+        body: settings,
       });
-      return { ok: true, name, mode, data };
+      return { ok: true, name, settings, data };
     },
     async ensureProject(input = {}) {
       const name = String(input.name || "").trim();

@@ -172,7 +172,10 @@ function createCcWebclientAdapter(config) {
       const fileAttachments = attachments.filter((att) => normalizeAttachmentKind(att) === "file");
 
       const webclientImages = await buildWebclientImages(imageAttachments);
-      const message = buildWebclientTurnMessage(payload, fileAttachments);
+      const message =
+        payload?.runtimePassThrough === true && attachments.length === 0
+          ? getPassThroughMessageText(payload)
+          : buildWebclientTurnMessage(payload, fileAttachments);
 
       const sendUrl = buildWebclientUrl(baseUrl, appId, `/api/v1/projects/${encodeURIComponent(turnProject)}/send`);
       const sendResponse = await fetchWithTimeout(
@@ -1191,7 +1194,7 @@ async function buildWebclientImages(imageAttachments) {
 }
 
 function buildWebclientTurnMessage(payload, fileAttachments) {
-  const latestUserText = payload?.messages?.filter((item) => item.role === "user").at(-1)?.content || "";
+  const latestUserText = getLatestUserMessageText(payload);
   const triggerNote = normalizeText(payload?.trigger?.note);
   const primaryText =
     payload?.trigger?.mode === "decision_only"
@@ -1222,6 +1225,16 @@ function buildWebclientTurnMessage(payload, fileAttachments) {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function getLatestUserMessageText(payload) {
+  const content = payload?.messages?.filter((item) => item.role === "user").at(-1)?.content;
+  return typeof content === "string" ? content : "";
+}
+
+function getPassThroughMessageText(payload) {
+  const content = payload?.runtimePassThroughText;
+  return typeof content === "string" ? content : getLatestUserMessageText(payload);
 }
 
 function buildWebclientFileBlock(fileAttachments) {

@@ -40,10 +40,155 @@ function makeResponse({ ok, status, json, text, headers, bodyBytes }) {
   };
 }
 
+async function sendWebclientTestTurn(payload = {}) {
+  let sendBody = null;
+  const calls = [];
+  const fetchStub = async (url, options = {}) => {
+    const method = String(options.method || "GET").toUpperCase();
+    const u = new URL(String(url));
+    calls.push({ method, pathname: u.pathname, search: u.search, body: options.body || "" });
+
+    if (method === "POST" && u.pathname.endsWith("/sessions")) {
+      const body = JSON.parse(String(options.body || "{}"));
+      return makeResponse({
+        ok: true,
+        status: 200,
+        json: {
+          ok: true,
+          data: {
+            id: "s1",
+            session_key: body.session_key,
+            name: body.name,
+          },
+        },
+      });
+    }
+
+    if (method === "POST" && u.pathname.endsWith("/send")) {
+      sendBody = JSON.parse(String(options.body || "{}"));
+      return makeResponse({
+        ok: true,
+        status: 200,
+        json: {
+          ok: true,
+          data: {
+            session_id: "s1",
+            outbox_id: "out-1",
+          },
+        },
+      });
+    }
+
+    if (method === "GET" && u.pathname.includes("/sessions/s1")) {
+      return makeResponse({
+        ok: true,
+        status: 200,
+        json: {
+          ok: true,
+          data: {
+            id: "s1",
+            history: [
+              {
+                id: "a1",
+                seq: 2,
+                role: "assistant",
+                user_message_id: "out-1",
+                content: "ok",
+              },
+            ],
+            run_events: [],
+          },
+        },
+      });
+    }
+
+    return makeResponse({ ok: false, status: 500, text: `unexpected fetch ${method} ${u.pathname}` });
+  };
+
+  const runtime = createRuntimeAdapter({
+    mode: "cc-webclient",
+    webclientBaseUrl: "http://127.0.0.1:9840",
+    webclientToken: "test-token",
+    webclientAppId: "smallphone",
+    ccConnectProject: "proj",
+    timeoutMs: 2000,
+    pollIntervalMs: 1,
+    fetch: fetchStub,
+  });
+
+  await runtime.sendTurn({
+    runtimeSessionId: "smallphone-legacy-bridge-replyctx",
+    thread: {
+      id: "thread-abc",
+      title: "Thread",
+      runtime: { sessionKey: "smallphone:thread:thread-abc", sessionGeneration: 1 },
+    },
+    contact: { id: "c1", displayName: "Alice" },
+    character: { name: "Bob", persona: "persona" },
+    relationship: { trust: 0.5, intimacy: 0.1, tension: 0.2 },
+    memories: [],
+    messages: [{ role: "user", content: "/help" }],
+    turnContext: null,
+    attachments: [],
+    ...payload,
+  });
+
+  assert.ok(sendBody, "expected cc-webclient send body");
+  return { sendBody, calls };
+}
+
 test("createRuntimeAdapter recognizes cc-webclient modes", () => {
   assert.equal(createRuntimeAdapter({ mode: "cc-webclient" }).describe().id, "cc-webclient");
   assert.equal(createRuntimeAdapter({ mode: "cc_webclient" }).describe().id, "cc-webclient");
   assert.equal(createRuntimeAdapter({ mode: "ccwebclient" }).describe().id, "cc-webclient");
+});
+
+test("cc-webclient adapter wraps user text by default", async () => {
+  const { sendBody } = await sendWebclientTestTurn();
+
+  assert.match(sendBody.message, /^SmallPhone turn/);
+  assert.match(sendBody.message, /User message:\n\/help/);
+  assert.notEqual(sendBody.message, "/help");
+});
+
+test("cc-webclient adapter sends explicit raw text in pass-through mode", async () => {
+  const { sendBody } = await sendWebclientTestTurn({
+    runtimePassThrough: true,
+    runtimePassThroughText: "  /help  ",
+    messages: [
+      { role: "assistant", content: "previous" },
+      { role: "user", content: "/help" },
+    ],
+  });
+
+  assert.equal(sendBody.message, "  /help  ");
+});
+
+test("cc-webclient adapter wraps escaped pass-through text when pass-through is disabled", async () => {
+  const { sendBody } = await sendWebclientTestTurn({
+    runtimePassThrough: false,
+    runtimePassThroughText: "  //help  ",
+    messages: [{ role: "user", content: "/help" }],
+  });
+
+  assert.match(sendBody.message, /^SmallPhone turn/);
+  assert.match(sendBody.message, /User message:\n\/help/);
+  assert.doesNotMatch(sendBody.message, /\/\/help/);
+});
+
+test("cc-webclient adapter keeps wrapped mode when pass-through has attachments", async () => {
+  const { sendBody } = await sendWebclientTestTurn({
+    runtimePassThrough: true,
+    runtimePassThroughText: "  /help  ",
+    messages: [{ role: "user", content: "/help" }],
+    attachments: [
+      { id: "att-file", kind: "file", localPath: "/tmp/note.txt", mimeType: "text/plain", fileName: "note.txt", size: 5 },
+    ],
+  });
+
+  assert.match(sendBody.message, /^SmallPhone turn/);
+  assert.match(sendBody.message, /Attached files/i);
+  assert.match(sendBody.message, /User message:\n\/help/);
 });
 
 test("cc-webclient adapter sends images and polls for assistant reply + attachments", async () => {

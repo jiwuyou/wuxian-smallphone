@@ -117,8 +117,14 @@
           <textarea id="companion-worldbook-content" rows="4" placeholder="默认世界书内容"></textarea>
           <textarea id="companion-thread-summary" rows="3" placeholder="线程摘要"></textarea>
           <textarea id="companion-greeting" rows="3" placeholder="初始问候（仅创建时使用）"></textarea>
-          <section class="form-section">
-            <div class="form-section-title">执行引擎</div>
+          <section class="form-section runtime-project-section" aria-labelledby="companion-runtime-heading">
+            <div class="form-section-head">
+              <div>
+                <div class="form-section-title">执行引擎</div>
+                <div id="companion-runtime-heading" class="runtime-project-eyebrow">9840 Runtime</div>
+              </div>
+              <span id="companion-runtime-status" class="runtime-settings-status">未加载</span>
+            </div>
             <div class="grid-two">
               <label class="form-field">
                 <span>Agent</span>
@@ -138,6 +144,34 @@
             <label class="form-field">
               <span>权限模式</span>
               <select id="companion-agent-mode"></select>
+            </label>
+            <div class="runtime-toggle-grid">
+              <label class="form-field runtime-toggle-field">
+                <span>Reply footer</span>
+                <span class="runtime-toggle-row">
+                  <input id="companion-runtime-reply-footer" type="checkbox" />
+                  <span>回复后缀</span>
+                </span>
+              </label>
+              <label class="form-field runtime-toggle-field">
+                <span>Context indicator</span>
+                <span class="runtime-toggle-row">
+                  <input id="companion-runtime-context-indicator" type="checkbox" />
+                  <span>上下文标记</span>
+                </span>
+              </label>
+            </div>
+            <label class="form-field">
+              <span>Work dir</span>
+              <input id="companion-runtime-work-dir" placeholder="/workspace/project" />
+            </label>
+            <label class="form-field">
+              <span>Disabled commands</span>
+              <input id="companion-runtime-disabled-commands" placeholder="rm, shutdown" />
+            </label>
+            <label class="form-field">
+              <span>Admin from</span>
+              <input id="companion-runtime-admin-from" placeholder="admin@example.test" />
             </label>
           </section>
           <div class="grid-two">
