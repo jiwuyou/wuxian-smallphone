@@ -539,6 +539,14 @@ body {
   gap: 10px;
 }
 
+.text-mode-section .runtime-toggle-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.text-mode-section .runtime-toggle-grid label:last-child {
+  grid-column: 1 / -1;
+}
+
 .runtime-toggle-row {
   display: flex;
   align-items: center;
@@ -551,6 +559,25 @@ body {
 .companion-form input[type="checkbox"] {
   width: auto;
   flex: none;
+}
+
+.companion-form input[type="range"] {
+  padding: 0;
+  accent-color: #cf6437;
+}
+
+.range-field strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.message-content {
+  display: grid;
+  gap: 8px;
+}
+
+.message-segment {
+  display: block;
 }
 
 .form-field {

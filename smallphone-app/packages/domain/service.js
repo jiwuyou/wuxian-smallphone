@@ -58,6 +58,7 @@ const WORKSPACE_ATTACHMENT_MIME_TYPES = {
   ".csv": "text/csv",
   ".json": "application/json",
 };
+const DEFAULT_TIMEZONE = "Etc/UTC";
 const DEFAULT_PERMISSION_TEMPLATE = "safe";
 const DEFAULT_PERMISSION_CHECKS = [
   "chat.send",
@@ -253,12 +254,15 @@ class SmallPhoneService {
       const character = hydrateCharacter(state, state.characters.find((item) => item.id === contact.characterId) || null);
       const thread = state.threads.find((item) => item.contactId === contact.id) || null;
       const routedThread = thread ? attachThreadRouting(thread, this.runtimeInfo.id, this.paths) : null;
+      const timeSettings = resolveThreadTimeSettings({ contact, thread });
       return {
         ...contact,
+        timeSettings,
         character,
         thread: routedThread
           ? {
               ...routedThread,
+              timeSettings,
               summary: resolveThreadProfileSummary(routedThread, contact, character),
             }
           : null,
@@ -290,10 +294,12 @@ class SmallPhoneService {
       const character = contact ? hydrateCharacter(state, state.characters.find((item) => item.id === contact.characterId) || null) : null;
       const lastMessage = state.messages.filter((item) => item.threadId === thread.id).at(-1) || null;
       const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
+      const timeSettings = resolveThreadTimeSettings({ contact, thread });
       return {
         ...routedThread,
+        timeSettings,
         summary: resolveThreadProfileSummary(routedThread, contact, character),
-        contact: contact ? { ...contact, character } : null,
+        contact: contact ? { ...contact, timeSettings, character } : null,
         lastMessage,
         relationshipState:
           state.relationshipStates.find(
@@ -801,6 +807,7 @@ class SmallPhoneService {
         roleLevel: payload.roleLevel,
         status: "active",
         agentId,
+        timeSettings: payload.timeSettings,
         worldbookScopeIds: [ids.worldbookEntryId],
         relationship: {
           trust: payload.relationship.trust,
@@ -821,6 +828,7 @@ class SmallPhoneService {
         channel: "smallphone",
         roleLevel: payload.roleLevel,
         summary: payload.threadSummary || `${payload.name} 的独立一对一窗口。`,
+        timeSettings: payload.timeSettings,
         runtimeSessionId: "",
         runtime: {
           provider: this.runtimeInfo.id || "mock",
@@ -999,6 +1007,7 @@ class SmallPhoneService {
       liveContact.displayName = payload.displayName;
       liveContact.roleLevel = payload.roleLevel;
       liveContact.agentId = payload.agentId;
+      liveContact.timeSettings = payload.timeSettings;
       liveContact.relationship = {
         trust: payload.relationship.trust,
         intimacy: payload.relationship.intimacy,
@@ -1010,6 +1019,7 @@ class SmallPhoneService {
       liveThread.title = payload.threadTitle;
       liveThread.roleLevel = payload.roleLevel;
       liveThread.summary = payload.threadSummary;
+      liveThread.timeSettings = payload.timeSettings;
       liveThread.windowId = payload.windowId;
       liveThread.channelId = payload.channelId;
       liveThread.updatedAt = updatedAt;
@@ -1826,6 +1836,7 @@ class SmallPhoneService {
       relationship: contact.relationship,
       memories,
       messages,
+      timeContext: buildRuntimeTimeContext(resolveThreadTimeSettings({ contact, thread })),
       turnContext,
       trigger: {
         type: "scheduled_check",
@@ -1994,10 +2005,13 @@ class SmallPhoneService {
 
   async sendMessage(threadId, input) {
     const attachmentIds = normalizeAttachmentIds(input?.attachments || input?.attachmentIds || []);
-    const rawText = input?.text == null ? "" : String(input.text);
+    const textParts = normalizeRuntimeTextParts(input?.textParts || input?.messageParts || input?.parts);
+    const rawText = input?.text == null ? textParts.join("\n") : String(input.text);
     const displayText = rawText.trim();
     const escapedPassThrough = displayText.startsWith("//");
     const text = escapedPassThrough ? displayText.slice(1) : displayText;
+    const runtimeTextParts = textParts.length ? textParts : text ? [text] : [];
+    const runtimeUserText = buildRuntimeUserText(runtimeTextParts);
     const runtimePassThrough = Boolean(input?.runtimePassThrough) && !escapedPassThrough && attachmentIds.length === 0;
     if (!text && !attachmentIds.length) {
       throw new Error("Message text cannot be empty.");
@@ -2016,6 +2030,7 @@ class SmallPhoneService {
     if (!character) {
       throw new Error(`Character not found for contact: ${contact.id}`);
     }
+    const timeContext = buildRuntimeTimeContext(resolveThreadTimeSettings({ contact, thread }));
 
     const resolvedAttachments = attachmentIds.map((id) => state.attachments.find((item) => item.id === id) || null);
     if (resolvedAttachments.some((item) => !item)) {
@@ -2080,6 +2095,7 @@ class SmallPhoneService {
     });
 
     const messages = nextState.messages.filter((item) => item.threadId === threadId);
+    const runtimeMessages = buildRuntimeMessages(messages, runtimeUserText);
     const memories = nextState.memories
       .filter((item) => item.threadId === threadId || item.scope === "global")
       .sort((a, b) => b.salience - a.salience)
@@ -2107,9 +2123,15 @@ class SmallPhoneService {
         character,
         relationship: contact.relationship,
         memories,
-        messages,
+        messages: runtimeMessages,
+        originalMessages: messages,
+        runtimeUserText,
+        runtimeTextParts,
+        timeContext,
         runtimePassThrough,
-        ...(runtimePassThrough ? { runtimePassThroughText: rawText } : {}),
+        ...(runtimePassThrough
+          ? { runtimePassThroughText: runtimeTextParts.length > 1 ? runtimeUserText : rawText }
+          : {}),
         attachments: attachmentIds
           .map((id) => nextState.attachments.find((item) => item.id === id) || null)
           .filter(Boolean)
@@ -2934,6 +2956,112 @@ function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
 }
 
+function normalizeRuntimeTextParts(input) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input
+    .map((item) => String(item == null ? "" : item).trim())
+    .filter(Boolean);
+}
+
+function buildRuntimeUserText(parts) {
+  const normalizedParts = normalizeRuntimeTextParts(parts);
+  if (normalizedParts.length <= 1) {
+    return normalizedParts[0] || "";
+  }
+  return normalizedParts.map((part, index) => `当前消息第${index + 1}条：${part}`).join("\n");
+}
+
+function buildRuntimeMessages(messages, runtimeUserText) {
+  const records = Array.isArray(messages) ? messages : [];
+  const runtimeText = String(runtimeUserText || "").trim();
+  if (!runtimeText) {
+    return records;
+  }
+  const output = records.map((item) => ({ ...item }));
+  for (let index = output.length - 1; index >= 0; index -= 1) {
+    if (output[index]?.role !== "user") {
+      continue;
+    }
+    output[index] = {
+      ...output[index],
+      content: runtimeText,
+      originalContent: output[index].content,
+    };
+    break;
+  }
+  return output;
+}
+
+function normalizeTimeSettingsInput(input = {}) {
+  const enabled = Boolean(input?.enabled || input?.injectCurrentTime || input?.timeInjectionEnabled);
+  return {
+    enabled,
+    timezone: normalizeIanaTimezone(input?.timezone || input?.timeZone || input?.tz) || DEFAULT_TIMEZONE,
+  };
+}
+
+function resolveThreadTimeSettings(params = {}) {
+  const threadSettings = normalizeTimeSettingsInput(params.thread?.timeSettings || params.thread?.time || {});
+  const contactSettings = normalizeTimeSettingsInput(params.contact?.timeSettings || params.contact?.time || {});
+  if (hasExplicitTimeSettings(params.thread)) {
+    return threadSettings;
+  }
+  if (hasExplicitTimeSettings(params.contact)) {
+    return contactSettings;
+  }
+  return normalizeTimeSettingsInput({});
+}
+
+function hasExplicitTimeSettings(record) {
+  return Boolean(record && (hasOwn(record, "timeSettings") || hasOwn(record, "time")));
+}
+
+function normalizeIanaTimezone(value) {
+  const timezone = String(value || "").trim();
+  if (!timezone) {
+    return "";
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+    return timezone;
+  } catch {
+    return "";
+  }
+}
+
+function buildRuntimeTimeContext(settings = {}, date = new Date()) {
+  const normalized = normalizeTimeSettingsInput(settings);
+  if (!normalized.enabled) {
+    return null;
+  }
+  const utcIso = date.toISOString();
+  const localTime = new Intl.DateTimeFormat("en-US", {
+    timeZone: normalized.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZoneName: "short",
+  }).format(date);
+  return {
+    enabled: true,
+    timezone: normalized.timezone,
+    localTime,
+    utcIso,
+    block: [
+      "Current backend time:",
+      `- timezone: ${normalized.timezone}`,
+      `- local: ${localTime}`,
+      `- utc: ${utcIso}`,
+    ].join("\n"),
+  };
+}
+
 function normalizeAvatarAttachmentId(value) {
   return String(value || "").trim();
 }
@@ -3346,6 +3474,7 @@ function normalizeCompanionInput(input) {
   const workspaceScope = normalizeWorkspaceScope(input?.workspaceScope) || workspaceScopeForRole(roleLevel);
   const relationship = normalizeRelationshipBaseline(input?.relationship);
   const relationshipState = normalizeCompanionRelationshipState(input?.relationshipState);
+  const timeSettings = normalizeTimeSettingsInput(input?.timeSettings || input?.time || input?.currentTime);
   const toolAllow = Array.isArray(input?.toolPolicy?.allow)
     ? input.toolPolicy.allow.map((item) => String(item).trim()).filter(Boolean)
     : [];
@@ -3364,6 +3493,7 @@ function normalizeCompanionInput(input) {
     workspaceScope,
     relationship,
     relationshipState,
+    timeSettings,
     toolAllow,
     worldbookContent,
     worldbookPriority: Number.isFinite(Number(input?.worldbookPriority))
@@ -3426,6 +3556,10 @@ function normalizeCompanionPatchInput(params) {
   const avatarAttachmentId = hasOwn(input, "avatarAttachmentId") || hasOwn(input, "avatarId") || hasOwn(input, "avatar_image_id")
     ? normalizeAvatarAttachmentId(input?.avatarAttachmentId ?? input?.avatarId ?? input?.avatar_image_id)
     : normalizeAvatarAttachmentId(character.avatarAttachmentId || "");
+  const timeSettingsInput =
+    hasOwn(input, "timeSettings") || hasOwn(input, "time") || hasOwn(input, "currentTime")
+      ? input?.timeSettings ?? input?.time ?? input?.currentTime
+      : thread.timeSettings || contact.timeSettings || {};
   return {
     name,
     slug: slugify(name) || slugify(displayName) || "companion",
@@ -3441,6 +3575,7 @@ function normalizeCompanionPatchInput(params) {
     workspaceScope,
     relationship: normalizeRelationshipBaseline(input?.relationship || contact.relationship),
     relationshipState: normalizeCompanionRelationshipState(input?.relationshipState || relationshipState),
+    timeSettings: normalizeTimeSettingsInput(timeSettingsInput),
     toolAllow: Array.isArray(input?.toolPolicy?.allow)
       ? input.toolPolicy.allow.map((item) => String(item).trim()).filter(Boolean)
       : Array.isArray(character.toolPolicy?.allow)

@@ -13,6 +13,10 @@ const DEFAULT_BACKEND_PORT = '3100';
 const DEFAULT_BACKEND_BASE = `http://127.0.0.1:${DEFAULT_BACKEND_PORT}/api`;
 const BACKEND_STORAGE_KEY = 'smallphone.backendBase';
 const AVATAR_CLASSES = ['avatar-pink', 'avatar-blue', 'avatar-gold', 'avatar-green'];
+const DEFAULT_TIMEZONE = 'Etc/UTC';
+const DEFAULT_WAIFU_DELAY_MS_PER_CHAR = 55;
+const MIN_WAIFU_SEGMENT_DELAY_MS = 280;
+const MAX_WAIFU_SEGMENT_DELAY_MS = 1400;
 let backendEnabled = false;
 let backendBase = DEFAULT_BACKEND_BASE;
 let threadEventSource = null;
@@ -36,6 +40,7 @@ let characterRuntimeSettingsState = {
 };
 let characterRuntimeSettingsRequestId = 0;
 let characterRuntimeSettingsSaving = false;
+let waifuDisplayTimers = [];
 
 const CORE_DESKTOP_APPS = [
   { id: 'messages', name: '消息', shortName: '聊', orbClass: 'orb-chat', target: 'messages', badge: 'unread' },
@@ -294,6 +299,131 @@ function normalizeMessageContent(content) {
   return '';
 }
 
+function getBrowserTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
+  } catch {
+    return DEFAULT_TIMEZONE;
+  }
+}
+
+function normalizeTimezone(value) {
+  const raw = String(value || '').trim() || getBrowserTimezone();
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: raw }).format(new Date());
+    return raw;
+  } catch {
+    return DEFAULT_TIMEZONE;
+  }
+}
+
+function normalizeTimeSettings(settings = {}) {
+  const source = settings && typeof settings === 'object' ? settings : {};
+  return {
+    enabled: normalizeRuntimeBoolean(source.enabled ?? source.injectCurrentTime ?? source.timeInjectionEnabled),
+    timezone: normalizeTimezone(source.timezone || source.timeZone || source.tz),
+  };
+}
+
+function normalizeWaifuSettings(settings = {}) {
+  const source = settings && typeof settings === 'object' ? settings : {};
+  const delay = Number(source.typingDelayMsPerChar ?? source.delayMsPerChar ?? source.typingDelay ?? DEFAULT_WAIFU_DELAY_MS_PER_CHAR);
+  return {
+    enabled: normalizeRuntimeBoolean(source.enabled ?? source.textMode ?? source.waifuTextMode),
+    removePunctuation: normalizeRuntimeBoolean(source.removePunctuation ?? source.stripPunctuation),
+    typingDelayMsPerChar: Number.isFinite(delay)
+      ? Math.min(160, Math.max(20, Math.round(delay)))
+      : DEFAULT_WAIFU_DELAY_MS_PER_CHAR,
+  };
+}
+
+function resolveChatTimeSettings(chat = null) {
+  return normalizeTimeSettings(chat?.timeSettings || chat?.backend?.timeSettings || {});
+}
+
+function resolveChatWaifuSettings(chat = null) {
+  return normalizeWaifuSettings(chat?.waifuTextSettings || chat?.textModeSettings || {});
+}
+
+function splitWaifuSegments(text) {
+  const source = String(text || '').trim();
+  if (!source) return [];
+  const matches = source.match(/[^。！？!?；;\n]+[。！？!?；;]*|[\n]+/g) || [source];
+  const segments = matches
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  return segments.length ? segments : [source];
+}
+
+function stripDisplayPunctuation(text) {
+  return String(text || '').replace(/[。！？!?；;，,、.]+$/g, '').trim();
+}
+
+function getWaifuSegmentDelay(segment, settings) {
+  const delayPerChar = Number(settings?.typingDelayMsPerChar || DEFAULT_WAIFU_DELAY_MS_PER_CHAR);
+  const computed = String(segment || '').length * delayPerChar;
+  return Math.min(MAX_WAIFU_SEGMENT_DELAY_MS, Math.max(MIN_WAIFU_SEGMENT_DELAY_MS, computed));
+}
+
+function clearWaifuDisplayTimers() {
+  waifuDisplayTimers.forEach((timer) => window.clearTimeout(timer));
+  waifuDisplayTimers = [];
+}
+
+function renderMessageTextHtml(message, chat) {
+  const text = String(message?.text || '');
+  if (!text) return '';
+  const settings = resolveChatWaifuSettings(chat);
+  if (message.side !== 'other' || message.streaming || !settings.enabled) {
+    return `<div class="bubble-text">${escapeHtml(text).replaceAll('\n', '<br>')}</div>`;
+  }
+  const segments = splitWaifuSegments(text);
+  if (segments.length <= 1) {
+    const displayText = settings.removePunctuation ? stripDisplayPunctuation(text) : text;
+    return `<div class="bubble-text">${escapeHtml(displayText).replaceAll('\n', '<br>')}</div>`;
+  }
+  const shouldDelay = message.waifuDisplayPending === true;
+  return `<div class="bubble-text bubble-segments">${segments.map((segment, index) => {
+    const displayText = settings.removePunctuation ? stripDisplayPunctuation(segment) : segment;
+    return `<span class="bubble-segment" data-waifu-segment="${index}" ${shouldDelay && index > 0 ? 'hidden' : ''}>${escapeHtml(displayText).replaceAll('\n', '<br>')}</span>`;
+  }).join('')}</div>`;
+}
+
+function scheduleWaifuSegments(chat) {
+  clearWaifuDisplayTimers();
+  if (!chat || !resolveChatWaifuSettings(chat).enabled || !dom.chatThread) return;
+  const settings = resolveChatWaifuSettings(chat);
+  let maxDelay = 0;
+  dom.chatThread.querySelectorAll('.bubble-message-waifu .bubble-segment[hidden]').forEach((segment) => {
+    let previousText = '';
+    let previous = segment.previousElementSibling;
+    while (previous) {
+      previousText = `${previous.textContent || ''}${previousText}`;
+      previous = previous.previousElementSibling;
+    }
+    const delay = getWaifuSegmentDelay(previousText || segment.textContent || '', settings);
+    maxDelay = Math.max(maxDelay, delay);
+    const timer = window.setTimeout(() => {
+      segment.hidden = false;
+      dom.chatThread.scrollTop = dom.chatThread.scrollHeight;
+    }, delay);
+    waifuDisplayTimers.push(timer);
+  });
+  if (maxDelay > 0) {
+    const clearTimer = window.setTimeout(() => {
+      let clearedPendingFlag = false;
+      chat.messages?.forEach((message) => {
+        if (message?.waifuDisplayPending) {
+          message.waifuDisplayPending = false;
+          clearedPendingFlag = true;
+        }
+      });
+      if (clearedPendingFlag) saveState();
+    }, maxDelay + 60);
+    waifuDisplayTimers.push(clearTimer);
+  }
+}
+
 function normalizeAttachmentList(items, fallbackKind = '') {
   return (Array.isArray(items) ? items : [])
     .map((item) => {
@@ -399,6 +529,8 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
   const relationshipState = thread?.relationshipState || contact?.relationshipState || null;
   const character = contact?.character || null;
   const scopedWorldbook = findThreadScopedWorldbookEntry(worldbookEntries, contact?.id, thread?.id);
+  const timeSettings = normalizeTimeSettings(thread?.timeSettings || contact?.timeSettings || previousChat?.timeSettings || {});
+  const waifuTextSettings = normalizeWaifuSettings(previousChat?.waifuTextSettings || {});
   const baseChatMessages = Array.isArray(messages) && messages.length
     ? mapMessagesToChatMessages(messages)
     : Array.isArray(previousChat?.messages)
@@ -437,6 +569,8 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
     description: String(character?.persona || fallbackDescription).trim(),
     roleLevel: normalizeRoleLevel(thread?.roleLevel || contact?.roleLevel || thread?.runtime?.roleLevel || previousChat?.roleLevel),
     agentType: normalizeAgentType(thread?.runtime?.agentType || previousChat?.agentType),
+    waifuTextSettings,
+    timeSettings,
     personality: String(character?.style || previousChat?.personality || '').trim(),
     scenario: String(relationshipState?.guidance?.join(' / ') || previousChat?.scenario || '').trim(),
     systemPrompt: String(scopedWorldbook?.content || previousChat?.systemPrompt || '').trim(),
@@ -452,6 +586,7 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
       runtimeProject: thread?.runtime?.project || '',
       workspaceDir: thread?.runtime?.workspaceDir || '',
       workspaceScope: thread?.runtime?.workspaceScope || '',
+      timeSettings,
     },
   };
 }
@@ -502,6 +637,8 @@ function createBlankChatDraft() {
       description: '新的私人联系人。',
       roleLevel: 'contact',
       agentType: '',
+      waifuTextSettings: normalizeWaifuSettings({}),
+      timeSettings: normalizeTimeSettings({ timezone: getBrowserTimezone() }),
       personality: '',
       scenario: '',
       systemPrompt: '',
@@ -658,6 +795,7 @@ async function syncCharacterEdits(threadId, chat) {
     agentMode: normalizeAgentPermissionMode(chat.agentMode, chat.agentType),
     avatar: String(chat.avatarText || chat.name.slice(0, 1) || '').trim(),
     avatarAttachmentId: String(chat.avatarAttachmentId || '').trim(),
+    timeSettings: resolveChatTimeSettings(chat),
   };
   if (chat.backend?.relationship) payload.relationship = chat.backend.relationship;
   if (chat.backend?.relationshipState?.state) {
@@ -707,6 +845,7 @@ function buildCompanionPayload(chat) {
     agentMode: normalizeAgentPermissionMode(chat.agentMode, chat.agentType),
     avatar: String(chat.avatarText || chat.name.slice(0, 1) || '').trim(),
     avatarAttachmentId: String(chat.avatarAttachmentId || '').trim(),
+    timeSettings: resolveChatTimeSettings(chat),
   };
 }
 
@@ -1362,6 +1501,9 @@ function upsertHydratedChatMessage(threadId, rawMessage) {
   const mapped = mapMessagesToChatMessages([rawMessage])[0];
   if (!mapped) return;
   const chat = state.chats[key];
+  if (mapped.side === 'other' && !mapped.streaming && resolveChatWaifuSettings(chat).enabled) {
+    mapped.waifuDisplayPending = true;
+  }
   const existingIndex = mapped.id
     ? chat.messages.findIndex((message) => message.id && message.id === mapped.id)
     : -1;
@@ -1876,6 +2018,7 @@ async function flushPendingOutbox() {
         ? '正在肘击 AI，经由 smallphone-app 直送 runtime...'
         : `正在把 ${pendingTexts.length} 条待送消息 / ${pendingAttachmentIds.length} 个附件交给 smallphone-app...`);
       const requestBody = { text: batchText, attachments: pendingAttachmentIds };
+      if (pendingTexts.length) requestBody.textParts = pendingTexts;
       if (runtimePassThrough) requestBody.runtimePassThrough = true;
       await requestBackend(`/threads/${encodeURIComponent(threadId)}/messages`, {
         method: 'POST',
@@ -1966,7 +2109,11 @@ async function generateAssistantReply(userInput = '', { continueOnly = false } =
       replyText = buildFallbackReply(chat, userInput);
     }
 
-    chat.messages.push({ side: 'other', text: replyText });
+    chat.messages.push({
+      side: 'other',
+      text: replyText,
+      waifuDisplayPending: resolveChatWaifuSettings(chat).enabled,
+    });
     chat.summary = replyText;
     chat.time = '刚刚';
     saveState();
@@ -2587,6 +2734,7 @@ function renderChat() {
     dom.chatSubtitle.textContent = '';
     if (dom.chatHeaderAvatar) dom.chatHeaderAvatar.innerHTML = '';
     dom.chatThread.innerHTML = '';
+    clearWaifuDisplayTimers();
     updatePromptPreview();
     renderAttachmentStrip();
     updateRuntimePassThroughToggle();
@@ -2595,15 +2743,17 @@ function renderChat() {
   dom.chatTitle.textContent = chat.name;
   dom.chatSubtitle.textContent = chat.subtitle;
   if (dom.chatHeaderAvatar) dom.chatHeaderAvatar.innerHTML = renderAvatar(chat, 'avatar');
+  clearWaifuDisplayTimers();
   dom.chatThread.innerHTML = '';
+  const waifuEnabled = resolveChatWaifuSettings(chat).enabled;
 
   chat.messages.forEach((message) => {
     const row = document.createElement('div');
     row.className = `chat-message-row chat-message-${message.side}`;
     const bubble = document.createElement('div');
-    bubble.className = `bubble bubble-${message.side}${message.pending ? ' bubble-pending' : ''}${message.streaming ? ' bubble-streaming' : ''}`;
+    bubble.className = `bubble bubble-${message.side}${message.pending ? ' bubble-pending' : ''}${message.streaming ? ' bubble-streaming' : ''}${waifuEnabled && message.side === 'other' && !message.streaming ? ' bubble-message-waifu' : ''}`;
     bubble.innerHTML = [
-      message.text ? `<div class="bubble-text">${escapeHtml(message.text).replaceAll('\n', '<br>')}</div>` : '',
+      renderMessageTextHtml(message, chat),
       renderMessageAttachments(message),
       renderMessageActions(message),
     ].filter(Boolean).join('');
@@ -2621,6 +2771,7 @@ function renderChat() {
   updateRuntimePassThroughToggle();
 
   requestAnimationFrame(() => {
+    scheduleWaifuSegments(chat);
     dom.chatThread.scrollTop = dom.chatThread.scrollHeight;
   });
 }
@@ -2797,6 +2948,8 @@ function renderCharacterEditor() {
 
   const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
   if (!chat) return;
+  const waifuSettings = resolveChatWaifuSettings(chat);
+  const timeSettings = resolveChatTimeSettings(chat);
   dom.characterNameInput.value = chat.name;
   if (dom.characterAvatarTextInput) dom.characterAvatarTextInput.value = String(chat.avatarText || chat.name.slice(0, 1) || '').slice(0, 2);
   renderCharacterAvatarPreview(chat);
@@ -2819,6 +2972,12 @@ function renderCharacterEditor() {
   dom.characterScenarioInput.value = chat.scenario || '';
   dom.characterSystemPromptInput.value = chat.systemPrompt || '';
   dom.characterProactiveToggle.checked = chat.proactiveContactEnabled !== false;
+  if (dom.characterWaifuTextModeToggle) dom.characterWaifuTextModeToggle.checked = waifuSettings.enabled;
+  if (dom.characterWaifuRemovePunctuationToggle) dom.characterWaifuRemovePunctuationToggle.checked = waifuSettings.removePunctuation;
+  if (dom.characterWaifuDelayInput) dom.characterWaifuDelayInput.value = String(waifuSettings.typingDelayMsPerChar);
+  if (dom.characterWaifuDelayValue) dom.characterWaifuDelayValue.textContent = `${waifuSettings.typingDelayMsPerChar} ms/字`;
+  if (dom.characterTimeInjectionToggle) dom.characterTimeInjectionToggle.checked = timeSettings.enabled;
+  if (dom.characterTimezoneInput) dom.characterTimezoneInput.value = timeSettings.timezone;
   dom.characterPreviewName.textContent = chat.name;
   dom.characterPreviewDescription.textContent = chat.description;
   if (dom.characterSubmitButton) {
@@ -2831,6 +2990,11 @@ dom.characterAgentTypeSelect?.addEventListener('change', () => {
   const chat = state.chats[uiState.editingCharacterKey] || getFallbackChat();
   renderAgentModeSelect('', dom.characterAgentTypeSelect.value || chat?.agentType || 'codex');
   renderCharacterRuntimeSettings();
+});
+
+dom.characterWaifuDelayInput?.addEventListener('input', () => {
+  const value = Number(dom.characterWaifuDelayInput.value || DEFAULT_WAIFU_DELAY_MS_PER_CHAR);
+  if (dom.characterWaifuDelayValue) dom.characterWaifuDelayValue.textContent = `${value} ms/字`;
 });
 
 dom.characterAvatarTextInput?.addEventListener('input', () => {
@@ -3512,6 +3676,19 @@ dom.characterForm.addEventListener('submit', async (event) => {
   chat.scenario = dom.characterScenarioInput.value.trim();
   chat.systemPrompt = dom.characterSystemPromptInput.value.trim();
   chat.proactiveContactEnabled = dom.characterProactiveToggle.checked;
+  chat.waifuTextSettings = normalizeWaifuSettings({
+    enabled: dom.characterWaifuTextModeToggle?.checked,
+    removePunctuation: dom.characterWaifuRemovePunctuationToggle?.checked,
+    typingDelayMsPerChar: dom.characterWaifuDelayInput?.value,
+  });
+  chat.timeSettings = normalizeTimeSettings({
+    enabled: dom.characterTimeInjectionToggle?.checked,
+    timezone: dom.characterTimezoneInput?.value,
+  });
+  chat.backend = {
+    ...(chat.backend || {}),
+    timeSettings: chat.timeSettings,
+  };
   saveState();
   try {
     if (backendEnabled) {

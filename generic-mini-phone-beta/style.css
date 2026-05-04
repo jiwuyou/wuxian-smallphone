@@ -1363,6 +1363,34 @@ body[data-theme="night"] .runtime-status-error {
   min-height: 42px;
 }
 
+.text-mode-settings-section .runtime-toggle-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.text-mode-settings-section .runtime-toggle-grid label:last-child {
+  grid-column: 1 / -1;
+}
+
+.range-field strong {
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-form input[type="range"] {
+  padding: 0;
+  accent-color: var(--primary);
+}
+
+.bubble-segments {
+  display: grid;
+  gap: 8px;
+}
+
+.bubble-segment {
+  display: block;
+}
+
 .badge {
   min-width: 22px;
   height: 22px;

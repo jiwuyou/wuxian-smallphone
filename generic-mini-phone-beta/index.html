@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>手机桌面</title>
-  <link rel="stylesheet" href="style.css?v=12">
+  <link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
   <div class="app-shell">
@@ -523,6 +523,45 @@
                     <input type="text" id="character-runtime-admin-from" placeholder="admin@example.test">
                   </label>
                 </section>
+                <section class="runtime-settings-section text-mode-settings-section" aria-labelledby="character-text-mode-heading">
+                  <div class="runtime-settings-head">
+                    <div>
+                      <p class="eyebrow">Text Waifu</p>
+                      <strong id="character-text-mode-heading">文本与时间</strong>
+                    </div>
+                  </div>
+                  <div class="runtime-toggle-grid">
+                    <label>
+                      <span>Waifu 文本模式</span>
+                      <div class="toggle-row">
+                        <input type="checkbox" id="character-waifu-text-mode">
+                        <span>分段显示回复</span>
+                      </div>
+                    </label>
+                    <label>
+                      <span>去除标点</span>
+                      <div class="toggle-row">
+                        <input type="checkbox" id="character-waifu-remove-punctuation">
+                        <span>显示时隐藏句末标点</span>
+                      </div>
+                    </label>
+                    <label>
+                      <span>注入当前时间</span>
+                      <div class="toggle-row">
+                        <input type="checkbox" id="character-time-injection-enabled">
+                        <span>由后端加入运行时上下文</span>
+                      </div>
+                    </label>
+                  </div>
+                  <label class="range-field">
+                    <span>分段延迟 <strong id="character-waifu-delay-value">55 ms/字</strong></span>
+                    <input type="range" id="character-waifu-delay" min="20" max="160" step="5">
+                  </label>
+                  <label>
+                    <span>Timezone</span>
+                    <input type="text" id="character-timezone" placeholder="Etc/UTC">
+                  </label>
+                </section>
                 <label>
                   <span>状态文案</span>
                   <input type="text" id="character-subtitle" placeholder="例如：在线 · 海风很轻">
@@ -571,6 +610,6 @@
     </div>
   </div>
 
-  <script type="module" src="scripts/main.js?v=14"></script>
+  <script type="module" src="scripts/main.js?v=15"></script>
 </body>
 </html>

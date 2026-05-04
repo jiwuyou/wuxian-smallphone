@@ -174,6 +174,45 @@
               <input id="companion-runtime-admin-from" placeholder="admin@example.test" />
             </label>
           </section>
+          <section class="form-section runtime-project-section text-mode-section" aria-labelledby="companion-text-mode-heading">
+            <div class="form-section-head">
+              <div>
+                <div class="form-section-title">文本与时间</div>
+                <div id="companion-text-mode-heading" class="runtime-project-eyebrow">Text Waifu</div>
+              </div>
+            </div>
+            <div class="runtime-toggle-grid">
+              <label class="form-field runtime-toggle-field">
+                <span>Waifu 文本模式</span>
+                <span class="runtime-toggle-row">
+                  <input id="companion-waifu-text-mode" type="checkbox" />
+                  <span>分段显示回复</span>
+                </span>
+              </label>
+              <label class="form-field runtime-toggle-field">
+                <span>去除标点</span>
+                <span class="runtime-toggle-row">
+                  <input id="companion-waifu-remove-punctuation" type="checkbox" />
+                  <span>显示时隐藏句末标点</span>
+                </span>
+              </label>
+              <label class="form-field runtime-toggle-field">
+                <span>注入当前时间</span>
+                <span class="runtime-toggle-row">
+                  <input id="companion-time-injection-enabled" type="checkbox" />
+                  <span>由后端加入运行时上下文</span>
+                </span>
+              </label>
+            </div>
+            <label class="form-field range-field">
+              <span>分段延迟 <strong id="companion-waifu-delay-value">55 ms/字</strong></span>
+              <input id="companion-waifu-delay" type="range" min="20" max="160" step="5" />
+            </label>
+            <label class="form-field">
+              <span>Timezone</span>
+              <input id="companion-timezone" placeholder="Etc/UTC" />
+            </label>
+          </section>
           <div class="grid-two">
             <input id="companion-trust" type="number" min="0" max="1" step="0.01" placeholder="trust" />
             <input id="companion-intimacy" type="number" min="0" max="1" step="0.01" placeholder="intimacy" />

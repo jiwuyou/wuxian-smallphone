@@ -459,7 +459,7 @@ function createMockAdapter() {
       return { id: "mock", kind: "runtime" };
     },
     async sendTurn(payload) {
-      const latestUserText = payload.messages.filter((item) => item.role === "user").at(-1)?.content || "";
+      const latestUserText = getLatestRuntimeUserText(payload);
       const triggerNote = normalizeText(payload.trigger?.note);
       const primaryText = payload.trigger?.mode === "decision_only" ? triggerNote || latestUserText : latestUserText || triggerNote;
       const hints = [];
@@ -685,8 +685,9 @@ function createOpenAICompatibleAdapter(config) {
 
 function buildRuntimePrompt(payload) {
   const memoryBlock = payload.memories.map((item) => `- ${item.text}`).join("\n");
-  const recent = payload.messages.slice(-8).map((item) => `${item.role}: ${item.content}`).join("\n");
+  const recent = buildRecentConversationBlock(payload);
   const turnContextBlock = buildTurnContextBlock(payload.turnContext);
+  const timeContextBlock = buildTimeContextBlock(payload.timeContext);
   return [
     "SmallPhone turn",
     `Character: ${payload.character.name}`,
@@ -694,6 +695,7 @@ function buildRuntimePrompt(payload) {
     `Contact: ${payload.contact.displayName}`,
     `Thread: ${payload.thread.title}`,
     `Relationship: trust=${payload.relationship.trust.toFixed(2)}, intimacy=${payload.relationship.intimacy.toFixed(2)}, tension=${payload.relationship.tension.toFixed(2)}`,
+    timeContextBlock,
     turnContextBlock,
     memoryBlock ? `Relevant memories:\n${memoryBlock}` : "",
     "Recent conversation:",
@@ -705,6 +707,7 @@ function buildRuntimePrompt(payload) {
 }
 
 function buildOpenAICompatibleMessages(payload) {
+  const timeContextBlock = buildTimeContextBlock(payload.timeContext);
   return [
     {
       role: "system",
@@ -713,6 +716,7 @@ function buildOpenAICompatibleMessages(payload) {
           `You are ${payload.contact.displayName} in a small-phone chat.`,
           `Character persona: ${payload.character.persona}`,
           `Reply briefly, concretely, and in-character.`,
+          timeContextBlock,
           buildTurnContextBlock(payload.turnContext),
           payload.memories.length
             ? `Relevant memories:\n${payload.memories.map((item) => `- ${item.text}`).join("\n")}`
@@ -722,11 +726,41 @@ function buildOpenAICompatibleMessages(payload) {
           .filter(Boolean)
           .join("\n\n"),
     },
-    ...payload.messages.slice(-8).map((item) => ({
-      role: item.role === "assistant" ? "assistant" : "user",
-      content: item.content,
-    })),
+    ...buildOpenAICompatibleHistoryMessages(payload),
   ];
+}
+
+function buildRecentConversationBlock(payload) {
+  const messages = Array.isArray(payload?.messages) ? payload.messages.slice(-8) : [];
+  if (!messages.length) {
+    return "";
+  }
+  const latestUserIndex = latestUserMessageIndex(messages);
+  return messages
+    .map((item, index) => `${item.role}: ${index === latestUserIndex ? getLatestRuntimeUserText(payload) : item.content}`)
+    .join("\n");
+}
+
+function buildOpenAICompatibleHistoryMessages(payload) {
+  const messages = Array.isArray(payload?.messages) ? payload.messages.slice(-8) : [];
+  const latestUserIndex = latestUserMessageIndex(messages);
+  return messages.map((item, index) => ({
+    role: item.role === "assistant" ? "assistant" : "user",
+    content: index === latestUserIndex ? getLatestRuntimeUserText(payload) : item.content,
+  }));
+}
+
+function latestUserMessageIndex(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function buildTimeContextBlock(timeContext) {
+  return normalizeText(timeContext?.block);
 }
 
 function buildTurnContextBlock(turnContext) {
@@ -1194,7 +1228,7 @@ async function buildWebclientImages(imageAttachments) {
 }
 
 function buildWebclientTurnMessage(payload, fileAttachments) {
-  const latestUserText = getLatestUserMessageText(payload);
+  const latestUserText = getLatestRuntimeUserText(payload);
   const triggerNote = normalizeText(payload?.trigger?.note);
   const primaryText =
     payload?.trigger?.mode === "decision_only"
@@ -1217,6 +1251,7 @@ function buildWebclientTurnMessage(payload, fileAttachments) {
     payload?.relationship
       ? `Relationship: trust=${Number(payload.relationship.trust || 0).toFixed(2)}, intimacy=${Number(payload.relationship.intimacy || 0).toFixed(2)}, tension=${Number(payload.relationship.tension || 0).toFixed(2)}`
       : "",
+    buildTimeContextBlock(payload?.timeContext),
     turnContextBlock,
     memoryBlock ? `Relevant memories:\n${memoryBlock}` : "",
     fileBlock,
@@ -1232,9 +1267,14 @@ function getLatestUserMessageText(payload) {
   return typeof content === "string" ? content : "";
 }
 
+function getLatestRuntimeUserText(payload) {
+  const content = payload?.runtimeUserText;
+  return typeof content === "string" && content ? content : getLatestUserMessageText(payload);
+}
+
 function getPassThroughMessageText(payload) {
   const content = payload?.runtimePassThroughText;
-  return typeof content === "string" ? content : getLatestUserMessageText(payload);
+  return typeof content === "string" ? content : getLatestRuntimeUserText(payload);
 }
 
 function buildWebclientFileBlock(fileAttachments) {
