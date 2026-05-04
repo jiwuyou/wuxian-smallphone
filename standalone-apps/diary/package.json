@@ -1,0 +1,21 @@
+{
+  "name": "@smallphone/standalone-diary",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Source-first standalone SmallPhone Diary app with native Node HTTP, SQLite storage, CLI, and plain web UI.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "start": "node ./src/server.js",
+    "dev": "node --watch ./src/server.js",
+    "cli": "node ./src/cli.js",
+    "test": "node --test",
+    "check": "node --check ./src/paths.js && node --check ./src/seed-data.js && node --check ./src/domain.js && node --check ./src/storage.js && node --check ./src/service.js && node --check ./src/http-app.js && node --check ./src/server.js && node --check ./src/cli.js && node --check ./public/app.js"
+  },
+  "bin": {
+    "smallphone-diary": "./src/cli.js"
+  }
+}

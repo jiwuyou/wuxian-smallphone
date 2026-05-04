@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SmallPhone Album</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">SmallPhone</p>
+        <h1>Album</h1>
+      </div>
+      <div class="topbar-actions">
+        <span class="status-pill" id="status-pill">Loading</span>
+        <button class="ghost-button" id="refresh-button" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="album-pane" aria-labelledby="albums-heading">
+        <div class="pane-heading">
+          <div>
+            <p class="eyebrow">Library</p>
+            <h2 id="albums-heading">Albums</h2>
+          </div>
+          <span class="count-pill" id="album-count">0 albums</span>
+        </div>
+
+        <form class="album-form" id="album-form">
+          <h3 id="album-editor-heading">New album</h3>
+          <label>
+            <span>Title</span>
+            <input id="album-title" name="title" type="text" maxlength="160" required autocomplete="off" placeholder="Weekend Walks">
+          </label>
+          <label>
+            <span>Description</span>
+            <textarea id="album-description" name="description" rows="3" maxlength="1000" placeholder="Reference images collected during neighborhood walks."></textarea>
+          </label>
+          <div class="form-actions">
+            <button class="ghost-button" id="cancel-album-edit-button" type="button" hidden>Cancel</button>
+            <button class="primary-button" id="save-album-button" type="submit">Save album</button>
+          </div>
+        </form>
+
+        <div class="album-list" id="album-list" aria-live="polite"></div>
+      </section>
+
+      <section class="photo-pane" aria-labelledby="photos-heading">
+        <div class="pane-heading">
+          <div>
+            <p class="eyebrow" id="selected-album-label">Selected album</p>
+            <h2 id="photos-heading">Photos</h2>
+          </div>
+          <span class="count-pill" id="photo-count">0 photos</span>
+        </div>
+
+        <form class="photo-form" id="photo-form">
+          <fieldset id="photo-fieldset">
+            <div class="photo-form-grid">
+              <label>
+                <span>Title</span>
+                <input id="photo-title" name="title" type="text" maxlength="160" required autocomplete="off" placeholder="Corner light">
+              </label>
+              <label>
+                <span>Album</span>
+                <select id="photo-album" name="albumId" required></select>
+              </label>
+              <label class="wide-field">
+                <span>Image URL</span>
+                <input id="photo-image-url" name="imageUrl" type="url" maxlength="2000" required placeholder="https://example.com/photo.jpg">
+              </label>
+              <label>
+                <span>Taken at</span>
+                <input id="photo-taken-at" name="takenAt" type="datetime-local" required>
+              </label>
+              <label class="wide-field">
+                <span>Caption</span>
+                <textarea id="photo-caption" name="caption" rows="3" maxlength="4000" placeholder="Late afternoon light across a quiet corner."></textarea>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="ghost-button" id="cancel-photo-edit-button" type="button" hidden>Cancel</button>
+              <button class="primary-button" id="save-photo-button" type="submit">Save photo</button>
+            </div>
+          </fieldset>
+        </form>
+
+        <div class="photo-list" id="photo-list" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <template id="album-template">
+      <article class="album-row">
+        <button class="album-select-button" type="button">
+          <span class="album-title"></span>
+          <span class="album-description"></span>
+          <span class="album-meta"></span>
+        </button>
+        <div class="row-actions">
+          <button class="ghost-button edit-album-button" type="button">Edit</button>
+          <button class="danger-button delete-album-button" type="button">Delete</button>
+        </div>
+      </article>
+    </template>
+
+    <template id="photo-template">
+      <article class="photo-row">
+        <div class="photo-media">
+          <img alt="" loading="lazy">
+        </div>
+        <div class="photo-main">
+          <div class="photo-meta"></div>
+          <h3></h3>
+          <p></p>
+          <a target="_blank" rel="noreferrer">Open image</a>
+        </div>
+        <div class="row-actions">
+          <button class="ghost-button edit-photo-button" type="button">Edit</button>
+          <button class="danger-button delete-photo-button" type="button">Delete</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

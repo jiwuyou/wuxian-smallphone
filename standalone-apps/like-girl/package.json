@@ -1,0 +1,22 @@
+{
+  "name": "@smallphone/standalone-like-girl",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "基于 LikeGirl 页面气质改造的 SmallPhone 原生应用，包含 Node HTTP、SQLite、CLI 和 Web 界面。",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "start": "node ./src/server.js",
+    "start:clone": "PORT=4108 LIKE_GIRL_DB_FILE=./data/instances/like-girl-clone/like-girl.sqlite LIKE_GIRL_PHOTO_UPLOADS_DIR=./data/instances/like-girl-clone/uploads/photos node ./src/server.js",
+    "dev": "node --watch ./src/server.js",
+    "cli": "node ./src/cli.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check ./src/paths.js && node --check ./src/seed-data.js && node --check ./src/domain.js && node --check ./src/storage.js && node --check ./src/service.js && node --check ./src/http-app.js && node --check ./src/server.js && node --check ./src/cli.js && node --check ./public/app.js && node --check ./public/admin.js"
+  },
+  "bin": {
+    "smallphone-like-girl": "./src/cli.js"
+  }
+}

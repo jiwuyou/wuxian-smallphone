@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "smallphone.app/v1",
+  "id": "diary",
+  "name": "SmallPhone Diary",
+  "shortName": "Diary",
+  "version": "0.1.0",
+  "description": "A standalone source-first diary app for listing, writing, editing, and deleting journal entries.",
+  "runtime": {
+    "type": "node-http",
+    "node": ">=22",
+    "entry": "src/server.js",
+    "defaultPort": 4101,
+    "portEnv": "PORT"
+  },
+  "ui": {
+    "type": "web",
+    "path": "/",
+    "servedBy": "app"
+  },
+  "storage": {
+    "type": "sqlite",
+    "driver": "node:sqlite",
+    "defaultPath": "data/diary.sqlite",
+    "pathEnv": "DIARY_DB_FILE",
+    "seedOnEmpty": true
+  },
+  "api": [
+    { "method": "GET", "path": "/health" },
+    { "method": "GET", "path": "/manifest" },
+    { "method": "GET", "path": "/api/entries" },
+    { "method": "POST", "path": "/api/entries" },
+    { "method": "PATCH", "path": "/api/entries/:id" },
+    { "method": "DELETE", "path": "/api/entries/:id" }
+  ],
+  "permissions": {
+    "network": "local-http",
+    "storage": "local-sqlite"
+  }
+}

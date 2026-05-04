@@ -4,23 +4,23 @@ const http = require("http");
 const { Readable } = require("stream");
 const { URL } = require("url");
 const { SmallPhoneService } = require("../../packages/domain/service");
+const { isPathInside, resolveSmallPhonePaths } = require("../../packages/shared/paths");
 
 const PORT = Number.parseInt(process.env.SMALLPHONE_PORT || "3100", 10);
 const HOST = process.env.SMALLPHONE_HOST || "127.0.0.1";
 const HOSTS = parseHostList(process.env.SMALLPHONE_HOSTS || HOST);
 const WEB_ROOT = path.join(__dirname, "..", "web");
-const ATTACHMENTS_ROOT = path.join(__dirname, "..", "..", "data", "attachments");
-const ATTACHMENTS_ROOT_RESOLVED = path.resolve(ATTACHMENTS_ROOT);
+const SMALLPHONE_PATHS = resolveSmallPhonePaths({ env: process.env });
 const TASK_WORKER_ENABLED = process.env.SMALLPHONE_TASK_WORKER_ENABLED !== "0";
 const TASK_POLL_MS = Number.parseInt(process.env.SMALLPHONE_TASK_POLL_MS || "5000", 10);
 const WEBCLIENT_POLL_INTERVAL_MS = process.env.SMALLPHONE_WEBCLIENT_POLL_INTERVAL_MS;
 const WEBCLIENT_HISTORY_LIMIT = process.env.SMALLPHONE_WEBCLIENT_HISTORY_LIMIT;
-const DATA_FILE = process.env.SMALLPHONE_DATA_FILE
-  ? path.resolve(process.env.SMALLPHONE_DATA_FILE)
-  : path.join(__dirname, "..", "..", "data", "runtime.json");
+const DATA_FILE = SMALLPHONE_PATHS.dataFile;
 
 const service = new SmallPhoneService({
   dataFile: DATA_FILE,
+  paths: SMALLPHONE_PATHS,
+  officialShellRoot: WEB_ROOT,
   runtime: {
     mode: process.env.SMALLPHONE_RUNTIME_MODE || "mock",
     command: process.env.SMALLPHONE_OPENCLAW_COMMAND || process.execPath,
@@ -85,6 +85,10 @@ async function handleRequest(req, res) {
       await handleApi(req, res, url);
       return;
     }
+    if ((req.method || "GET") === "GET" && url.pathname.startsWith("/shells/")) {
+      serveShellAsset(req, res, url);
+      return;
+    }
     serveStatic(req, res, url);
   } catch (error) {
     sendJson(res, 500, {
@@ -122,6 +126,16 @@ async function handleApi(req, res, url) {
 
   if (method === "GET" && url.pathname === "/api/bootstrap") {
     return sendJson(res, 200, await service.bootstrapHydrated());
+  }
+  if (method === "GET" && url.pathname === "/api/user-content") {
+    return sendJson(res, 200, service.getUserContent());
+  }
+  if (method === "PUT" && url.pathname === "/api/user-content") {
+    const body = await readJson(req);
+    return sendJson(res, 200, service.updateUserContent(body));
+  }
+  if (method === "GET" && url.pathname === "/api/app-registry") {
+    return sendJson(res, 200, service.getAppRegistry());
   }
   if (method === "POST" && url.pathname === "/api/attachments") {
     const body = await readJsonWithLimit(req, ATTACHMENT_UPLOAD_MAX_JSON_BYTES);
@@ -368,26 +382,7 @@ function serveWorkspaceAttachment(res, download) {
 }
 
 function isManagedAttachmentFile(filePath) {
-  const resolved = path.resolve(String(filePath || ""));
-  const relative = path.relative(ATTACHMENTS_ROOT_RESOLVED, resolved);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    return false;
-  }
-  try {
-    const stat = fs.lstatSync(resolved);
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      return false;
-    }
-    const rootReal = safeRealpath(ATTACHMENTS_ROOT_RESOLVED) || ATTACHMENTS_ROOT_RESOLVED;
-    const fileReal = safeRealpath(resolved) || resolved;
-    const relReal = path.relative(rootReal, fileReal);
-    if (!relReal || relReal.startsWith("..") || path.isAbsolute(relReal)) {
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return service.isManagedAttachmentFile(filePath);
 }
 
 function safeRealpath(value) {
@@ -463,6 +458,61 @@ function serveStatic(req, res, url) {
   const type = MIME_TYPES[ext] || "application/octet-stream";
   res.writeHead(200, { "content-type": type });
   fs.createReadStream(filePath).pipe(res);
+}
+
+function serveShellAsset(req, res, url) {
+  const match = url.pathname.match(/^\/shells\/([^/]+)\/?(.*)$/);
+  if (!match) {
+    sendText(res, 404, "Not found");
+    return;
+  }
+  let shellId = "";
+  let assetPath;
+  try {
+    shellId = decodeURIComponent(match[1] || "");
+    assetPath = match[2] ? decodeURIComponent(match[2]) : undefined;
+  } catch {
+    sendText(res, 400, "Invalid path");
+    return;
+  }
+  let asset;
+  try {
+    asset = service.resolveShellAssetPath({ shellId, assetPath });
+  } catch {
+    sendText(res, 403, "Forbidden");
+    return;
+  }
+  serveResolvedStaticFile(res, asset.filePath, asset.root);
+}
+
+function serveResolvedStaticFile(res, filePath, root) {
+  const resolvedFile = path.resolve(filePath);
+  const resolvedRoot = path.resolve(root);
+  if (!isPathInside(resolvedRoot, resolvedFile) || resolvedFile === resolvedRoot) {
+    sendText(res, 403, "Forbidden");
+    return;
+  }
+  let stat;
+  try {
+    stat = fs.lstatSync(resolvedFile);
+  } catch {
+    sendText(res, 404, "Not found");
+    return;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    sendText(res, 404, "Not found");
+    return;
+  }
+  const rootReal = safeRealpath(resolvedRoot) || resolvedRoot;
+  const fileReal = safeRealpath(resolvedFile) || resolvedFile;
+  if (!isPathInside(rootReal, fileReal) || fileReal === rootReal) {
+    sendText(res, 403, "Forbidden");
+    return;
+  }
+  const ext = path.extname(resolvedFile);
+  const type = MIME_TYPES[ext] || "application/octet-stream";
+  res.writeHead(200, { "content-type": type });
+  fs.createReadStream(resolvedFile).pipe(res);
 }
 
 function sendJson(res, statusCode, payload) {
@@ -563,4 +613,8 @@ const MIME_TYPES = {
   ".js": "application/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
 };

@@ -1,9 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const { SmallPhoneService } = require("../packages/domain/service");
+const { resolveSmallPhonePaths } = require("../packages/shared/paths");
 
 function tmpDataFile() {
   return path.join("/tmp", `smallphone-attachments-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
@@ -214,6 +216,61 @@ test("attachments: assistant localPath outside managed root is not persisted or 
 
   const download = await service.openAttachmentDownload(attId);
   assert.equal(download.kind, "remote_unproxied");
+});
+
+test("attachments: legacy migrated localPath remains readable", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "smallphone-legacy-"));
+  const home = path.join(root, "home");
+  const legacyDataRoot = path.join(root, "legacy-data");
+  const legacyAttachmentsRoot = path.join(legacyDataRoot, "attachments");
+  const legacyRuntimeFile = path.join(legacyDataRoot, "runtime.json");
+  const localPath = path.join(legacyAttachmentsRoot, "thread-legacy", "att-legacy", "legacy.txt");
+  fs.mkdirSync(path.dirname(localPath), { recursive: true });
+  fs.writeFileSync(localPath, "legacy attachment", "utf8");
+  fs.writeFileSync(
+    legacyRuntimeFile,
+    JSON.stringify(
+      {
+        attachments: [
+          {
+            id: "att-legacy",
+            kind: "file",
+            fileName: "legacy.txt",
+            mimeType: "text/plain",
+            size: 17,
+            source: "legacy",
+            localPath,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+
+  const paths = {
+    ...resolveSmallPhonePaths({ smallphoneHome: home, env: {} }),
+    legacyRuntimeFile,
+    legacyAttachmentsRoot,
+  };
+  const service = new SmallPhoneService({
+    paths,
+    runtime: { mode: "mock" },
+  });
+
+  try {
+    const record = service.getAttachment("att-legacy");
+    assert.equal(record.localPath, localPath);
+    assert.equal(fs.readFileSync(record.localPath, "utf8"), "legacy attachment");
+
+    const download = await service.openAttachmentDownload("att-legacy");
+    assert.equal(download.kind, "local");
+    assert.equal(download.localPath, localPath);
+    assert.equal(download.fileName, "legacy.txt");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("cc-webclient hydration updates thread preview without replacing profile summary", async () => {

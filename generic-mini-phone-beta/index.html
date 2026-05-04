@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>手机桌面</title>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
   <div class="app-shell">
@@ -86,6 +86,10 @@
           <button class="dock-app" data-panel-target="settings">
             <span class="icon-orb orb-settings">调</span>
             <strong>调试</strong>
+          </button>
+          <button class="dock-app" data-panel-target="app-manager">
+            <span class="icon-orb orb-app-manager">管</span>
+            <strong>App</strong>
           </button>
           <button class="dock-app" data-panel-target="permissions">
             <span class="icon-orb orb-permission">权</span>
@@ -312,6 +316,32 @@
               </article>
             </section>
 
+            <section class="panel-view" data-panel="app-manager">
+              <form class="settings-form" id="app-manager-form">
+                <label>
+                  <span>LikeGirl 服务地址</span>
+                  <input type="url" id="like-girl-service-url" inputmode="url" placeholder="http://127.0.0.1:4103/">
+                </label>
+                <label>
+                  <span>LikeGirl 分身服务地址</span>
+                  <input type="url" id="like-girl-clone-service-url" inputmode="url" placeholder="http://127.0.0.1:4108/">
+                </label>
+                <p class="permission-panel-summary">这里配置独立后端 App 的入口地址。桌面图标会直接使用该地址，不再要求用户打开后手动填写。</p>
+                <button type="submit" class="soft-button small-button">保存 App 配置</button>
+              </form>
+              <div class="app-manager-actions">
+                <button type="button" class="soft-button small-button" id="like-girl-open-public">进入 LikeGirl 前台</button>
+                <button type="button" class="secondary-button small-button" id="like-girl-open-admin">进入 LikeGirl 后台</button>
+                <button type="button" class="soft-button small-button" id="like-girl-clone-open-public">进入 LikeGirl 分身前台</button>
+                <button type="button" class="secondary-button small-button" id="like-girl-clone-open-admin">进入 LikeGirl 分身后台</button>
+              </div>
+              <article class="info-card">
+                <p class="eyebrow">运行说明</p>
+                <strong>LikeGirl 是独立 Node/SQLite 服务</strong>
+                <p>先启动 LikeGirl 服务，再从桌面图标进入。分身使用同一份源码，但应配置独立端口、SQLite 文件和上传目录。</p>
+              </article>
+            </section>
+
             <section class="panel-view" data-panel="permissions">
               <div class="permission-panel-head">
                 <label class="permission-contact-field">
@@ -483,6 +513,6 @@
     </div>
   </div>
 
-  <script type="module" src="scripts/main.js?v=8"></script>
+  <script type="module" src="scripts/main.js?v=11"></script>
 </body>
 </html>

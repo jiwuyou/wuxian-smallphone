@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LikeGirl</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero" id="home">
+        <div class="hero-copy">
+          <p class="eyebrow">SmallPhone 原生应用</p>
+          <h1 id="site-title">LikeGirl</h1>
+          <p id="site-writing">Loading...</p>
+          <div class="couple-line">
+            <img id="boy-image" alt="" hidden>
+            <span id="boy">Ki</span>
+            <span>+</span>
+            <span id="girl">Li</span>
+            <img id="girl-image" alt="" hidden>
+          </div>
+          <p class="counter" id="counter">0 days</p>
+        </div>
+      </section>
+
+      <nav class="nav">
+        <a href="#little">点点滴滴</a>
+        <a href="#photos">恋爱相册</a>
+        <a href="#messages">留言祝福</a>
+        <a href="#checklist">恋爱清单</a>
+        <a href="#about">关于</a>
+        <a href="/admin">后台</a>
+      </nav>
+
+      <section class="section" id="little">
+        <div class="section-head">
+          <h2 id="articles-title">点点滴滴</h2>
+          <p id="articles-description">被认真留下来的日常片段。</p>
+        </div>
+        <div class="article-list" id="articles"></div>
+        <article class="article-detail" id="article-detail" hidden></article>
+      </section>
+
+      <section class="section" id="photos">
+        <div class="section-head">
+          <h2 id="photos-title">恋爱相册</h2>
+          <p id="photos-description">图片可以来自本地资源，也可以是你自己的远程图片。</p>
+        </div>
+        <div class="photo-grid" id="photo-grid"></div>
+      </section>
+
+      <section class="section split" id="messages">
+        <div>
+          <div class="section-head">
+            <h2 id="messages-title">留言祝福</h2>
+            <p id="messages-description">留言会写入本地 SQLite。</p>
+          </div>
+          <div class="message-list" id="message-list"></div>
+        </div>
+        <form class="message-form" id="message-form">
+          <input name="name" placeholder="名字" required>
+          <input name="qq" placeholder="QQ / 头像标识（可选）">
+          <textarea name="text" rows="5" placeholder="写一句祝福" required></textarea>
+          <button type="submit">发送留言</button>
+        </form>
+      </section>
+
+      <section class="section" id="checklist">
+        <div class="section-head">
+          <h2 id="checklist-title">恋爱清单</h2>
+          <p id="checklist-description">SmallPhone 原生版保留页面体验，后台由 Node.js 和 SQLite 提供。</p>
+        </div>
+        <div class="check-list" id="check-list"></div>
+      </section>
+
+      <section class="section" id="about">
+        <div class="section-head">
+          <h2 id="about-title">关于我们</h2>
+          <p id="about-description">这是 LikeGirl 页面气质的原生实现。</p>
+        </div>
+        <div class="about-flow" id="about-flow"></div>
+      </section>
+      <footer class="site-footer" id="site-footer"></footer>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

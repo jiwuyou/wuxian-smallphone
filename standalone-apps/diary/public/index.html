@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SmallPhone Diary</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">SmallPhone</p>
+        <h1>Diary</h1>
+      </div>
+      <div class="topbar-actions">
+        <span class="status-pill" id="status-pill">Loading</span>
+        <button class="ghost-button" id="refresh-button" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="editor-pane" aria-labelledby="editor-heading">
+        <div class="pane-heading">
+          <p class="eyebrow">Entry</p>
+          <h2 id="editor-heading">New entry</h2>
+        </div>
+
+        <form class="entry-form" id="entry-form">
+          <label>
+            <span>Title</span>
+            <input id="entry-title" name="title" type="text" maxlength="160" required autocomplete="off" placeholder="今天的二维地图">
+          </label>
+
+          <label>
+            <span>Text</span>
+            <textarea id="entry-text" name="text" rows="12" maxlength="20000" required placeholder="写下今天的想法、地图布局或应用入口设计。"></textarea>
+          </label>
+
+          <div class="form-actions">
+            <button class="ghost-button" id="cancel-edit-button" type="button" hidden>Cancel</button>
+            <button class="primary-button" id="save-button" type="submit">Save entry</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="list-pane" aria-labelledby="entries-heading">
+        <div class="list-heading">
+          <div>
+            <p class="eyebrow">Archive</p>
+            <h2 id="entries-heading">Entries</h2>
+          </div>
+          <span class="count-pill" id="entry-count">0 entries</span>
+        </div>
+
+        <div class="entry-list" id="entry-list" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <template id="entry-template">
+      <article class="entry-row">
+        <div class="entry-main">
+          <div class="entry-meta"></div>
+          <h3></h3>
+          <p></p>
+        </div>
+        <div class="entry-actions">
+          <button class="ghost-button edit-button" type="button">Edit</button>
+          <button class="danger-button delete-button" type="button">Delete</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

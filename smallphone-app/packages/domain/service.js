@@ -1,8 +1,19 @@
 const fs = require("fs");
 const path = require("path");
-const { JsonStore } = require("../storage/json-store");
+const {
+  DEFAULT_OFFICIAL_SHELL_ID,
+  JsonStore,
+  createDefaultUserContent,
+  projectPublicUserContentCollection,
+  sanitizePublicUserContentValue,
+} = require("../storage/json-store");
 const { createRuntimeAdapter } = require("../openclaw-adapter");
 const { createId, nowIso } = require("../shared/types");
+const {
+  isPathInside,
+  resolveShellAssetPath,
+  resolveSmallPhonePaths,
+} = require("../shared/paths");
 const {
   assertAllowedMimeType,
   assertMaxBytes,
@@ -15,21 +26,7 @@ const {
   sanitizePathSegment,
 } = require("./attachments");
 
-const CHANNEL_WORKSPACES_ROOT = path.join(
-  __dirname,
-  "..",
-  "..",
-  "data",
-  "channel-workspaces",
-);
-const ADMIN_WORKSPACES_ROOT = path.join(
-  __dirname,
-  "..",
-  "..",
-  "data",
-  "admin-workspaces",
-);
-const SYSTEM_WORKSPACE_ROOT = path.join(__dirname, "..", "..", "data", "system-workspace");
+const DEFAULT_PATHS = resolveSmallPhonePaths();
 const MANAGED_BLOCK_START = "BEGIN_SMALLPHONE_MANAGED_BLOCK";
 const MANAGED_BLOCK_END = "END_SMALLPHONE_MANAGED_BLOCK";
 const OPENCLAW_AGENT_LIST_START = "BEGIN_SMALLPHONE_AGENT_LIST";
@@ -38,13 +35,11 @@ const OPENCLAW_AGENT_CONFIG_PATHS = [
   "/root/projects/smallphone/openclaw.global.openclaw.json",
   "/root/projects/smallphone/openclaw-smallphone.json",
 ];
-const OPENCLAW_AGENT_REGISTRY_PATH = "/root/projects/smallphone/smallphone-active/smallphone-app/data/openclaw-agents.generated.json";
+const OPENCLAW_AGENT_REGISTRY_PATH = DEFAULT_PATHS.openclawAgentRegistryPath;
 const OPENCLAW_SMALLPHONE_SESSION_ROOT = "/root/.openclaw/plugins/smallphone/sessions";
 const OPENCLAW_SMALLPHONE_TURN_CONTEXT_ROOT = "/root/.openclaw/plugins/smallphone/turn-context";
 const LATE_RUNTIME_REPLY_GRACE_MS = 30000;
 const LATE_RUNTIME_REPLY_POLL_MS = 2000;
-const ATTACHMENTS_ROOT = path.join(__dirname, "..", "..", "data", "attachments");
-const ATTACHMENTS_ROOT_RESOLVED = path.resolve(ATTACHMENTS_ROOT);
 const ATTACHMENT_MAX_BYTES = Number.parseInt(
   process.env.SMALLPHONE_ATTACHMENT_MAX_BYTES || "10485760",
   10,
@@ -109,8 +104,29 @@ const FALLBACK_PERMISSION_TEMPLATES = {
 
 class SmallPhoneService {
   constructor(options = {}) {
-    const dataFile = options.dataFile || path.join(__dirname, "..", "..", "data", "runtime.json");
-    this.store = new JsonStore(dataFile);
+    const deriveHomeFromDataFile = Boolean(options.dataFile && !options.smallphoneHome && !options.paths);
+    this.paths =
+      options.paths ||
+      resolveSmallPhonePaths({
+        env: options.env,
+        dataFile: options.dataFile,
+        smallphoneHome: options.smallphoneHome,
+        deriveHomeFromDataFile,
+      });
+    const dataFile = options.dataFile || this.paths.dataFile;
+    const storeOptions = {
+      dataFile,
+      paths: this.paths,
+    };
+    if (Object.prototype.hasOwnProperty.call(options, "legacySeedFile")) {
+      storeOptions.legacySeedFile = options.legacySeedFile;
+    } else if (deriveHomeFromDataFile) {
+      storeOptions.legacySeedFile = "";
+    }
+    this.store = new JsonStore(storeOptions);
+    this.attachmentsRoot = this.paths.attachmentsRoot;
+    this.attachmentsRootResolved = path.resolve(this.attachmentsRoot);
+    this.officialShellRoot = path.resolve(options.officialShellRoot || path.join(__dirname, "..", "..", "apps", "web"));
     this.runtime = createRuntimeAdapter(options.runtime || {});
     this.runtimeInfo = this.runtime.describe();
     this.webclientChat = createWebclientChatClient(options.runtime || {});
@@ -126,7 +142,7 @@ class SmallPhoneService {
         options.projectManagement?.ccConnectManagementToken || options.permissions?.ccConnectManagementToken || "",
     });
     this.projectInfo = this.ccConnectProjects.describe();
-    this.artifactSync = normalizeArtifactSyncOptions(options.artifactSync);
+    this.artifactSync = normalizeArtifactSyncOptions(options.artifactSync, this.paths);
     this.threadEventSubscribers = new Map();
   }
 
@@ -174,13 +190,69 @@ class SmallPhoneService {
     };
   }
 
+  getUserContent() {
+    return selectUserContent(this.store.read());
+  }
+
+  updateUserContent(input = {}) {
+    const updatedAt = nowIso();
+    this.store.update((state) => {
+      applyUserContentPatch(state, input, updatedAt);
+      return state;
+    });
+    return this.getUserContent();
+  }
+
+  getAppRegistry() {
+    const content = this.getUserContent();
+    const activeShell = content.shells.find((item) => item.id === content.activeShell) ||
+      content.shells.find((item) => item.id === DEFAULT_OFFICIAL_SHELL_ID) ||
+      null;
+    return {
+      generatedAt: nowIso(),
+      apps: content.apps,
+      appInstances: content.appInstances,
+      themes: content.themes,
+      desktopLayouts: content.desktopLayouts,
+      shells: content.shells,
+      activeShell: content.activeShell,
+      activeShellRecord: activeShell,
+    };
+  }
+
+  getActiveShell() {
+    const state = this.store.read();
+    return resolveActiveShellRecord(state);
+  }
+
+  resolveShellAssetPath(params = {}) {
+    const state = this.store.read();
+    const requestedShellId = String(params.shellId || "").trim();
+    const shell = requestedShellId
+      ? state.shells.find((item) => item.id === requestedShellId) || null
+      : resolveActiveShellRecord(state);
+    if (requestedShellId && !shell) {
+      throw new Error(`Shell not found: ${requestedShellId}`);
+    }
+    const shellRecord =
+      shell ||
+      state.shells.find((item) => item.id === DEFAULT_OFFICIAL_SHELL_ID) ||
+      createDefaultUserContent(nowIso()).shells[0];
+    return resolveShellAssetPath({
+      paths: this.paths,
+      officialRoot: this.officialShellRoot,
+      shell: shellRecord,
+      assetPath: params.assetPath || params.path,
+    });
+  }
+
   listContacts() {
     const state = this.store.read();
     this.syncManagedArtifacts(state);
     return state.contacts.map((contact) => {
       const character = hydrateCharacter(state, state.characters.find((item) => item.id === contact.characterId) || null);
       const thread = state.threads.find((item) => item.contactId === contact.id) || null;
-      const routedThread = thread ? attachThreadRouting(thread, this.runtimeInfo.id) : null;
+      const routedThread = thread ? attachThreadRouting(thread, this.runtimeInfo.id, this.paths) : null;
       return {
         ...contact,
         character,
@@ -217,7 +289,7 @@ class SmallPhoneService {
       const contact = state.contacts.find((item) => item.id === thread.contactId) || null;
       const character = contact ? hydrateCharacter(state, state.characters.find((item) => item.id === contact.characterId) || null) : null;
       const lastMessage = state.messages.filter((item) => item.threadId === thread.id).at(-1) || null;
-      const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+      const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
       return {
         ...routedThread,
         summary: resolveThreadProfileSummary(routedThread, contact, character),
@@ -291,7 +363,7 @@ class SmallPhoneService {
     if (this.runtimeInfo.id !== "cc-webclient" || !thread) {
       return localMessages;
     }
-    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
     const project = resolveWebclientProjectForThread(routedThread, this.runtimeInfo.project);
     const sessionId = String(thread.runtimeSessionId || "").trim();
     if (!project || !sessionId) {
@@ -335,8 +407,8 @@ class SmallPhoneService {
 
   async openAttachmentDownload(attachmentId) {
     const attachment = this.getAttachment(attachmentId);
-    const localPath = sanitizeManagedAttachmentPath(attachment.localPath);
-    if (localPath && isManagedAttachmentFile(localPath)) {
+    const localPath = this.sanitizeManagedAttachmentPath(attachment.localPath);
+    if (localPath && this.isManagedAttachmentFile(localPath)) {
       return {
         kind: "local",
         localPath,
@@ -367,7 +439,7 @@ class SmallPhoneService {
     if (!thread) {
       throw new Error(`Thread not found: ${threadId}`);
     }
-    const workspaceDir = String(attachThreadRouting(thread, this.runtimeInfo.id)?.runtime?.workspaceDir || "").trim();
+    const workspaceDir = String(attachThreadRouting(thread, this.runtimeInfo.id, this.paths)?.runtime?.workspaceDir || "").trim();
     const filePath = resolveWorkspaceAttachmentPath(rawPath, workspaceDir);
     if (!filePath) {
       throw new Error("Workspace attachment is not allowed.");
@@ -403,6 +475,46 @@ class SmallPhoneService {
     };
   }
 
+  sanitizeManagedAttachmentPath(value) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw) return "";
+    const resolved = path.resolve(raw);
+    for (const root of this.attachmentReadRoots()) {
+      if (resolved !== root && isPathInside(root, resolved)) {
+        return resolved;
+      }
+    }
+    return "";
+  }
+
+  isManagedAttachmentFile(localPath) {
+    const resolved = this.sanitizeManagedAttachmentPath(localPath);
+    if (!resolved) {
+      return false;
+    }
+    try {
+      const stat = fs.lstatSync(resolved);
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        return false;
+      }
+      const fileReal = safeRealpath(resolved) || resolved;
+      return this.attachmentReadRoots().some((root) => {
+        const rootReal = safeRealpath(root) || root;
+        return fileReal !== rootReal && isPathInside(rootReal, fileReal);
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  attachmentReadRoots() {
+    return [this.attachmentsRootResolved, this.paths.legacyAttachmentsRoot]
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean)
+      .map((item) => path.resolve(item))
+      .filter((item, index, all) => all.indexOf(item) === index);
+  }
+
   createAttachment(input) {
     const parsed = parseBase64Upload(input?.data || input?.content || input?.base64 || "");
     const mimeType = sanitizeMimeType(input?.mimeType || input?.mime || input?.contentType || parsed.mimeType || "");
@@ -422,7 +534,7 @@ class SmallPhoneService {
     const id = createId("att");
     const createdAt = nowIso();
     const threadSegment = sanitizePathSegment(threadId) || "unbound";
-    const dir = path.join(ATTACHMENTS_ROOT, threadSegment, id);
+    const dir = path.join(this.attachmentsRoot, threadSegment, id);
     ensureDir(dir);
     const localPath = path.join(dir, fileName);
     fs.writeFileSync(localPath, buffer);
@@ -465,7 +577,7 @@ class SmallPhoneService {
 
     const id = createId("att");
     const createdAt = nowIso();
-    const dir = path.join(ATTACHMENTS_ROOT, "avatars", id);
+    const dir = path.join(this.attachmentsRoot, "avatars", id);
     ensureDir(dir);
     const localPath = path.join(dir, fileName);
     fs.writeFileSync(localPath, buffer);
@@ -610,7 +722,7 @@ class SmallPhoneService {
         provider: this.runtimeInfo.id || liveThread.runtime?.provider || "mock",
         model: liveThread.runtime?.model || this.runtimeInfo.model || "",
         agentId: liveThread.runtime?.agentId || defaultAgentId(liveThread),
-        workspaceDir: liveThread.runtime?.workspaceDir || defaultWorkspaceDir(liveThread),
+        workspaceDir: liveThread.runtime?.workspaceDir || defaultWorkspaceDir(liveThread, this.paths),
         sessionKey: nextSessionKey,
         sessionGeneration: nextGeneration,
         resumeSummary: handoffSummary,
@@ -659,7 +771,7 @@ class SmallPhoneService {
       const channelId = payload.channelId || `channel-${slug}`;
       const windowId = payload.windowId || `window-${slug}`;
       const agentId = payload.agentId || `smallphone-${channelId}`.replace(/[^a-zA-Z0-9:_-]+/g, "-");
-      const workspaceDir = payload.workspaceDir || defaultWorkspaceDirForRole(payload.roleLevel, channelId, slug);
+      const workspaceDir = payload.workspaceDir || defaultWorkspaceDirForRole(payload.roleLevel, channelId, slug, this.paths);
       const runtimeProject = payload.runtimeProject || defaultRuntimeProjectForRole(payload.roleLevel, slug);
       const sessionKey = payload.sessionKey || `smallphone:thread:${ids.threadId}`;
       const character = {
@@ -856,6 +968,7 @@ class SmallPhoneService {
       relationshipState,
       worldbookEntry,
       runtimeInfo: this.runtimeInfo,
+      paths: this.paths,
     });
     this.assertAvatarAttachmentId(payload.avatarAttachmentId);
     const updatedAt = nowIso();
@@ -1109,7 +1222,7 @@ class SmallPhoneService {
 
   getThreadDebugSnapshot(threadId) {
     const thread = this.getThread(threadId);
-    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
     const sessionKey = routedThread.runtime?.sessionKey || "";
     const turnContextRecord = readTurnContextRecord(sessionKey);
     const turnContextCache = this.getTurnContextCache(threadId);
@@ -1253,7 +1366,7 @@ class SmallPhoneService {
     if (!character) {
       throw new Error(`Character not found for contact: ${contact.id}`);
     }
-    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
     const runtime = routedThread.runtime || {};
     const project =
       resolveWebclientProjectForThread(routedThread, this.runtimeInfo.project) ||
@@ -1561,13 +1674,14 @@ class SmallPhoneService {
     if (!character) {
       throw new Error(`Character not found for reminder: ${reminderId}`);
     }
-    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
     ensureThreadWorkspace({
       thread: routedThread,
       contact,
       character,
       relationshipState:
         state.relationshipStates.find((item) => item.threadId === routedThread.id || item.contactId === contact.id) || null,
+      paths: this.paths,
     });
     const messages = state.messages.filter((item) => item.threadId === thread.id);
     const memories = state.memories
@@ -1673,7 +1787,7 @@ class SmallPhoneService {
   }
 
   syncManagedArtifacts(state = this.store.read()) {
-    ensureAllThreadWorkspaces(state);
+    ensureAllThreadWorkspaces(state, this.paths);
     syncOpenClawAgentConfigs(state, this.artifactSync);
   }
 
@@ -1682,7 +1796,7 @@ class SmallPhoneService {
     if (!thread) {
       return { ok: false, skipped: true, reason: "missing thread" };
     }
-    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
     const project = String(routedThread.runtime?.project || "").trim();
     if (!project || this.runtimeInfo.id !== "cc-webclient") {
       return { ok: false, skipped: true, reason: "project ensure not required" };
@@ -1692,6 +1806,7 @@ class SmallPhoneService {
       contact: params.contact || null,
       character: params.character || null,
       relationshipState: params.relationshipState || null,
+      paths: this.paths,
     });
     return this.ccConnectProjects.ensureProject({
       name: project,
@@ -1706,7 +1821,7 @@ class SmallPhoneService {
     if (!thread || this.runtimeInfo.id !== "cc-webclient") {
       return { ok: false, skipped: true, reason: "project mode sync not required" };
     }
-    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
     const project = String(routedThread.runtime?.project || "").trim();
     const agentType = normalizeAgentType(params.agentType || routedThread.runtime?.agentType) || "codex";
     const mode = normalizeAgentPermissionMode(params.agentMode, agentType);
@@ -1730,7 +1845,7 @@ class SmallPhoneService {
     if (!thread) {
       throw new Error(`Thread not found: ${threadId}`);
     }
-    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
     const project = resolveWebclientProjectForThread(routedThread, this.runtimeInfo.project);
     const sessionId = String(thread.runtimeSessionId || routedThread.runtimeSessionId || "").trim();
     const sessionKey = String(routedThread.runtime?.sessionKey || buildThreadSessionKey(thread.id, getSessionGeneration(thread))).trim();
@@ -1820,7 +1935,7 @@ class SmallPhoneService {
     const hydratedUserMessage = this.hydrateMessage(nextState, userMessage);
     this.emitThreadEvent(threadId, { type: "user.message", message: hydratedUserMessage });
 
-    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
     const relationshipState =
       nextState.relationshipStates.find((item) => item.threadId === routedThread.id || item.contactId === contact.id) || null;
     ensureThreadWorkspace({
@@ -1980,7 +2095,7 @@ class SmallPhoneService {
       };
     }
 
-    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id);
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
     const runtimeResult = readRuntimeReplyFromSessionFile({
       sessionKey: routedThread.runtime?.sessionKey,
       userText: pendingUserMessage.content,
@@ -2045,7 +2160,7 @@ class SmallPhoneService {
           const payload = normalizedAssistantAttachments[index];
           const candidateLocalPath =
             typeof payload.localPath === "string" ? payload.localPath.trim() : "";
-          const safeLocalPath = sanitizeManagedAttachmentPath(candidateLocalPath);
+          const safeLocalPath = this.sanitizeManagedAttachmentPath(candidateLocalPath);
           draft.attachments.push({
             id: assistantAttachmentIds[index],
             threadId,
@@ -2057,7 +2172,7 @@ class SmallPhoneService {
             size: Number.isFinite(Number(payload.size)) ? Number(payload.size) : 0,
             source: payload.source || "webclient",
             // Never trust runtime-provided paths unless they are already within our managed attachments directory.
-            localPath: safeLocalPath && isManagedAttachmentFile(safeLocalPath) ? safeLocalPath : "",
+            localPath: safeLocalPath && this.isManagedAttachmentFile(safeLocalPath) ? safeLocalPath : "",
             url: typeof payload.url === "string" ? payload.url.trim() : "",
             createdAt: assistantMessage.createdAt,
           });
@@ -2088,7 +2203,7 @@ class SmallPhoneService {
           workspaceDir:
             liveThread.runtime?.workspaceDir ||
             routedThread.runtime?.workspaceDir ||
-            path.join(CHANNEL_WORKSPACES_ROOT, liveThread.channelId || `channel-${liveThread.id}`),
+            path.join(this.paths.channelWorkspacesRoot, liveThread.channelId || `channel-${liveThread.id}`),
           sessionKey:
             runtimeResult.runtimeSessionKey ||
             liveThread.runtime?.sessionKey ||
@@ -2222,7 +2337,72 @@ class SmallPhoneService {
   }
 }
 
-function attachThreadRouting(thread, runtimeProvider = "") {
+function selectUserContent(state) {
+  return {
+    apps: projectPublicUserContentCollection("apps", state.apps),
+    appInstances: projectPublicUserContentCollection("appInstances", state.appInstances),
+    themes: projectPublicUserContentCollection("themes", state.themes),
+    desktopLayouts: projectPublicUserContentCollection("desktopLayouts", state.desktopLayouts),
+    shells: projectPublicUserContentCollection("shells", state.shells),
+    activeShell: String(state.activeShell || DEFAULT_OFFICIAL_SHELL_ID).trim() || DEFAULT_OFFICIAL_SHELL_ID,
+  };
+}
+
+function applyUserContentPatch(state, input, updatedAt) {
+  if (!input || typeof input !== "object") {
+    return state;
+  }
+  state.apps = upsertUserContentCollection("apps", state.apps, input.apps, updatedAt);
+  state.appInstances = upsertUserContentCollection("appInstances", state.appInstances, input.appInstances, updatedAt);
+  state.themes = upsertUserContentCollection("themes", state.themes, input.themes, updatedAt);
+  state.desktopLayouts = upsertUserContentCollection("desktopLayouts", state.desktopLayouts, input.desktopLayouts, updatedAt);
+  state.shells = upsertUserContentCollection("shells", state.shells, input.shells, updatedAt);
+  if (Object.prototype.hasOwnProperty.call(input, "activeShell")) {
+    state.activeShell = String(input.activeShell || "").trim();
+  }
+  return state;
+}
+
+function upsertUserContentCollection(collectionName, current, patch, updatedAt) {
+  const existing = Array.isArray(current) ? current : [];
+  if (!Array.isArray(patch)) {
+    return existing;
+  }
+  const byId = new Map(existing.map((item) => [item.id, item]));
+  const order = existing.map((item) => item.id).filter(Boolean);
+  for (const item of patch) {
+    const id = String(item?.id || "").trim();
+    if (!id || !item || typeof item !== "object") {
+      continue;
+    }
+    const previous = byId.get(id) || {};
+    const sanitizedItem = sanitizePublicUserContentValue(item);
+    byId.set(id, {
+      ...previous,
+      ...sanitizedItem,
+      id,
+      createdAt: sanitizedItem.createdAt || previous.createdAt || updatedAt,
+      updatedAt,
+    });
+    if (!order.includes(id)) {
+      order.push(id);
+    }
+  }
+  return projectPublicUserContentCollection(
+    collectionName,
+    order.map((id) => byId.get(id)).filter(Boolean),
+  );
+}
+
+function resolveActiveShellRecord(state) {
+  const shells = Array.isArray(state.shells) ? state.shells : [];
+  const activeShellId = String(state.activeShell || DEFAULT_OFFICIAL_SHELL_ID).trim();
+  return shells.find((item) => item.id === activeShellId) ||
+    shells.find((item) => item.id === DEFAULT_OFFICIAL_SHELL_ID) ||
+    createDefaultUserContent(nowIso()).shells[0];
+}
+
+function attachThreadRouting(thread, runtimeProvider = "", paths = DEFAULT_PATHS) {
   const channelId = thread.channelId || `channel-${thread.id}`;
   const sessionGeneration = getSessionGeneration(thread);
   const roleLevel = normalizeRoleLevel(thread.roleLevel || thread.runtime?.roleLevel || "contact");
@@ -2243,7 +2423,7 @@ function attachThreadRouting(thread, runtimeProvider = "") {
         thread.runtime?.agentId ||
         `smallphone-${channelId}`.replace(/[^a-zA-Z0-9:_-]+/g, "-"),
       workspaceDir:
-        thread.runtime?.workspaceDir || defaultWorkspaceDirForRole(roleLevel, channelId, thread.id),
+        thread.runtime?.workspaceDir || defaultWorkspaceDirForRole(roleLevel, channelId, thread.id, paths),
       sessionKey: thread.runtime?.sessionKey || buildThreadSessionKey(thread.id, sessionGeneration),
       sessionGeneration,
       resumeSummary: normalizeSessionResumeSummary(thread.runtime?.resumeSummary, ""),
@@ -2405,10 +2585,10 @@ function buildSessionResumeSummary({ thread, contact, messages }) {
   return `${contactName} 的同一私有窗口已续代到新 session。延续前文关系与语气。最近上下文：${tail}`.slice(0, 1200);
 }
 
-function ensureAllThreadWorkspaces(state) {
-  ensureSystemWorkspace();
+function ensureAllThreadWorkspaces(state, paths = DEFAULT_PATHS) {
+  ensureSystemWorkspace(paths);
   for (const thread of state.threads || []) {
-    const routedThread = attachThreadRouting(thread);
+    const routedThread = attachThreadRouting(thread, "", paths);
     const contact = (state.contacts || []).find((item) => item.id === routedThread.contactId) || null;
     const character = contact
       ? (state.characters || []).find((item) => item.id === contact.characterId) || null
@@ -2422,12 +2602,13 @@ function ensureAllThreadWorkspaces(state) {
       contact,
       character,
       relationshipState,
+      paths,
     });
   }
 }
 
-function ensureSystemWorkspace() {
-  fs.mkdirSync(SYSTEM_WORKSPACE_ROOT, { recursive: true });
+function ensureSystemWorkspace(paths = DEFAULT_PATHS) {
+  fs.mkdirSync(paths.systemWorkspaceRoot, { recursive: true });
   const files = {
     "SYSTEM.md": [
       "# SmallPhone System Workspace",
@@ -2440,11 +2621,11 @@ function ensureSystemWorkspace() {
     "SYSTEM_MEMORY.md": "Curated SmallPhone-wide memory. Keep this about the system, not private contact conversations.",
   };
   for (const [name, content] of Object.entries(files)) {
-    syncManagedWorkspaceFile(path.join(SYSTEM_WORKSPACE_ROOT, name), content);
+    syncManagedWorkspaceFile(path.join(paths.systemWorkspaceRoot, name), content);
   }
 }
 
-function ensureThreadWorkspace({ thread, contact, character, relationshipState }) {
+function ensureThreadWorkspace({ thread, contact, character, relationshipState, paths = DEFAULT_PATHS }) {
   const workspaceDir = String(thread?.runtime?.workspaceDir || "").trim();
   if (!workspaceDir) {
     return;
@@ -2457,7 +2638,7 @@ function ensureThreadWorkspace({ thread, contact, character, relationshipState }
     "SOUL.md": buildSoulBootstrap({ character }),
     "MEMORY.md": buildMemoryBootstrap(),
     "TOOLS.md": buildToolsBootstrap({ character }),
-    "OPERATIONAL_CONTEXT.md": buildOperationalContextBootstrap({ thread, contact }),
+    "OPERATIONAL_CONTEXT.md": buildOperationalContextBootstrap({ thread, contact, paths }),
   };
   for (const [name, content] of Object.entries(files)) {
     const filePath = path.join(workspaceDir, name);
@@ -2660,11 +2841,11 @@ function hydrateCharacter(state, character) {
   };
 }
 
-function normalizeArtifactSyncOptions(input) {
+function normalizeArtifactSyncOptions(input, paths = DEFAULT_PATHS) {
   const configPaths = Array.isArray(input?.configPaths)
     ? input.configPaths.map((item) => String(item).trim()).filter(Boolean)
     : OPENCLAW_AGENT_CONFIG_PATHS;
-  const registryPath = String(input?.registryPath || "").trim() || OPENCLAW_AGENT_REGISTRY_PATH;
+  const registryPath = String(input?.registryPath || "").trim() || paths.openclawAgentRegistryPath || OPENCLAW_AGENT_REGISTRY_PATH;
   return {
     enabled: input?.enabled !== false,
     configPaths,
@@ -2733,7 +2914,7 @@ function buildUserBootstrap({ thread, contact }) {
   ].join("\n");
 }
 
-function buildOperationalContextBootstrap({ thread, contact }) {
+function buildOperationalContextBootstrap({ thread, contact, paths = DEFAULT_PATHS }) {
   const roleLevel = normalizeRoleLevel(thread?.roleLevel || contact?.roleLevel || thread?.runtime?.roleLevel);
   const workspaceDir = thread?.runtime?.workspaceDir || "";
   if (roleLevel === "admin") {
@@ -2742,7 +2923,7 @@ function buildOperationalContextBootstrap({ thread, contact }) {
       "",
       "Context type: SmallPhone administrator role.",
       `Default operation directory: ${workspaceDir}`,
-      `Shared system workspace: ${SYSTEM_WORKSPACE_ROOT}`,
+      `Shared system workspace: ${paths.systemWorkspaceRoot}`,
       "Use your admin workspace for your own role memory and task continuity.",
       "Use the shared system workspace for SmallPhone-wide app notes, app-building experience, and system memory.",
       "Do not read private contact memories unless the user explicitly requests cross-contact administration.",
@@ -3103,7 +3284,7 @@ function normalizeCompanionPatchInput(params) {
   const workspaceDir =
     String(input?.workspaceDir || "").trim() ||
     (roleLevelChanged ? "" : String(thread.runtime?.workspaceDir || "").trim()) ||
-    defaultWorkspaceDirForRole(roleLevel, channelId, slugify(name) || thread.id || channelId);
+    defaultWorkspaceDirForRole(roleLevel, channelId, slugify(name) || thread.id || channelId, params.paths || DEFAULT_PATHS);
   const sessionKey =
     String(input?.sessionKey || "").trim() ||
     String(thread.runtime?.sessionKey || "").trim() ||
@@ -3301,13 +3482,19 @@ function templateForAgentMode(agentMode, agentType) {
   return DEFAULT_PERMISSION_TEMPLATE;
 }
 
-function defaultWorkspaceDirForRole(roleLevel, channelId, slug) {
+function defaultWorkspaceDir(thread, paths = DEFAULT_PATHS) {
+  const roleLevel = normalizeRoleLevel(thread?.roleLevel || thread?.runtime?.roleLevel || "contact");
+  const channelId = thread?.channelId || `channel-${thread?.id || "thread"}`;
+  return defaultWorkspaceDirForRole(roleLevel, channelId, thread?.id || channelId, paths);
+}
+
+function defaultWorkspaceDirForRole(roleLevel, channelId, slug, paths = DEFAULT_PATHS) {
   const safeChannel = slugify(channelId) || "channel";
   const safeSlug = slugify(slug) || safeChannel;
   if (normalizeRoleLevel(roleLevel) === "admin") {
-    return path.join(ADMIN_WORKSPACES_ROOT, `admin-${safeSlug.replace(/^admin-/, "")}`);
+    return path.join(paths.adminWorkspacesRoot, `admin-${safeSlug.replace(/^admin-/, "")}`);
   }
-  return path.join(CHANNEL_WORKSPACES_ROOT, safeChannel);
+  return path.join(paths.channelWorkspacesRoot, safeChannel);
 }
 
 function defaultRuntimeProjectForRole(roleLevel, slug) {
@@ -4084,35 +4271,6 @@ function normalizeRuntimeAssistantAttachments(input) {
       };
     })
     .filter(Boolean);
-}
-
-function sanitizeManagedAttachmentPath(value) {
-  const raw = typeof value === "string" ? value.trim() : "";
-  if (!raw) return "";
-  const resolved = path.resolve(raw);
-  const relative = path.relative(ATTACHMENTS_ROOT_RESOLVED, resolved);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    return "";
-  }
-  return resolved;
-}
-
-function isManagedAttachmentFile(localPath) {
-  try {
-    const stat = fs.lstatSync(localPath);
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      return false;
-    }
-    const rootReal = safeRealpath(ATTACHMENTS_ROOT_RESOLVED) || ATTACHMENTS_ROOT_RESOLVED;
-    const fileReal = safeRealpath(localPath) || localPath;
-    const relative = path.relative(rootReal, fileReal);
-    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function safeRealpath(value) {

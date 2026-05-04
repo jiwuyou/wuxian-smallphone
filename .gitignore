@@ -2,6 +2,8 @@
 
 # Separate nested repository
 generic-mini-phone/
+smallphone-user-shell-template/
+standalone-apps/like-girl/source/
 
 # Dependencies
 node_modules/

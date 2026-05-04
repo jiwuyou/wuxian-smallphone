@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "smallphone.app/v1",
+  "id": "like-girl",
+  "name": "LikeGirl",
+  "shortName": "LikeGirl",
+  "version": "0.1.0",
+  "type": "native-app",
+  "license": "AGPL-3.0",
+  "description": "基于 LikeGirl v5.2.0 页面气质改造的 SmallPhone 原生 Node/SQLite 应用。",
+  "source": {
+    "provider": "gitee",
+    "repository": "https://gitee.com/kiCode111/like-girl-v5.2.0",
+    "cloneUrl": "https://gitee.com/kiCode111/like-girl-v5.2.0.git",
+    "upstreamVersion": "5.2.0",
+    "expectedLocalPath": "source",
+    "usage": "visual-reference-only",
+    "shared": false
+  },
+  "runtime": {
+    "type": "node-http",
+    "packageManager": "pnpm",
+    "node": ">=22",
+    "entry": "src/server.js",
+    "defaultPort": 4103,
+    "portEnv": "PORT",
+    "startCommand": "pnpm start",
+    "devCommand": "pnpm dev",
+    "serves": {
+      "protocol": "http",
+      "urlTemplate": "http://127.0.0.1:{PORT}/"
+    }
+  },
+  "ui": {
+    "type": "web",
+    "path": "/",
+    "servedBy": "app"
+  },
+  "storage": {
+    "type": "sqlite",
+    "driver": "node:sqlite",
+    "defaultPath": "data/like-girl.sqlite",
+    "pathEnv": "LIKE_GIRL_DB_FILE",
+    "seedOnEmpty": true
+  },
+  "api": [
+    { "method": "GET", "path": "/health" },
+    { "method": "GET", "path": "/manifest" },
+    { "method": "GET", "path": "/api/bootstrap" },
+    { "method": "GET", "path": "/api/site" },
+    { "method": "GET", "path": "/api/articles" },
+    { "method": "GET", "path": "/api/articles/:id" },
+    { "method": "GET", "path": "/api/photos" },
+    { "method": "GET", "path": "/api/messages" },
+    { "method": "POST", "path": "/api/messages" },
+    { "method": "GET", "path": "/api/checklist" }
+  ],
+  "cli": {
+    "bin": "smallphone-like-girl",
+    "commands": [
+      "bootstrap",
+      "messages",
+      "add-message"
+    ]
+  },
+  "permissions": {
+    "network": "local-http",
+    "storage": "local-sqlite"
+  }
+}

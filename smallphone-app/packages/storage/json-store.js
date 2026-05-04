@@ -6,14 +6,36 @@ const {
   DEFAULT_THREAD_ID,
   nowIso,
 } = require("../shared/types");
+const { resolveSmallPhonePaths } = require("../shared/paths");
 
 const ACTIVE_RUNTIME_PROVIDER = normalizeRuntimeProvider(process.env.SMALLPHONE_RUNTIME_MODE);
-const ATTACHMENTS_ROOT = path.join(__dirname, "..", "..", "data", "attachments");
-const ATTACHMENTS_ROOT_RESOLVED = path.resolve(ATTACHMENTS_ROOT);
+const DEFAULT_PATHS = resolveSmallPhonePaths();
+const DEFAULT_OFFICIAL_SHELL_ID = "official";
+const DEFAULT_THEME_ID = "default";
+const DEFAULT_DESKTOP_LAYOUT_ID = "default";
+const DEFAULT_APP_INSTANCE_ID = "instance-chat";
 
 class JsonStore {
-  constructor(filePath) {
-    this.filePath = filePath;
+  constructor(filePathOrOptions, options = {}) {
+    const inputOptions =
+      filePathOrOptions && typeof filePathOrOptions === "object"
+        ? filePathOrOptions
+        : {
+            ...options,
+            dataFile: filePathOrOptions,
+          };
+    this.paths =
+      inputOptions.paths ||
+      resolveSmallPhonePaths({
+        env: inputOptions.env,
+        dataFile: inputOptions.dataFile,
+        smallphoneHome: inputOptions.smallphoneHome,
+        deriveHomeFromDataFile: inputOptions.deriveHomeFromDataFile,
+      });
+    this.filePath = path.resolve(inputOptions.dataFile || this.paths.dataFile);
+    this.legacySeedFile = Object.prototype.hasOwnProperty.call(inputOptions, "legacySeedFile")
+      ? String(inputOptions.legacySeedFile || "").trim()
+      : String(this.paths.legacyRuntimeFile || "").trim();
     this.ensureParent();
     this.ensureSeed();
   }
@@ -26,7 +48,11 @@ class JsonStore {
     if (fs.existsSync(this.filePath)) {
       return;
     }
-    const seed = createSeedData();
+    if (this.legacySeedFile && path.resolve(this.legacySeedFile) !== this.filePath && fs.existsSync(this.legacySeedFile)) {
+      fs.copyFileSync(this.legacySeedFile, this.filePath);
+      return;
+    }
+    const seed = createSeedData(this.paths);
     fs.writeFileSync(this.filePath, JSON.stringify(seed, null, 2));
   }
 
@@ -34,7 +60,7 @@ class JsonStore {
     this.ensureSeed();
     const raw = fs.readFileSync(this.filePath, "utf8");
     const parsed = JSON.parse(raw);
-    const normalized = normalizeState(parsed);
+    const normalized = normalizeState(parsed, this.paths);
     if (JSON.stringify(parsed) !== JSON.stringify(normalized)) {
       this.write(normalized);
     }
@@ -53,9 +79,10 @@ class JsonStore {
   }
 }
 
-function createSeedData() {
+function createSeedData(paths = DEFAULT_PATHS) {
   const createdAt = nowIso();
-  const companionSeed = createDefaultCompanionSeed(createdAt);
+  const companionSeed = createDefaultCompanionSeed(createdAt, paths);
+  const userContentSeed = createDefaultUserContent(createdAt);
   return {
     characters: companionSeed.characters,
     contacts: companionSeed.contacts,
@@ -67,6 +94,12 @@ function createSeedData() {
     maskDefinitions: createDefaultMaskDefinitions(createdAt),
     relationshipStates: createDefaultRelationshipStates(createdAt),
     turnContextCache: [],
+    apps: userContentSeed.apps,
+    appInstances: userContentSeed.appInstances,
+    themes: userContentSeed.themes,
+    desktopLayouts: userContentSeed.desktopLayouts,
+    shells: userContentSeed.shells,
+    activeShell: userContentSeed.activeShell,
     reminders: [],
     timeline: [
       {
@@ -80,14 +113,40 @@ function createSeedData() {
   };
 }
 
-function normalizeState(state) {
+function normalizeState(state, paths = DEFAULT_PATHS) {
   const createdAt = nowIso();
-  const defaultCompanionSeed = createDefaultCompanionSeed(createdAt);
+  const defaultCompanionSeed = createDefaultCompanionSeed(createdAt, paths);
   const defaultWorldbookEntries = createDefaultWorldbookEntries(createdAt);
   const defaultMaskDefinitions = createDefaultMaskDefinitions(createdAt);
   const defaultRelationshipStates = createDefaultRelationshipStates(createdAt);
+  const defaultUserContent = createDefaultUserContent(createdAt);
   const messages = normalizeMessages(
     mergeById(Array.isArray(state.messages) ? state.messages : [], defaultCompanionSeed.messages),
+    createdAt,
+  );
+  const apps = normalizeApps(
+    mergeById(Array.isArray(state.apps) ? state.apps : [], defaultUserContent.apps),
+    defaultUserContent.apps,
+    createdAt,
+  );
+  const appInstances = normalizeAppInstances(
+    mergeById(Array.isArray(state.appInstances) ? state.appInstances : [], defaultUserContent.appInstances),
+    defaultUserContent.appInstances,
+    createdAt,
+  );
+  const themes = normalizeThemes(
+    mergeById(Array.isArray(state.themes) ? state.themes : [], defaultUserContent.themes),
+    defaultUserContent.themes,
+    createdAt,
+  );
+  const desktopLayouts = normalizeDesktopLayouts(
+    mergeById(Array.isArray(state.desktopLayouts) ? state.desktopLayouts : [], defaultUserContent.desktopLayouts),
+    defaultUserContent.desktopLayouts,
+    createdAt,
+  );
+  const shells = normalizeShells(
+    mergeById(Array.isArray(state.shells) ? state.shells : [], defaultUserContent.shells),
+    defaultUserContent.shells,
     createdAt,
   );
   return {
@@ -104,9 +163,10 @@ function normalizeState(state) {
       mergeById(Array.isArray(state.threads) ? state.threads : [], defaultCompanionSeed.threads),
       messages,
       createdAt,
+      paths,
     ),
     messages,
-    attachments: normalizeAttachments(Array.isArray(state.attachments) ? state.attachments : [], createdAt),
+    attachments: normalizeAttachments(Array.isArray(state.attachments) ? state.attachments : [], createdAt, paths),
     memories: mergeById(Array.isArray(state.memories) ? state.memories : [], defaultCompanionSeed.memories),
     worldbookEntries: normalizeWorldbookEntries(
       mergeById(
@@ -130,12 +190,18 @@ function normalizeState(state) {
       createdAt,
     ),
     turnContextCache: Array.isArray(state.turnContextCache) ? state.turnContextCache : [],
+    apps,
+    appInstances,
+    themes,
+    desktopLayouts,
+    shells,
+    activeShell: normalizeActiveShell(state.activeShell, shells, defaultUserContent.activeShell),
     reminders: normalizeTasks(Array.isArray(state.reminders) ? state.reminders : [], createdAt),
     timeline: Array.isArray(state.timeline) ? state.timeline : [],
   };
 }
 
-function createDefaultCompanionSeed(createdAt) {
+function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
   return {
     characters: [
       {
@@ -246,7 +312,7 @@ function createDefaultCompanionSeed(createdAt) {
           provider: "mock",
           model: "",
           agentId: "smallphone-channel-aki",
-          workspaceDir: "/root/projects/smallphone/smallphone-active/smallphone-app/data/channel-workspaces/channel-aki",
+          workspaceDir: path.join(paths.channelWorkspacesRoot, "channel-aki"),
           sessionKey: `smallphone:thread:${DEFAULT_THREAD_ID}`,
         },
         unreadCount: 0,
@@ -267,7 +333,7 @@ function createDefaultCompanionSeed(createdAt) {
           provider: "mock",
           model: "",
           agentId: "smallphone-channel-mira",
-          workspaceDir: "/root/projects/smallphone/smallphone-active/smallphone-app/data/channel-workspaces/channel-mira",
+          workspaceDir: path.join(paths.channelWorkspacesRoot, "channel-mira"),
           sessionKey: "smallphone:thread:thread-mira",
         },
         unreadCount: 1,
@@ -288,7 +354,7 @@ function createDefaultCompanionSeed(createdAt) {
           provider: "mock",
           model: "",
           agentId: "smallphone-channel-sora",
-          workspaceDir: "/root/projects/smallphone/smallphone-active/smallphone-app/data/channel-workspaces/channel-sora",
+          workspaceDir: path.join(paths.channelWorkspacesRoot, "channel-sora"),
           sessionKey: "smallphone:thread:thread-sora",
         },
         unreadCount: 1,
@@ -359,6 +425,75 @@ function createDefaultCompanionSeed(createdAt) {
         createdAt,
       },
     ],
+  };
+}
+
+function createDefaultUserContent(createdAt) {
+  return {
+    apps: [
+      {
+        id: "chat",
+        name: "Chat",
+        title: "Chat",
+        source: "official",
+        kind: "core",
+        entry: "/apps/chat",
+        icon: "message-circle",
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+    appInstances: [
+      {
+        id: DEFAULT_APP_INSTANCE_ID,
+        appId: "chat",
+        title: "Chat",
+        source: "official",
+        settings: {},
+        state: {},
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+    themes: [
+      {
+        id: DEFAULT_THEME_ID,
+        name: "Default",
+        source: "official",
+        tokens: {},
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+    desktopLayouts: [
+      {
+        id: DEFAULT_DESKTOP_LAYOUT_ID,
+        name: "Default",
+        source: "official",
+        items: [
+          {
+            instanceId: DEFAULT_APP_INSTANCE_ID,
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+          },
+        ],
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+    shells: [
+      {
+        id: DEFAULT_OFFICIAL_SHELL_ID,
+        name: "Official Shell",
+        source: "official",
+        entry: "index.html",
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+    activeShell: DEFAULT_OFFICIAL_SHELL_ID,
   };
 }
 
@@ -562,7 +697,7 @@ function defaultWorldbookScopeIds(contactId) {
   return [];
 }
 
-function normalizeThreads(threads, messages, createdAt) {
+function normalizeThreads(threads, messages, createdAt, paths = DEFAULT_PATHS) {
   return threads.map((thread) => {
     const threadMessages = messagesForThread(messages, thread.id);
     const summary = normalizeThreadSummary(thread, threadMessages);
@@ -575,7 +710,7 @@ function normalizeThreads(threads, messages, createdAt) {
         provider: ACTIVE_RUNTIME_PROVIDER,
         model: "",
         agentId: defaultAgentId(thread),
-        workspaceDir: defaultWorkspaceDir(thread),
+        workspaceDir: defaultWorkspaceDir(thread, paths),
         sessionKey: defaultSessionKey(thread),
         sessionGeneration: defaultSessionGeneration(thread),
         resumeSummary: "",
@@ -590,7 +725,7 @@ function normalizeThreads(threads, messages, createdAt) {
         workspaceScope: typeof thread.runtime?.workspaceScope === "string" ? thread.runtime.workspaceScope.trim() : "",
         model: thread.runtime?.model || "",
         agentId: thread.runtime?.agentId || defaultAgentId(thread),
-        workspaceDir: thread.runtime?.workspaceDir || defaultWorkspaceDir(thread),
+        workspaceDir: thread.runtime?.workspaceDir || defaultWorkspaceDir(thread, paths),
         sessionKey: thread.runtime?.sessionKey || defaultSessionKey(thread),
         sessionGeneration: defaultSessionGeneration(thread),
         resumeSummary:
@@ -623,7 +758,7 @@ function normalizeMessages(messages, createdAt) {
     });
 }
 
-function normalizeAttachments(attachments, createdAt) {
+function normalizeAttachments(attachments, createdAt, paths = DEFAULT_PATHS) {
   return attachments
     .filter((item) => item && typeof item.id === "string" && item.id.trim())
     .map((item) => ({
@@ -638,21 +773,31 @@ function normalizeAttachments(attachments, createdAt) {
       mimeType: typeof item.mimeType === "string" ? item.mimeType.trim().toLowerCase() : "",
       size: Number.isFinite(Number(item.size)) ? Number(item.size) : 0,
       source: typeof item.source === "string" ? item.source.trim() : "",
-      localPath: sanitizeManagedAttachmentPath(item.localPath),
+      localPath: sanitizeManagedAttachmentPath(item.localPath, paths),
       url: typeof item.url === "string" ? item.url.trim() : "",
       createdAt: item.createdAt || createdAt,
     }));
 }
 
-function sanitizeManagedAttachmentPath(value) {
+function sanitizeManagedAttachmentPath(value, paths = DEFAULT_PATHS) {
   const raw = typeof value === "string" ? value.trim() : "";
   if (!raw) return "";
   const resolved = path.resolve(raw);
-  const relative = path.relative(ATTACHMENTS_ROOT_RESOLVED, resolved);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    return "";
+  for (const root of attachmentReadRoots(paths)) {
+    const relative = path.relative(root, resolved);
+    if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
+      return resolved;
+    }
   }
-  return resolved;
+  return "";
+}
+
+function attachmentReadRoots(paths = DEFAULT_PATHS) {
+  return [paths.attachmentsRoot, paths.legacyAttachmentsRoot]
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean)
+    .map((item) => path.resolve(item))
+    .filter((item, index, all) => all.indexOf(item) === index);
 }
 
 function normalizeAttachmentIdList(input) {
@@ -761,14 +906,218 @@ function defaultAgentId(thread) {
   return `smallphone-${defaultChannelId(thread)}`.replace(/[^a-zA-Z0-9:_-]+/g, "-");
 }
 
-function defaultWorkspaceDir(thread) {
+function defaultWorkspaceDir(thread, paths = DEFAULT_PATHS) {
   const explicit =
     typeof thread.runtime?.workspaceDir === "string" ? thread.runtime.workspaceDir.trim() : "";
   if (explicit) return explicit;
-  return path.join(
-    "/root/projects/smallphone/smallphone-active/smallphone-app/data/channel-workspaces",
-    defaultChannelId(thread),
+  return path.join(paths.channelWorkspacesRoot, defaultChannelId(thread));
+}
+
+function normalizeApps(entries, defaults, createdAt) {
+  return normalizeUserContentCollection(entries, defaults, createdAt, (entry, base) =>
+    projectPublicUserContentRecord("apps", {
+      id: String(entry.id || base.id || "").trim(),
+      name: String(entry.name || entry.title || base.name || entry.id || "").trim(),
+      title: String(entry.title || entry.name || base.title || base.name || entry.id || "").trim(),
+      source: normalizeContentSource(entry.source || base.source),
+      kind: String(entry.kind || base.kind || "app").trim(),
+      entry: String(entry.entry || base.entry || "").trim(),
+      icon: String(entry.icon || base.icon || "").trim(),
+      version: String(entry.version || base.version || "").trim(),
+      createdAt: entry.createdAt || base.createdAt || createdAt,
+      updatedAt: entry.updatedAt || base.updatedAt || entry.createdAt || createdAt,
+    }));
+}
+
+function normalizeAppInstances(entries, defaults, createdAt) {
+  return normalizeUserContentCollection(entries, defaults, createdAt, (entry, base) =>
+    projectPublicUserContentRecord("appInstances", {
+      id: String(entry.id || base.id || "").trim(),
+      appId: String(entry.appId || entry.app_id || base.appId || "").trim(),
+      title: String(entry.title || entry.name || base.title || base.name || entry.id || "").trim(),
+      source: normalizeContentSource(entry.source || base.source),
+      settings: isPlainObject(entry.settings) ? entry.settings : isPlainObject(base.settings) ? base.settings : {},
+      state: isPlainObject(entry.state) ? entry.state : isPlainObject(base.state) ? base.state : {},
+      createdAt: entry.createdAt || base.createdAt || createdAt,
+      updatedAt: entry.updatedAt || base.updatedAt || entry.createdAt || createdAt,
+    }));
+}
+
+function normalizeThemes(entries, defaults, createdAt) {
+  return normalizeUserContentCollection(entries, defaults, createdAt, (entry, base) =>
+    projectPublicUserContentRecord("themes", {
+      id: String(entry.id || base.id || "").trim(),
+      name: String(entry.name || entry.title || base.name || entry.id || "").trim(),
+      source: normalizeContentSource(entry.source || base.source),
+      tokens: isPlainObject(entry.tokens) ? entry.tokens : isPlainObject(base.tokens) ? base.tokens : {},
+      createdAt: entry.createdAt || base.createdAt || createdAt,
+      updatedAt: entry.updatedAt || base.updatedAt || entry.createdAt || createdAt,
+    }));
+}
+
+function normalizeDesktopLayouts(entries, defaults, createdAt) {
+  return normalizeUserContentCollection(entries, defaults, createdAt, (entry, base) =>
+    projectPublicUserContentRecord("desktopLayouts", {
+      id: String(entry.id || base.id || "").trim(),
+      name: String(entry.name || entry.title || base.name || entry.id || "").trim(),
+      source: normalizeContentSource(entry.source || base.source),
+      items: Array.isArray(entry.items) ? entry.items : Array.isArray(base.items) ? base.items : [],
+      createdAt: entry.createdAt || base.createdAt || createdAt,
+      updatedAt: entry.updatedAt || base.updatedAt || entry.createdAt || createdAt,
+    }));
+}
+
+function normalizeShells(entries, defaults, createdAt) {
+  return normalizeUserContentCollection(entries, defaults, createdAt, (entry, base) =>
+    projectPublicUserContentRecord("shells", {
+      id: String(entry.id || base.id || "").trim(),
+      name: String(entry.name || entry.title || base.name || entry.id || "").trim(),
+      source: normalizeContentSource(entry.source || base.source),
+      entry: String(entry.entry || base.entry || "index.html").trim() || "index.html",
+      createdAt: entry.createdAt || base.createdAt || createdAt,
+      updatedAt: entry.updatedAt || base.updatedAt || entry.createdAt || createdAt,
+    }));
+}
+
+function projectPublicUserContentCollection(collectionName, entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => projectPublicUserContentRecord(collectionName, entry))
+    .filter((entry) => entry && entry.id);
+}
+
+function projectPublicUserContentRecord(collectionName, entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  switch (collectionName) {
+    case "apps":
+      return {
+        id: normalizePublicString(entry.id),
+        name: normalizePublicString(entry.name || entry.title || entry.id),
+        title: normalizePublicString(entry.title || entry.name || entry.id),
+        source: normalizePublicString(entry.source),
+        kind: normalizePublicString(entry.kind),
+        entry: normalizePublicString(entry.entry),
+        icon: normalizePublicString(entry.icon),
+        version: normalizePublicString(entry.version),
+        createdAt: normalizePublicString(entry.createdAt),
+        updatedAt: normalizePublicString(entry.updatedAt),
+      };
+    case "appInstances":
+      return {
+        id: normalizePublicString(entry.id),
+        appId: normalizePublicString(entry.appId || entry.app_id),
+        title: normalizePublicString(entry.title || entry.name || entry.id),
+        source: normalizePublicString(entry.source),
+        settings: sanitizePublicUserContentValue(isPlainObject(entry.settings) ? entry.settings : {}),
+        state: sanitizePublicUserContentValue(isPlainObject(entry.state) ? entry.state : {}),
+        createdAt: normalizePublicString(entry.createdAt),
+        updatedAt: normalizePublicString(entry.updatedAt),
+      };
+    case "themes":
+      return {
+        id: normalizePublicString(entry.id),
+        name: normalizePublicString(entry.name || entry.title || entry.id),
+        source: normalizePublicString(entry.source),
+        tokens: sanitizePublicUserContentValue(isPlainObject(entry.tokens) ? entry.tokens : {}),
+        createdAt: normalizePublicString(entry.createdAt),
+        updatedAt: normalizePublicString(entry.updatedAt),
+      };
+    case "desktopLayouts":
+      return {
+        id: normalizePublicString(entry.id),
+        name: normalizePublicString(entry.name || entry.title || entry.id),
+        source: normalizePublicString(entry.source),
+        items: sanitizePublicUserContentValue(Array.isArray(entry.items) ? entry.items : []),
+        createdAt: normalizePublicString(entry.createdAt),
+        updatedAt: normalizePublicString(entry.updatedAt),
+      };
+    case "shells":
+      return {
+        id: normalizePublicString(entry.id),
+        name: normalizePublicString(entry.name || entry.title || entry.id),
+        source: normalizePublicString(entry.source),
+        entry: normalizePublicString(entry.entry) || "index.html",
+        createdAt: normalizePublicString(entry.createdAt),
+        updatedAt: normalizePublicString(entry.updatedAt),
+      };
+    default:
+      return null;
+  }
+}
+
+function sanitizePublicUserContentValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizePublicUserContentValue(item));
+  }
+  if (isPlainObject(value)) {
+    const output = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (isSensitiveUserContentKey(key)) {
+        continue;
+      }
+      output[key] = sanitizePublicUserContentValue(item);
+    }
+    return output;
+  }
+  return value;
+}
+
+function isSensitiveUserContentKey(key) {
+  const normalized = String(key || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!normalized) {
+    return false;
+  }
+  if (["token", "apikey", "secret", "password", "authorization", "credentials"].includes(normalized)) {
+    return true;
+  }
+  return (
+    normalized.endsWith("apikey") ||
+    normalized.endsWith("secret") ||
+    normalized.endsWith("password") ||
+    normalized.endsWith("credentials") ||
+    (normalized.endsWith("token") && normalized !== "tokens") ||
+    normalized.startsWith("authorization")
   );
+}
+
+function normalizePublicString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeActiveShell(value, shells, fallbackId = DEFAULT_OFFICIAL_SHELL_ID) {
+  const activeShell = String(value || "").trim();
+  const shellList = Array.isArray(shells) ? shells : [];
+  const shellIds = new Set(shellList.map((item) => item.id).filter(Boolean));
+  if (activeShell && shellIds.has(activeShell)) {
+    return activeShell;
+  }
+  return shellIds.has(fallbackId) ? fallbackId : (shellList[0]?.id || fallbackId);
+}
+
+function normalizeUserContentCollection(entries, defaults, createdAt, normalizer) {
+  const defaultById = new Map((Array.isArray(defaults) ? defaults : []).map((item) => [item.id, item]));
+  const seen = new Set();
+  return (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry && typeof entry.id === "string" && entry.id.trim())
+    .map((entry) => {
+      const id = String(entry.id).trim();
+      if (seen.has(id)) {
+        return null;
+      }
+      seen.add(id);
+      return normalizer({ ...entry, id }, defaultById.get(id) || {}, createdAt);
+    })
+    .filter(Boolean);
+}
+
+function normalizeContentSource(value) {
+  const source = String(value || "").trim().toLowerCase();
+  return source === "official" ? "official" : "user";
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function normalizeWorldbookEntries(entries, createdAt) {
@@ -861,5 +1210,11 @@ function normalizeRuntimeProvider(value) {
 }
 
 module.exports = {
+  DEFAULT_OFFICIAL_SHELL_ID,
   JsonStore,
+  createDefaultUserContent,
+  normalizeState,
+  projectPublicUserContentCollection,
+  projectPublicUserContentRecord,
+  sanitizePublicUserContentValue,
 };

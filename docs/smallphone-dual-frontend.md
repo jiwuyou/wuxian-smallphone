@@ -1,6 +1,6 @@
 # SmallPhone 双前端运行说明
 
-日期：2026-05-02
+日期：2026-05-04
 
 当前目标是：保留原来的 stable 锁屏手机界面，同时提供 beta 前端。两套前端共用同一个 SmallPhone API 和同一个 cc-connect webclient app。
 
@@ -37,6 +37,7 @@ smallphone-app API :3100
 
 - 启动脚本：`/root/projects/smallphone/smallphone-active/start_smallphone.sh`
 - 兼容入口：`/root/projects/smallphone/start_smallphone.sh`
+- 用户持久化目录：`/root/projects/smallphone/smallphone-home`，默认位于 `smallphone-active/` 外部，可用 `SMALLPHONE_HOME` 覆盖
 - stable 前端：`/root/projects/smallphone/smallphone-active/generic-mini-phone`
 - beta 前端：`/root/projects/smallphone/smallphone-active/generic-mini-phone-beta`
 - SmallPhone API 后端：`/root/projects/smallphone/smallphone-active/smallphone-app`
@@ -61,6 +62,8 @@ setsid -f ./start_smallphone.sh </dev/null >/tmp/smallphone-start.log 2>&1
 - stable 静态前端本地监听 `127.0.0.1:18080`
 - beta 静态前端，监听 `100.120.221.72:18082`
 - beta 静态前端本地监听 `127.0.0.1:18082`
+
+脚本会创建 `SMALLPHONE_HOME` 的必要子目录，并把该路径传给 `smallphone-app`。官方 stable/beta 前端属于 `smallphone-active/` 系统代码；`runtime.json`、附件、用户 app registry、app 分身、用户 app 本地数据、主题、桌面布局和用户自定义 shell 都应保存在 `SMALLPHONE_HOME`，避免更新 `smallphone-active` 时丢失用户内容。更多约定见 [SmallPhone 用户内容持久化约定](./smallphone-user-content.md)。
 
 脚本不会使用 `0.0.0.0`。本地端口通过显式绑定 `127.0.0.1` 的额外监听进程提供。
 

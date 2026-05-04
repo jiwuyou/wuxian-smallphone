@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "like-girl",
+  "name": "LikeGirl",
+  "shortName": "LikeGirl",
+  "type": "source-app",
+  "license": "AGPL-3.0",
+  "description": "SmallPhone source-app adapter for the upstream LikeGirl v5.2.0 PHP/MySQL application.",
+  "source": {
+    "provider": "gitee",
+    "repository": "https://gitee.com/kiCode111/like-girl-v5.2.0",
+    "cloneUrl": "https://gitee.com/kiCode111/like-girl-v5.2.0.git",
+    "upstreamVersion": "5.2.0",
+    "expectedLocalPath": "source",
+    "linkEnvironmentVariable": "LIKE_GIRL_SOURCE_DIR",
+    "vendored": false
+  },
+  "runtime": {
+    "packageManager": "pnpm",
+    "node": ">=20",
+    "defaultPort": 4102,
+    "portEnvironmentVariable": "PORT",
+    "hostEnvironmentVariable": "HOST",
+    "startCommand": "pnpm start",
+    "devCommand": "pnpm dev",
+    "serves": {
+      "protocol": "http",
+      "urlTemplate": "http://127.0.0.1:{PORT}/"
+    },
+    "requires": [
+      "php-cli",
+      "mysql-compatible database configured by the upstream source"
+    ]
+  },
+  "adapter": {
+    "entrypoint": "scripts/start.mjs",
+    "linkCommand": "pnpm link-source /path/to/like-girl-v5.2.0",
+    "localSourcePolicy": "external clone or symlink; upstream source is not committed here"
+  }
+}

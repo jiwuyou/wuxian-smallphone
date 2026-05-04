@@ -1,6 +1,6 @@
-import * as dom from './dom.js?v=8';
-import { appModules, appSpaceTemplates, registeredApps } from './app-registry.js?v=3';
-import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=6';
+import * as dom from './dom.js?v=10';
+import { appModules, appSpaceTemplates, registeredApps } from './app-registry.js?v=7';
+import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=7';
 import { applyDesktopMode, bindWorld, renderWorld, renderWorldToolbar } from './world.js?v=3';
 
 const DEFAULT_BACKEND_PORT = '3100';
@@ -17,6 +17,7 @@ const CORE_DESKTOP_APPS = [
   { id: 'messages', name: '消息', shortName: '聊', orbClass: 'orb-chat', target: 'messages', badge: 'unread' },
   { id: 'contacts', name: '联系人', shortName: '人', orbClass: 'orb-character', target: 'contacts' },
   { id: 'character', name: '角色', shortName: '角', orbClass: 'orb-world', panel: 'character' },
+  { id: 'app-manager', name: 'App 管理', shortName: '管', orbClass: 'orb-app-manager', panel: 'app-manager' },
   { id: 'settings', name: '调试', shortName: '调', orbClass: 'orb-settings', panel: 'settings' },
   { id: 'permissions', name: '权限', shortName: '权', orbClass: 'orb-permission', panel: 'permissions' },
 ];
@@ -77,6 +78,31 @@ function getBackendCandidates() {
 function rememberBackendBase(url) {
   backendBase = url;
   window.localStorage.setItem(BACKEND_STORAGE_KEY, url);
+}
+
+function normalizeStandaloneUrl(value, fallback = 'http://127.0.0.1:4103/') {
+  const raw = String(value || '').trim() || fallback;
+  return raw.endsWith('/') ? raw : `${raw}/`;
+}
+
+function setStandaloneLaunch(configKey, path = '', fallback) {
+  state.standaloneApps = {
+    ...(state.standaloneApps || {}),
+    [configKey]: {
+      ...(state.standaloneApps?.[configKey] || {}),
+      url: normalizeStandaloneUrl(state.standaloneApps?.[configKey]?.url, fallback),
+      path,
+    },
+  };
+  saveState();
+}
+
+function setLikeGirlLaunch(path = '') {
+  setStandaloneLaunch('likeGirl', path, 'http://127.0.0.1:4103/');
+}
+
+function setLikeGirlCloneLaunch(path = '') {
+  setStandaloneLaunch('likeGirlClone', path, 'http://127.0.0.1:4108/');
 }
 
 async function apiRequest(path, init = {}) {
@@ -1464,13 +1490,17 @@ function setActiveView(viewName) {
   dom.tabs.forEach((tab) => {
     tab.classList.toggle('active', tab.dataset.tab === viewName);
   });
+  document.body.dataset.activeView = viewName;
   document.body.dataset.spatialView = activeView?.classList.contains('app-space-view') ? 'true' : 'false';
 }
 
 function applyPhoneShell() {
   const mode = state.phoneShell?.mode || 'lock';
   document.body.dataset.shell = mode;
-  if (mode !== 'app') document.body.dataset.spatialView = 'false';
+  if (mode !== 'app') {
+    document.body.dataset.spatialView = 'false';
+    document.body.dataset.activeView = '';
+  }
   dom.lockScreen.classList.toggle('overlay-active', mode === 'lock');
   dom.desktopScreen.classList.toggle('overlay-active', mode === 'desktop');
   dom.lockScreen.setAttribute('aria-hidden', String(mode !== 'lock'));
@@ -1552,6 +1582,8 @@ function openDesktopApp(entry) {
   }
 
   if (!entry.target) return;
+  if (entry.id === 'like-girl') setLikeGirlLaunch('');
+  if (entry.id === 'like-girl-clone') setLikeGirlCloneLaunch('');
   uiState.previousView = entry.target;
   closePanel();
   setPhoneShell('app');
@@ -2003,6 +2035,8 @@ function renderProfile() {
   if (dom.temperatureInput) dom.temperatureInput.value = state.apiSettings.temperature;
   if (dom.maxTokensInput) dom.maxTokensInput.value = state.apiSettings.maxTokens;
   if (dom.systemPromptInput) dom.systemPromptInput.value = state.apiSettings.systemPrompt;
+  if (dom.likeGirlServiceUrlInput) dom.likeGirlServiceUrlInput.value = state.standaloneApps?.likeGirl?.url || 'http://127.0.0.1:4103/';
+  if (dom.likeGirlCloneServiceUrlInput) dom.likeGirlCloneServiceUrlInput.value = state.standaloneApps?.likeGirlClone?.url || 'http://127.0.0.1:4108/';
 
   if (dom.personaNameInput) dom.personaNameInput.value = state.persona.name;
   if (dom.personaSignatureInput) dom.personaSignatureInput.value = state.persona.signature;
@@ -2746,6 +2780,58 @@ dom.settingsForm.addEventListener('submit', (event) => {
   applyTheme();
   updatePromptPreview();
   queueStateSync('设置已保存。之后发送消息会按当前角色卡、人设、记忆和世界书拼装上下文。');
+});
+
+dom.appManagerForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const url = normalizeStandaloneUrl(dom.likeGirlServiceUrlInput?.value);
+  const cloneUrl = normalizeStandaloneUrl(dom.likeGirlCloneServiceUrlInput?.value, 'http://127.0.0.1:4108/');
+  state.standaloneApps = {
+    ...(state.standaloneApps || {}),
+    likeGirl: {
+      ...(state.standaloneApps?.likeGirl || {}),
+      url,
+    },
+    likeGirlClone: {
+      ...(state.standaloneApps?.likeGirlClone || {}),
+      url: cloneUrl,
+    },
+  };
+  saveState();
+  renderAll();
+  queueStateSync('App 配置已保存。桌面 LikeGirl 和分身图标会直接使用对应服务地址。');
+});
+
+dom.likeGirlOpenPublicButton?.addEventListener('click', () => {
+  setLikeGirlLaunch('');
+  closePanel();
+  setPhoneShell('app');
+  setActiveView('like-girl');
+  refreshRegisteredApps();
+});
+
+dom.likeGirlOpenAdminButton?.addEventListener('click', () => {
+  setLikeGirlLaunch('admin');
+  closePanel();
+  setPhoneShell('app');
+  setActiveView('like-girl');
+  refreshRegisteredApps();
+});
+
+dom.likeGirlCloneOpenPublicButton?.addEventListener('click', () => {
+  setLikeGirlCloneLaunch('');
+  closePanel();
+  setPhoneShell('app');
+  setActiveView('like-girl-clone');
+  refreshRegisteredApps();
+});
+
+dom.likeGirlCloneOpenAdminButton?.addEventListener('click', () => {
+  setLikeGirlCloneLaunch('admin');
+  closePanel();
+  setPhoneShell('app');
+  setActiveView('like-girl-clone');
+  refreshRegisteredApps();
 });
 
 dom.importsForm.addEventListener('submit', async (event) => {

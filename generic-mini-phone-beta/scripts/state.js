@@ -1,4 +1,4 @@
-import { appDefaultState } from './app-registry.js?v=2';
+import { appDefaultState } from './app-registry.js?v=7';
 
 export const STORAGE_KEY = 'generic-mini-phone-state-v1';
 
@@ -172,6 +172,7 @@ export const defaultState = {
 
 export const panelMeta = {
   settings: { eyebrow: '调试', title: '连接与提示词调试' },
+  'app-manager': { eyebrow: 'App', title: 'App 管理' },
   character: { eyebrow: '角色', title: '角色详情与编辑' },
   permissions: { eyebrow: '权限', title: '联系人权限' },
 };

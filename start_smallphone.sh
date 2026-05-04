@@ -7,6 +7,7 @@ OPENCODE_DIR="$ROOT_DIR/opencode"
 FRONTEND_DIR="$ACTIVE_DIR/generic-mini-phone"
 BETA_FRONTEND_DIR="${BETA_FRONTEND_DIR:-$ACTIVE_DIR/generic-mini-phone-beta}"
 APP_BACKEND_DIR="$ACTIVE_DIR/smallphone-app"
+SMALLPHONE_HOME="${SMALLPHONE_HOME:-$ROOT_DIR/smallphone-home}"
 RUNTIME_HOME="${RUNTIME_HOME:-/tmp/opencode-home}"
 RUNTIME_DATA="${RUNTIME_DATA:-/tmp/opencode-data}"
 RUNTIME_CACHE="${RUNTIME_CACHE:-/tmp/opencode-cache}"
@@ -174,6 +175,19 @@ PY
   fi
 fi
 
+prepare_smallphone_home() {
+  mkdir -p \
+    "$SMALLPHONE_HOME" \
+    "$SMALLPHONE_HOME/attachments" \
+    "$SMALLPHONE_HOME/channel-workspaces" \
+    "$SMALLPHONE_HOME/admin-workspaces" \
+    "$SMALLPHONE_HOME/system-workspace" \
+    "$SMALLPHONE_HOME/shells" \
+    "$SMALLPHONE_HOME/apps" \
+    "$SMALLPHONE_HOME/themes" \
+    "$SMALLPHONE_HOME/desktop-layouts"
+}
+
 prepare_opencode_runtime() {
   mkdir -p "$RUNTIME_HOME" "$RUNTIME_DATA" "$RUNTIME_CACHE" "$RUNTIME_CONFIG" "$RUNTIME_STATE" "$OPENCODE_DATA_DIR" "$OPENCODE_CONFIG_DIR"
 
@@ -260,9 +274,12 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+prepare_smallphone_home
+
 echo "Starting smallphone app API on ${APP_BACKEND_HOSTS}:${APP_BACKEND_PORT}"
 (
   cd "$APP_BACKEND_DIR"
+  SMALLPHONE_HOME="$SMALLPHONE_HOME" \
   SMALLPHONE_HOST="$APP_BACKEND_HOST" \
   SMALLPHONE_HOSTS="$APP_BACKEND_HOSTS" \
   SMALLPHONE_PORT="$APP_BACKEND_PORT" \
@@ -346,6 +363,7 @@ if [[ "$START_LOCAL_LISTENERS" != "0" && "$APP_BACKEND_HOST" != "$LOCAL_HOST" ]]
   echo "API local: http://${LOCAL_HOST}:${APP_BACKEND_PORT}/api"
 fi
 echo "Backend:  http://${BACKEND_HOST}:${BACKEND_PORT}"
+echo "SmallPhone home: $SMALLPHONE_HOME"
 echo
 echo "Press Ctrl+C to stop all services."
 

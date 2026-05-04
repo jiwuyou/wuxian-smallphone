@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "smallphone.app/v1",
+  "id": "album",
+  "name": "SmallPhone Album",
+  "shortName": "Album",
+  "version": "0.1.0",
+  "description": "A standalone source-first photo album metadata app for organizing albums and photo records.",
+  "runtime": {
+    "type": "node-http",
+    "node": ">=22",
+    "entry": "src/server.js",
+    "defaultPort": 4104,
+    "portEnv": "PORT"
+  },
+  "ui": {
+    "type": "web",
+    "path": "/",
+    "servedBy": "app"
+  },
+  "storage": {
+    "type": "sqlite",
+    "driver": "node:sqlite",
+    "defaultPath": "data/album.sqlite",
+    "pathEnv": "ALBUM_DB_FILE",
+    "seedOnEmpty": true
+  },
+  "api": [
+    { "method": "GET", "path": "/health" },
+    { "method": "GET", "path": "/manifest" },
+    { "method": "GET", "path": "/api/albums" },
+    { "method": "POST", "path": "/api/albums" },
+    { "method": "PATCH", "path": "/api/albums/:id" },
+    { "method": "DELETE", "path": "/api/albums/:id" },
+    { "method": "GET", "path": "/api/photos" },
+    { "method": "POST", "path": "/api/photos" },
+    { "method": "PATCH", "path": "/api/photos/:id" },
+    { "method": "DELETE", "path": "/api/photos/:id" }
+  ],
+  "permissions": {
+    "network": "local-http",
+    "storage": "local-sqlite"
+  }
+}

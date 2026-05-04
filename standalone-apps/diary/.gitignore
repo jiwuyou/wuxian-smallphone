@@ -1,0 +1,6 @@
+node_modules/
+data/diary.sqlite
+data/diary.sqlite-*
+data/diary.json
+data/*.tmp
+.DS_Store

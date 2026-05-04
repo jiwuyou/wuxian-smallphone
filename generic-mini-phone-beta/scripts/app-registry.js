@@ -3,6 +3,8 @@ import * as weather from '../apps/weather/index.js';
 import * as diary from '../apps/diary/index.js';
 import * as files from '../apps/files/index.js';
 import * as vocabulary from '../apps/vocabulary/index.js';
+import * as likeGirl from '../apps/like-girl/index.js';
+import * as likeGirlClone from '../apps/like-girl-clone/index.js';
 
 export const appModules = [
   calendar,
@@ -10,6 +12,8 @@ export const appModules = [
   diary,
   files,
   vocabulary,
+  likeGirl,
+  likeGirlClone,
 ];
 
 export const registeredApps = appModules.map((app) => app.manifest);
