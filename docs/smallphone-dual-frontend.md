@@ -116,9 +116,57 @@ curl -sS http://100.120.221.72:18082/ | rg '<title>|scripts/main.js'
 
 ## 开发规则
 
-- 改 stable UI 时编辑 `generic-mini-phone`。
-- 改 beta UI 时编辑 `generic-mini-phone-beta`。
+- 日常功能开发只改 beta：`generic-mini-phone-beta`。
+- beta 验证通过并实际使用一段时间后，再执行 promote 同步到 stable：`generic-mini-phone`。
+- promote 是发布动作，不是两个前端分别手工改同一功能；AI 或开发者不应一个文件一个文件分别改 beta/stable。
+- stable 是发布通道，原则上不手写新功能改动。若 stable 必须紧急修复，修复后必须回灌 beta，避免长期分叉。
+- promote 后要再跑 stable 最小检查，并在一次提交中包含 beta + stable 的同步结果。
 - 两套前端默认共用同一个 `3100/api`，所以联系人、线程、消息和记忆是一致的。
-- 如果只做 UI 实验，优先改 beta，不要动 stable。
 - 如果要改消息协议或数据结构，先检查 `smallphone-app` 的 API 兼容性。
 - 不要把 cc-connect bridge/webclient token 暴露给浏览器。
+
+## Beta -> Stable Promote 规则
+
+长期上 stable/beta 是同一条前端主线，不是两个长期分叉。默认流程：
+
+1. 只改 beta。
+2. beta 验证通过，并使用一段时间。
+3. 执行 promote 脚本从 beta 同步到 stable。
+4. 跑 stable 最小检查。
+5. 一次提交包含 beta + stable。
+
+promote 脚本尚未落地前，人工同步也必须按这个规则执行：先确认 beta 是来源，再批量同步到 stable，不要让 AI 对两个目录分别做独立实现。
+
+建议的未来命令：
+
+```bash
+npm run frontend:promote -- --dry-run
+npm run frontend:promote
+npm run frontend:promote -- --commit
+```
+
+promote 应使用白名单同步：
+
+- `index.html`
+- `style.css`
+- `scripts/`
+- `apps/`
+- 必要的 assets
+
+promote 应默认排除：
+
+- `docs/`
+- 用户数据
+- 临时文件
+- 构建产物
+- `.git`
+- 任何 runtime token、API key、secret
+
+promote 后最小检查：
+
+```bash
+node --check generic-mini-phone-beta/scripts/main.js
+node --check generic-mini-phone/scripts/main.js
+git diff --check
+git -C generic-mini-phone diff --check
+```

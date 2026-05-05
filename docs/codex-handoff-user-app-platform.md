@@ -116,7 +116,52 @@ generic-mini-phone/       # stable
 generic-mini-phone-beta/  # beta
 ```
 
-stable 已文件级对齐 beta。当前体验主要以这套官方前端壳为准。
+stable/beta 长期上是一条前端主线，而不是两个长期分叉。当前维护规则：
+
+- 日常功能开发只改 `generic-mini-phone-beta/`。
+- beta 验证通过，并实际使用一段时间后，再 promote 到 `generic-mini-phone/`。
+- promote 是发布动作，不是让 AI 或开发者分别手工修改两个目录。
+- stable 是发布通道，原则上不手写新功能改动。
+- stable 如需紧急修复，必须回灌 beta，避免分叉。
+- promote 后跑 stable 最小检查，并一次提交包含 beta + stable。
+
+建议后续落地 `npm run frontend:promote`：
+
+```bash
+npm run frontend:promote -- --dry-run
+npm run frontend:promote
+npm run frontend:promote -- --commit
+```
+
+promote 白名单建议包含：
+
+```text
+index.html
+style.css
+scripts/
+apps/
+必要 assets
+```
+
+promote 默认排除：
+
+```text
+docs/
+用户数据
+临时文件
+构建产物
+.git
+runtime token / API key / secret
+```
+
+promote 后最小检查：
+
+```bash
+node --check generic-mini-phone-beta/scripts/main.js
+node --check generic-mini-phone/scripts/main.js
+git diff --check
+git -C generic-mini-phone diff --check
+```
 
 用户 shell 模板仓库：
 
@@ -253,4 +298,3 @@ app.entry
 
 - 如果是已启动的外部服务或静态 shell，后端 registry 可以不重启更新。
 - 若想官方桌面即时出现新 app，还需要把官方前端接入动态 app registry。
-
