@@ -1516,6 +1516,10 @@ body[data-theme="night"] .runtime-status-error {
   width: 100%;
 }
 
+.chat-message-waifu-line[hidden] {
+  display: none;
+}
+
 .chat-message-self {
   justify-content: flex-end;
 }

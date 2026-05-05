@@ -17,6 +17,9 @@ const DEFAULT_TIMEZONE = 'Etc/UTC';
 const DEFAULT_WAIFU_DELAY_MS_PER_CHAR = 55;
 const MIN_WAIFU_SEGMENT_DELAY_MS = 280;
 const MAX_WAIFU_SEGMENT_DELAY_MS = 1400;
+const WAIFU_DISPLAYED_KEY_LIMIT = 500;
+const WAIFU_DISPLAYED_STORAGE_KEY = 'smallphone.waifuDisplayedMessages';
+const RECENT_PERSISTED_ASSISTANT_WINDOW_MS = 60_000;
 let backendEnabled = false;
 let backendBase = DEFAULT_BACKEND_BASE;
 let threadEventSource = null;
@@ -41,6 +44,8 @@ let characterRuntimeSettingsState = {
 let characterRuntimeSettingsRequestId = 0;
 let characterRuntimeSettingsSaving = false;
 let waifuDisplayTimers = [];
+const displayedWaifuMessageKeys = loadDisplayedWaifuMessageKeys();
+const recentPersistedAssistantByThreadId = new Map();
 
 const CORE_DESKTOP_APPS = [
   { id: 'messages', name: '消息', shortName: '聊', orbClass: 'orb-chat', target: 'messages', badge: 'unread' },
@@ -370,23 +375,136 @@ function clearWaifuDisplayTimers() {
   waifuDisplayTimers = [];
 }
 
+function loadDisplayedWaifuMessageKeys() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(WAIFU_DISPLAYED_STORAGE_KEY) || '[]');
+    return new Set((Array.isArray(parsed) ? parsed : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDisplayedWaifuMessageKeys() {
+  try {
+    const keys = Array.from(displayedWaifuMessageKeys).slice(-WAIFU_DISPLAYED_KEY_LIMIT);
+    displayedWaifuMessageKeys.clear();
+    keys.forEach((key) => displayedWaifuMessageKeys.add(key));
+    window.localStorage.setItem(WAIFU_DISPLAYED_STORAGE_KEY, JSON.stringify(keys));
+  } catch {}
+}
+
+function buildWaifuMessageKey(chatKey, message) {
+  return getWaifuMessageKeys(chatKey, message)[0] || '';
+}
+
+function getWaifuMessageKeys(chatKey, message) {
+  const threadKey = String(chatKey || uiState.activeChatKey || 'chat').trim() || 'chat';
+  const keys = [];
+  const id = String(message?.id || '').trim();
+  if (id) keys.push(`${threadKey}:id:${id}`);
+  const streamId = String(message?.streamId || '').trim();
+  if (streamId) keys.push(`${threadKey}:stream:${streamId}`);
+  const text = String(message?.text || '').trim();
+  const createdAt = String(message?.createdAt || '').trim();
+  if (text && createdAt) keys.push(`${threadKey}:sig:${message?.side || 'other'}:${createdAt}:${text}`);
+  return keys;
+}
+
+function hasDisplayedWaifuMessage(chatKey, message) {
+  return getWaifuMessageKeys(chatKey, message).some((key) => displayedWaifuMessageKeys.has(key));
+}
+
+function hydrateWaifuDisplayState(messages, chat, chatKey) {
+  const waifuEnabled = resolveChatWaifuSettings(chat).enabled;
+  const previousByKey = new Map();
+  (Array.isArray(chat?.messages) ? chat.messages : []).forEach((message) => {
+    getWaifuMessageKeys(chatKey, message).forEach((key) => {
+      if (key) previousByKey.set(key, message);
+    });
+  });
+
+  const previousMessages = Array.isArray(chat?.messages) ? chat.messages : [];
+  const sourceMessages = Array.isArray(messages) ? messages : [];
+  return sourceMessages.map((message, index) => {
+    const hydrated = { ...message };
+    const key = buildWaifuMessageKey(chatKey, hydrated);
+    if (key) hydrated.waifuMessageKey = key;
+    let previous = getWaifuMessageKeys(chatKey, hydrated)
+      .map((candidateKey) => previousByKey.get(candidateKey))
+      .find(Boolean) || null;
+    if (
+      !previous
+      && hydrated.side === 'other'
+      && isLatestAssistantTextOccurrence(sourceMessages, index)
+    ) {
+      const previousTransientIndex = findCurrentAssistantCandidateIndex(
+        { messages: previousMessages },
+        hydrated.text,
+        { transientOnly: true },
+      );
+      previous = previousTransientIndex >= 0 ? previousMessages[previousTransientIndex] : null;
+    }
+    const previousHasDisplayState = previous && Object.prototype.hasOwnProperty.call(previous, 'waifuDisplayPending');
+    if (previousHasDisplayState) {
+      hydrated.waifuDisplayPending = Boolean(previous.waifuDisplayPending);
+    }
+    const previousWasDisplayed = previous
+      ? hasDisplayedWaifuMessage(chatKey, previous)
+        || (previousHasDisplayState && previous.waifuDisplayPending === false)
+      : false;
+    if (previousWasDisplayed && hydrated.waifuMessageKey) {
+      markWaifuMessageDisplayed(hydrated, chatKey);
+      hydrated.waifuDisplayPending = false;
+    } else if (hasDisplayedWaifuMessage(chatKey, hydrated)) {
+      hydrated.waifuDisplayPending = false;
+    } else if (
+      waifuEnabled
+      && hydrated.side === 'other'
+      && !hydrated.streaming
+      && getWaifuDisplaySegments(hydrated, chat).length > 1
+      && (!previousHasDisplayState || previous.waifuDisplayPending === true)
+    ) {
+      hydrated.waifuDisplayPending = true;
+    }
+    return hydrated;
+  });
+}
+
+function markWaifuMessageDisplayed(message, chatKey = uiState.activeChatKey) {
+  const keys = getWaifuMessageKeys(chatKey, message);
+  if (!keys.length) return;
+  keys.forEach((key) => displayedWaifuMessageKeys.add(key));
+  saveDisplayedWaifuMessageKeys();
+}
+
+function renderBubbleTextHtml(text) {
+  const source = String(text || '');
+  if (!source) return '';
+  return `<div class="bubble-text">${escapeHtml(source).replaceAll('\n', '<br>')}</div>`;
+}
+
+function getWaifuDisplaySegments(message, chat) {
+  const text = String(message?.text || '');
+  if (!text) return [];
+  const settings = resolveChatWaifuSettings(chat);
+  if (message.side !== 'other' || message.streaming || !settings.enabled) return [];
+  const segments = splitWaifuSegments(text);
+  if (segments.length <= 1) return [];
+  return segments.map((segment) => (
+    settings.removePunctuation ? stripDisplayPunctuation(segment) : segment
+  ));
+}
+
 function renderMessageTextHtml(message, chat) {
   const text = String(message?.text || '');
   if (!text) return '';
   const settings = resolveChatWaifuSettings(chat);
-  if (message.side !== 'other' || message.streaming || !settings.enabled) {
-    return `<div class="bubble-text">${escapeHtml(text).replaceAll('\n', '<br>')}</div>`;
+  if (message.side === 'other' && !message.streaming && settings.enabled) {
+    return renderBubbleTextHtml(settings.removePunctuation ? stripDisplayPunctuation(text) : text);
   }
-  const segments = splitWaifuSegments(text);
-  if (segments.length <= 1) {
-    const displayText = settings.removePunctuation ? stripDisplayPunctuation(text) : text;
-    return `<div class="bubble-text">${escapeHtml(displayText).replaceAll('\n', '<br>')}</div>`;
-  }
-  const shouldDelay = message.waifuDisplayPending === true;
-  return `<div class="bubble-text bubble-segments">${segments.map((segment, index) => {
-    const displayText = settings.removePunctuation ? stripDisplayPunctuation(segment) : segment;
-    return `<span class="bubble-segment" data-waifu-segment="${index}" ${shouldDelay && index > 0 ? 'hidden' : ''}>${escapeHtml(displayText).replaceAll('\n', '<br>')}</span>`;
-  }).join('')}</div>`;
+  return renderBubbleTextHtml(text);
 }
 
 function scheduleWaifuSegments(chat) {
@@ -394,14 +512,17 @@ function scheduleWaifuSegments(chat) {
   if (!chat || !resolveChatWaifuSettings(chat).enabled || !dom.chatThread) return;
   const settings = resolveChatWaifuSettings(chat);
   let maxDelay = 0;
-  dom.chatThread.querySelectorAll('.bubble-message-waifu .bubble-segment[hidden]').forEach((segment) => {
-    let previousText = '';
-    let previous = segment.previousElementSibling;
-    while (previous) {
-      previousText = `${previous.textContent || ''}${previousText}`;
-      previous = previous.previousElementSibling;
+  dom.chatThread.querySelectorAll('.chat-message-waifu-line[hidden], .bubble-message-waifu .bubble-segment[hidden]').forEach((segment) => {
+    let delay = Number(segment.dataset?.waifuDelayMs);
+    if (!Number.isFinite(delay) || delay < 0) {
+      let previousText = '';
+      let previous = segment.previousElementSibling;
+      while (previous) {
+        previousText = `${previous.textContent || ''}${previousText}`;
+        previous = previous.previousElementSibling;
+      }
+      delay = getWaifuSegmentDelay(previousText || segment.textContent || '', settings);
     }
-    const delay = getWaifuSegmentDelay(previousText || segment.textContent || '', settings);
     maxDelay = Math.max(maxDelay, delay);
     const timer = window.setTimeout(() => {
       segment.hidden = false;
@@ -415,6 +536,7 @@ function scheduleWaifuSegments(chat) {
       chat.messages?.forEach((message) => {
         if (message?.waifuDisplayPending) {
           message.waifuDisplayPending = false;
+          markWaifuMessageDisplayed(message);
           clearedPendingFlag = true;
         }
       });
@@ -488,6 +610,7 @@ function mapMessagesToChatMessages(messages) {
         id: String(message.id || '').trim(),
         side: message.role === 'user' ? 'self' : 'other',
         text: normalizeMessageContent(message.content),
+        createdAt: String(message.createdAt || message.created_at || '').trim(),
         attachments,
         actions,
         runtime: message.runtime || null,
@@ -531,8 +654,16 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
   const scopedWorldbook = findThreadScopedWorldbookEntry(worldbookEntries, contact?.id, thread?.id);
   const timeSettings = normalizeTimeSettings(thread?.timeSettings || contact?.timeSettings || previousChat?.timeSettings || {});
   const waifuTextSettings = normalizeWaifuSettings(previousChat?.waifuTextSettings || {});
-  const baseChatMessages = Array.isArray(messages) && messages.length
+  const chatKey = String(thread?.id || '').trim();
+  const mappedBackendMessages = Array.isArray(messages) && messages.length
     ? mapMessagesToChatMessages(messages)
+    : null;
+  const baseChatMessages = mappedBackendMessages
+    ? hydrateWaifuDisplayState(
+      mappedBackendMessages,
+      previousChat ? { ...previousChat, waifuTextSettings } : { waifuTextSettings, messages: [] },
+      chatKey,
+    )
     : Array.isArray(previousChat?.messages)
       ? previousChat.messages
       : [];
@@ -758,20 +889,84 @@ async function requestBackend(path, init = {}) {
 }
 
 async function refreshBackendState(threadId = uiState.activeChatKey) {
-  const snapshot = await loadBackendSnapshot(requestBackend, { messageThreadId: threadId });
-  return applyBackendSnapshot(snapshot, threadId);
+  const key = String(threadId || '').trim();
+  const previousMessages = key ? state.chats?.[key]?.messages : null;
+  let previousAssistantIdentity = '';
+  if (Array.isArray(previousMessages)) {
+    for (let index = previousMessages.length - 1; index >= 0; index -= 1) {
+      const message = previousMessages[index];
+      if (message?.side !== 'other') continue;
+      const id = String(message?.id || '').trim();
+      const createdAt = String(message?.createdAt || '').trim();
+      if (id) {
+        previousAssistantIdentity = `id:${id}`;
+        break;
+      }
+      if (createdAt) {
+        previousAssistantIdentity = `at:${createdAt}`;
+        break;
+      }
+    }
+  }
+  const snapshot = await loadBackendSnapshot(requestBackend, { messageThreadId: key });
+  const nextChatKey = applyBackendSnapshot(snapshot, key);
+  const resolvedKey = state.chats?.[key] ? key : nextChatKey;
+  const nextMessages = resolvedKey ? state.chats?.[resolvedKey]?.messages : null;
+  if (resolvedKey && Array.isArray(nextMessages)) {
+    for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
+      const message = nextMessages[index];
+      if (message?.side !== 'other') continue;
+      const id = String(message?.id || '').trim();
+      const createdAt = String(message?.createdAt || '').trim();
+      const nextIdentity = id ? `id:${id}` : createdAt ? `at:${createdAt}` : '';
+      if (!nextIdentity || nextIdentity === previousAssistantIdentity) break;
+      rememberRecentPersistedAssistantIdentity(resolvedKey, message);
+      break;
+    }
+  }
+  return nextChatKey;
 }
 
-async function loadThreadMessages(threadId, { force = false } = {}) {
+async function loadThreadMessages(threadId, { force = false, recordRecentAssistant = false } = {}) {
   const key = String(threadId || '').trim();
   const chat = state.chats?.[key];
   if (!backendEnabled || !chat) return [];
   if (!force && Array.isArray(chat.messages) && chat.messages.length) return chat.messages;
+  const previousMessages = Array.isArray(chat.messages) ? chat.messages : [];
+  let previousAssistantIdentity = '';
+  if (recordRecentAssistant) {
+    for (let index = previousMessages.length - 1; index >= 0; index -= 1) {
+      const message = previousMessages[index];
+      if (message?.side !== 'other') continue;
+      const id = String(message?.id || '').trim();
+      const createdAt = String(message?.createdAt || '').trim();
+      if (id) {
+        previousAssistantIdentity = `id:${id}`;
+        break;
+      }
+      if (createdAt) {
+        previousAssistantIdentity = `at:${createdAt}`;
+        break;
+      }
+    }
+  }
   const messages = await requestBackend(`/threads/${encodeURIComponent(key)}/messages`);
-  chat.messages = mapMessagesToChatMessages(messages);
+  chat.messages = hydrateWaifuDisplayState(mapMessagesToChatMessages(messages), chat, key);
   if (chat.messages.length) {
     const last = chat.messages.at(-1);
     chat.summary = last.text || (last.attachments?.length ? '[附件]' : chat.summary);
+  }
+  if (recordRecentAssistant) {
+    for (let index = chat.messages.length - 1; index >= 0; index -= 1) {
+      const message = chat.messages[index];
+      if (message?.side !== 'other') continue;
+      const id = String(message?.id || '').trim();
+      const createdAt = String(message?.createdAt || '').trim();
+      const nextIdentity = id ? `id:${id}` : createdAt ? `at:${createdAt}` : '';
+      if (!nextIdentity || nextIdentity === previousAssistantIdentity) break;
+      rememberRecentPersistedAssistantIdentity(key, message);
+      break;
+    }
   }
   saveState();
   return chat.messages;
@@ -1490,9 +1685,112 @@ function subscribeThreadEvents(threadId) {
   };
 }
 
-function getStreamingMessage(chat) {
-  if (!chat) return null;
-  return chat.messages.find((message) => message.streaming === true) || null;
+function getStreamingMessageIndex(chat) {
+  if (!chat) return -1;
+  return chat.messages.findIndex((message) => message.streaming === true);
+}
+
+function messageHasDisplayableContent(message) {
+  return Boolean(
+    String(message?.text || '').trim()
+    || (Array.isArray(message?.attachments) && message.attachments.length)
+    || (Array.isArray(message?.actions) && message.actions.length)
+  );
+}
+
+function getLatestDisplayableMessageIndex(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messageHasDisplayableContent(messages[index])) return index;
+  }
+  return -1;
+}
+
+function assistantCandidateTextMatches(message, text, { allowPrefix = false } = {}) {
+  const candidateText = String(message?.text || '').trim();
+  const incomingText = String(text || '').trim();
+  if (!candidateText || !incomingText) return false;
+  if (candidateText === incomingText) return true;
+  return Boolean(
+    allowPrefix
+    && message?.streaming === true
+    && (incomingText.startsWith(candidateText) || candidateText.startsWith(incomingText))
+  );
+}
+
+function rememberRecentPersistedAssistantIdentity(threadId, message) {
+  const key = String(threadId || '').trim();
+  if (!key) return;
+  const id = String(message?.id || '').trim();
+  const createdAt = String(message?.createdAt || '').trim();
+  if (!id && !createdAt) return;
+  recentPersistedAssistantByThreadId.set(key, { id, createdAt, rememberedAtMs: Date.now() });
+}
+
+function findRecentPersistedAssistantCandidateIndex(chat, threadId, text) {
+  const key = String(threadId || '').trim();
+  if (!key) return -1;
+  const hint = recentPersistedAssistantByThreadId.get(key);
+  if (!hint) return -1;
+  const rememberedAtMs = Number(hint.rememberedAtMs);
+  if (!Number.isFinite(rememberedAtMs) || Date.now() - rememberedAtMs > RECENT_PERSISTED_ASSISTANT_WINDOW_MS) {
+    recentPersistedAssistantByThreadId.delete(key);
+    return -1;
+  }
+  const messages = Array.isArray(chat?.messages) ? chat.messages : [];
+  let index = -1;
+  const hintedId = String(hint.id || '').trim();
+  if (hintedId) {
+    index = messages.findIndex((message) => message?.side === 'other' && String(message?.id || '').trim() === hintedId);
+  }
+  const hintedCreatedAt = String(hint.createdAt || '').trim();
+  if (index < 0 && hintedCreatedAt) {
+    for (let cursor = messages.length - 1; cursor >= 0; cursor -= 1) {
+      const message = messages[cursor];
+      if (message?.side !== 'other') continue;
+      if (String(message?.createdAt || '').trim() !== hintedCreatedAt) continue;
+      index = cursor;
+      break;
+    }
+  }
+  if (index < 0) return -1;
+  if (index !== getLatestDisplayableMessageIndex(messages)) return -1;
+  const candidate = messages[index];
+  if (String(candidate?.text || '').trim() !== String(text || '').trim()) return -1;
+  recentPersistedAssistantByThreadId.delete(key);
+  return index;
+}
+
+function isCurrentAssistantCandidate(chat, index, text, options = {}) {
+  const messages = Array.isArray(chat?.messages) ? chat.messages : [];
+  const message = messages[index];
+  if (!message || message.side !== 'other') return false;
+  if (!assistantCandidateTextMatches(message, text, options)) return false;
+  const hasTransientIdentity = !message.id && Boolean(message.streaming === true || String(message.streamId || '').trim());
+  if (!hasTransientIdentity) return false;
+  if (message.streaming === true) return true;
+  return index === getLatestDisplayableMessageIndex(messages);
+}
+
+function findCurrentAssistantCandidateIndex(chat, text, options = {}) {
+  const messages = Array.isArray(chat?.messages) ? chat.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (isCurrentAssistantCandidate(chat, index, text, options)) return index;
+  }
+  return -1;
+}
+
+function isLatestAssistantTextOccurrence(messages, index) {
+  const source = Array.isArray(messages) ? messages : [];
+  const message = source[index];
+  const text = String(message?.text || '').trim();
+  if (!message || message.side !== 'other' || !text) return false;
+  for (let cursor = index + 1; cursor < source.length; cursor += 1) {
+    const next = source[cursor];
+    if (next?.side === 'other' && String(next.text || '').trim() === text) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function upsertHydratedChatMessage(threadId, rawMessage) {
@@ -1501,29 +1799,65 @@ function upsertHydratedChatMessage(threadId, rawMessage) {
   const mapped = mapMessagesToChatMessages([rawMessage])[0];
   if (!mapped) return;
   const chat = state.chats[key];
-  if (mapped.side === 'other' && !mapped.streaming && resolveChatWaifuSettings(chat).enabled) {
-    mapped.waifuDisplayPending = true;
-  }
+  const [hydratedMapped] = hydrateWaifuDisplayState([mapped], chat, key);
   const existingIndex = mapped.id
     ? chat.messages.findIndex((message) => message.id && message.id === mapped.id)
     : -1;
+  const existingMessage = existingIndex >= 0 ? chat.messages[existingIndex] : null;
+  const transientIndex = existingIndex < 0 && hydratedMapped.side === 'other'
+    ? findCurrentAssistantCandidateIndex(chat, hydratedMapped.text, {
+      transientOnly: true,
+      allowPrefix: true,
+    })
+    : -1;
+  const transientMessage = transientIndex >= 0 ? chat.messages[transientIndex] : null;
+  const previousMessage = existingMessage || transientMessage;
+  const previousHasDisplayState = previousMessage
+    ? Object.prototype.hasOwnProperty.call(previousMessage, 'waifuDisplayPending')
+    : false;
+  const previousWasDisplayed = previousMessage
+    ? hasDisplayedWaifuMessage(key, previousMessage)
+      || (previousHasDisplayState && previousMessage.waifuDisplayPending === false)
+    : false;
+  if (
+    hydratedMapped.side === 'other'
+    && !hydratedMapped.streaming
+    && hydratedMapped.waifuMessageKey
+    && previousWasDisplayed
+  ) {
+    markWaifuMessageDisplayed(hydratedMapped, key);
+    hydratedMapped.waifuDisplayPending = false;
+  }
+  if (
+    hydratedMapped.side === 'other'
+    && !hydratedMapped.streaming
+    && resolveChatWaifuSettings(chat).enabled
+    && !hasDisplayedWaifuMessage(key, hydratedMapped)
+    && (!previousHasDisplayState || previousMessage?.streaming || previousMessage.waifuDisplayPending === true)
+  ) {
+    hydratedMapped.waifuDisplayPending = true;
+  }
   if (existingIndex >= 0) {
-    chat.messages[existingIndex] = mapped;
+    chat.messages[existingIndex] = hydratedMapped;
   } else {
-    const pendingIndex = mapped.side === 'self'
-      ? chat.messages.findIndex((message) => message.pending && message.text === mapped.text)
+    const pendingIndex = hydratedMapped.side === 'self'
+      ? chat.messages.findIndex((message) => message.pending && message.text === hydratedMapped.text)
       : -1;
-    const streamingIndex = mapped.side === 'other'
-      ? chat.messages.findIndex((message) => message.streaming)
-      : -1;
-    const replaceIndex = pendingIndex >= 0 ? pendingIndex : streamingIndex;
+    const replaceIndex = pendingIndex >= 0
+      ? pendingIndex
+      : transientIndex >= 0
+        ? transientIndex
+        : -1;
     if (replaceIndex >= 0) {
-      chat.messages[replaceIndex] = mapped;
+      chat.messages[replaceIndex] = hydratedMapped;
     } else {
-      chat.messages.push(mapped);
+      chat.messages.push(hydratedMapped);
     }
   }
-  chat.summary = mapped.text || (mapped.attachments?.length ? '[附件]' : chat.summary);
+  if (hydratedMapped.side === 'other') {
+    rememberRecentPersistedAssistantIdentity(key, hydratedMapped);
+  }
+  chat.summary = hydratedMapped.text || (hydratedMapped.attachments?.length ? '[附件]' : chat.summary);
   chat.time = '刚刚';
   saveState();
   if (uiState.activeChatKey === key) renderChat();
@@ -1535,7 +1869,16 @@ function updateStreamingAssistant(threadId, content, done = false) {
   const text = String(content || '').trim();
   if (!key || !text || !state.chats?.[key]) return;
   const chat = state.chats[key];
-  let message = getStreamingMessage(chat);
+  const streamingIndex = getStreamingMessageIndex(chat);
+  let message = streamingIndex >= 0 ? chat.messages[streamingIndex] : null;
+  if (!message && done) {
+    const transientIndex = findCurrentAssistantCandidateIndex(chat, text, { transientOnly: true });
+    message = transientIndex >= 0 ? chat.messages[transientIndex] : null;
+  }
+  if (!message && done) {
+    const persistedIndex = findRecentPersistedAssistantCandidateIndex(chat, key, text);
+    message = persistedIndex >= 0 ? chat.messages[persistedIndex] : null;
+  }
   if (!message) {
     message = {
       side: 'other',
@@ -1547,6 +1890,19 @@ function updateStreamingAssistant(threadId, content, done = false) {
   } else {
     message.text = text;
     message.streaming = !done;
+  }
+  message.waifuMessageKey = buildWaifuMessageKey(key, message);
+  const hasWaifuDisplayState = Object.prototype.hasOwnProperty.call(message, 'waifuDisplayPending');
+  if (
+    done
+    && resolveChatWaifuSettings(chat).enabled
+    && getWaifuDisplaySegments(message, chat).length > 1
+    && !hasDisplayedWaifuMessage(key, message)
+    && (!hasWaifuDisplayState || message.waifuDisplayPending === true)
+  ) {
+    message.waifuDisplayPending = true;
+  } else if (done && hasDisplayedWaifuMessage(key, message)) {
+    message.waifuDisplayPending = false;
   }
   chat.summary = text;
   chat.time = '刚刚';
@@ -2026,7 +2382,7 @@ async function flushPendingOutbox() {
       chat.pendingOutbox = [];
       saveState();
       await refreshBackendState(threadId);
-      await loadThreadMessages(threadId, { force: true });
+      await loadThreadMessages(threadId, { force: true, recordRecentAssistant: true });
       renderAll();
       setChatStatus('魔法棒已送达后端，并刷新了回复。');
       return;
@@ -2697,6 +3053,34 @@ function bindMessageActions(container) {
   });
 }
 
+function appendChatMessageRow(message, chat, options = {}) {
+  const side = message.side === 'self' ? 'self' : 'other';
+  const row = document.createElement('div');
+  row.className = ['chat-message-row', `chat-message-${side}`, options.rowClass || ''].filter(Boolean).join(' ');
+  if (options.hidden) row.hidden = true;
+  if (Number.isFinite(options.waifuDelayMs)) row.dataset.waifuDelayMs = String(options.waifuDelayMs);
+  if (Number.isInteger(options.waifuSegmentIndex)) row.dataset.waifuSegment = String(options.waifuSegmentIndex);
+
+  const bubble = document.createElement('div');
+  bubble.className = [
+    `bubble bubble-${side}`,
+    message.pending ? 'bubble-pending' : '',
+    message.streaming ? 'bubble-streaming' : '',
+    options.bubbleClass || '',
+  ].filter(Boolean).join(' ');
+  bubble.innerHTML = [
+    options.textHtml ?? renderMessageTextHtml(message, chat),
+    options.includeAttachments === false ? '' : renderMessageAttachments(message),
+    options.includeActions === false ? '' : renderMessageActions(message),
+  ].filter(Boolean).join('');
+  bindMessageActions(bubble);
+
+  if (side === 'other') row.innerHTML = renderAvatar(chat, 'avatar chat-avatar');
+  row.appendChild(bubble);
+  if (side === 'self') row.insertAdjacentHTML('beforeend', renderAvatar(personaAvatarSource(), 'avatar chat-avatar'));
+  dom.chatThread.appendChild(row);
+}
+
 async function submitThreadAction(action, replyCtx = '') {
   const chat = getActiveChat();
   const threadId = String(chat?.backend?.threadId || uiState.activeChatKey || '').trim();
@@ -2711,7 +3095,7 @@ async function submitThreadAction(action, replyCtx = '') {
     });
     setChatStatus('审批已提交，正在刷新会话。');
     window.setTimeout(() => {
-      loadThreadMessages(threadId, { force: true })
+      loadThreadMessages(threadId, { force: true, recordRecentAssistant: true })
         .then(() => renderAll())
         .catch((error) => setChatStatus(error instanceof Error ? error.message : '审批后刷新失败', true));
     }, 1200);
@@ -2741,24 +3125,31 @@ function renderChat() {
   if (dom.chatHeaderAvatar) dom.chatHeaderAvatar.innerHTML = renderAvatar(chat, 'avatar');
   clearWaifuDisplayTimers();
   dom.chatThread.innerHTML = '';
-  const waifuEnabled = resolveChatWaifuSettings(chat).enabled;
+  const waifuSettings = resolveChatWaifuSettings(chat);
 
   chat.messages.forEach((message) => {
-    const row = document.createElement('div');
-    row.className = `chat-message-row chat-message-${message.side}`;
-    const bubble = document.createElement('div');
-    bubble.className = `bubble bubble-${message.side}${message.pending ? ' bubble-pending' : ''}${message.streaming ? ' bubble-streaming' : ''}${waifuEnabled && message.side === 'other' && !message.streaming ? ' bubble-message-waifu' : ''}`;
-    bubble.innerHTML = [
-      renderMessageTextHtml(message, chat),
-      renderMessageAttachments(message),
-      renderMessageActions(message),
-    ].filter(Boolean).join('');
-    bindMessageActions(bubble);
-    if (message.side === 'other') {
-      row.innerHTML = renderAvatar(chat, 'avatar chat-avatar');
+    const waifuSegments = getWaifuDisplaySegments(message, chat);
+    if (waifuSegments.length) {
+      let previousSegmentText = '';
+      waifuSegments.forEach((segmentText, index) => {
+        const isLastSegment = index === waifuSegments.length - 1;
+        appendChatMessageRow(message, chat, {
+          rowClass: 'chat-message-waifu-line',
+          bubbleClass: 'bubble-message-waifu',
+          textHtml: renderBubbleTextHtml(segmentText),
+          includeAttachments: isLastSegment,
+          includeActions: isLastSegment,
+          hidden: message.waifuDisplayPending === true && index > 0,
+          waifuDelayMs: index > 0
+            ? getWaifuSegmentDelay(previousSegmentText || segmentText, waifuSettings)
+            : 0,
+          waifuSegmentIndex: index,
+        });
+        previousSegmentText = `${previousSegmentText}${segmentText}`;
+      });
+      return;
     }
-    row.appendChild(bubble);
-    dom.chatThread.appendChild(row);
+    appendChatMessageRow(message, chat);
   });
 
   updatePromptPreview();
