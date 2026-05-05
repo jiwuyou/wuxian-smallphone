@@ -102,7 +102,6 @@ select {
 .contact-item,
 .profile-stats,
 .settings-item,
-.chat-tools,
 .input-bar,
 .hero-card,
 .status-icons,
@@ -1027,7 +1026,6 @@ p {
 .ghost-button,
 .ghost-pill,
 .icon-button,
-.tool-chip,
 .runtime-pass-through-toggle,
 .slash-command-option,
 .send-button,
@@ -1144,8 +1142,7 @@ p {
 .settings-item:hover,
 .discover-card:hover,
 .quick-card:hover,
-.feature-row:hover,
-.tool-chip:hover {
+.feature-row:hover {
   background: var(--surface-alt);
 }
 
@@ -1691,19 +1688,6 @@ body[data-theme="night"] .runtime-status-error {
   background: var(--primary-soft);
   font-size: 22px;
   line-height: 1;
-}
-
-.chat-tools {
-  gap: 10px;
-  flex-wrap: wrap;
-  margin: 16px 0 12px;
-}
-
-.tool-chip {
-  padding: 9px 12px;
-  border-radius: 999px;
-  background: var(--primary-soft);
-  color: var(--primary);
 }
 
 .input-bar,

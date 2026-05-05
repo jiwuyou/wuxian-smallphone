@@ -2004,7 +2004,6 @@ async function flushPendingOutbox() {
   const batchText = pendingTexts.join('\n');
   uiState.isGenerating = true;
   dom.chatInput.disabled = true;
-  dom.continueGenerateButton.disabled = true;
   updateMagicWandState();
   updateRuntimePassThroughToggle();
 
@@ -2046,7 +2045,6 @@ async function flushPendingOutbox() {
   } finally {
     uiState.isGenerating = false;
     dom.chatInput.disabled = false;
-    dom.continueGenerateButton.disabled = false;
     updateMagicWandState();
     updateRuntimePassThroughToggle();
   }
@@ -2073,7 +2071,6 @@ async function generateAssistantReply(userInput = '', { continueOnly = false } =
 
   uiState.isGenerating = true;
   dom.chatInput.disabled = true;
-  dom.continueGenerateButton.disabled = true;
   setChatStatus('正在按角色卡、人设、世界书和记忆拼装上下文...');
 
   try {
@@ -2128,7 +2125,6 @@ async function generateAssistantReply(userInput = '', { continueOnly = false } =
   } finally {
     uiState.isGenerating = false;
     dom.chatInput.disabled = false;
-    dom.continueGenerateButton.disabled = false;
   }
 }
 
@@ -3373,13 +3369,6 @@ document.querySelectorAll('[data-desktop-target]').forEach((button) => {
   });
 });
 
-document.querySelectorAll('[data-chat-shortcut]').forEach((button) => {
-  button.addEventListener('click', () => {
-    dom.chatInput.value = button.dataset.chatShortcut;
-    dom.chatInput.focus();
-  });
-});
-
 document.querySelectorAll('[data-open-chat]').forEach((button) => {
   button.addEventListener('click', () => {
     void openChat(button.dataset.openChat);
@@ -3465,15 +3454,6 @@ dom.markReadButton.addEventListener('click', () => {
   renderMessages();
   renderDesktopBadge();
   renderLockNotification();
-});
-
-dom.continueGenerateButton.addEventListener('click', () => {
-  if (!getActiveChat()) return;
-  if (backendEnabled) {
-    setChatStatus('smallphone-app 暂不支持无输入继续生成，请先输入一条消息。', true);
-    return;
-  }
-  generateAssistantReply('', { continueOnly: true });
 });
 
 if (dom.attachmentButton) {
@@ -3894,17 +3874,6 @@ dom.worldbookForm.addEventListener('submit', async (event) => {
     updatePromptPreview();
   } catch (error) {
     setChatStatus(error instanceof Error ? error.message : '世界书同步失败', true);
-  }
-});
-
-dom.promptPreviewButton.addEventListener('click', async () => {
-  setPhoneShell('app');
-  openPanel('settings');
-  try {
-    const preview = await fetchPromptPreviewFromBackend(dom.chatInput.value.trim());
-    if (!preview) updatePromptPreview(dom.chatInput.value.trim());
-  } catch {
-    updatePromptPreview(dom.chatInput.value.trim());
   }
 });
 
