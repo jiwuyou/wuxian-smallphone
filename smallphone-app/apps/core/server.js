@@ -3,6 +3,10 @@ const path = require("path");
 const http = require("http");
 const { Readable } = require("stream");
 const { URL } = require("url");
+const { applyCcConnectEnvDefaults } = require("./cc-connect-env");
+
+applyCcConnectEnvDefaults();
+
 const { SmallPhoneService } = require("../../packages/domain/service");
 const { isPathInside, resolveSmallPhonePaths } = require("../../packages/shared/paths");
 
