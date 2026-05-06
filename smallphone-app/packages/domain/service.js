@@ -143,6 +143,8 @@ class SmallPhoneService {
         options.projectManagement?.ccConnectManagementToken || options.permissions?.ccConnectManagementToken || "",
     });
     this.projectInfo = this.ccConnectProjects.describe();
+    this.serviceManager = createServiceManagerClient(options.serviceManager || {});
+    this.serviceManagerInfo = this.serviceManager.describe();
     this.artifactSync = normalizeArtifactSyncOptions(options.artifactSync, this.paths);
     this.threadEventSubscribers = new Map();
   }
@@ -156,7 +158,7 @@ class SmallPhoneService {
         version: "0.1.0",
         stage: "P0",
       },
-      runtime: this.runtimeInfo,
+      runtime: sanitizeRuntimeInfoPublic(this.runtimeInfo),
       permissions: this.permissionInfo,
       projects: this.projectInfo,
       stats: {
@@ -204,20 +206,250 @@ class SmallPhoneService {
     return this.getUserContent();
   }
 
-  getAppRegistry() {
+  getAppRegistry(options = {}) {
     const content = this.getUserContent();
-    const activeShell = content.shells.find((item) => item.id === content.activeShell) ||
-      content.shells.find((item) => item.id === DEFAULT_OFFICIAL_SHELL_ID) ||
+    const activeShellId = content.activeShell;
+
+    const apps = Array.isArray(content.apps)
+      ? content.apps.map((app) => ({
+          ...app,
+          entry: redactPublicUrlString(app?.entry),
+        }))
+      : [];
+    const shells = Array.isArray(content.shells)
+      ? content.shells.map((shell) => ({
+          ...shell,
+          entry: redactPublicUrlString(shell?.entry),
+        }))
+      : [];
+    const activeShellRecord = shells.find((item) => item.id === activeShellId) ||
+      shells.find((item) => item.id === DEFAULT_OFFICIAL_SHELL_ID) ||
       null;
-    return {
+    const appInstances = Array.isArray(content.appInstances)
+      ? content.appInstances.map((instance) => {
+          const settings = instance?.settings && typeof instance.settings === "object" ? instance.settings : {};
+          const url = Object.prototype.hasOwnProperty.call(settings, "url") ? redactPublicUrlString(settings.url) : undefined;
+          return {
+            ...instance,
+            settings: url === undefined ? settings : { ...settings, url },
+          };
+        })
+      : [];
+
+    const baseRegistry = {
       generatedAt: nowIso(),
-      apps: content.apps,
-      appInstances: content.appInstances,
+      apps,
+      appInstances,
       themes: content.themes,
       desktopLayouts: content.desktopLayouts,
-      shells: content.shells,
+      shells,
       activeShell: content.activeShell,
-      activeShellRecord: activeShell,
+      activeShellRecord,
+      serviceManager: this.serviceManager.describePublic({ available: false }),
+    };
+    const sanitizedRegistry = sanitizePublicRegistryPayload(baseRegistry);
+
+    const includeServiceManager = Boolean(options?.includeServiceManager);
+    if (!includeServiceManager) {
+      return sanitizedRegistry;
+    }
+
+    return this.getAppRegistryWithServiceMetadata(sanitizedRegistry);
+  }
+
+  async getAppRegistryWithServiceMetadata(baseRegistry) {
+    const registry = baseRegistry && typeof baseRegistry === "object" ? baseRegistry : this.getAppRegistry();
+    const serviceLookup = await this.listServiceManagerServices();
+    const serviceManager = serviceLookup?.serviceManager || this.serviceManager.describePublic({ available: false });
+    const services = Array.isArray(serviceLookup?.services) ? serviceLookup.services : [];
+
+    const byId = new Map();
+    const byTag = new Map();
+    for (const serviceRecord of services) {
+      if (serviceRecord?.id) {
+        byId.set(serviceRecord.id, serviceRecord);
+      }
+      for (const tag of Array.isArray(serviceRecord?.tags) ? serviceRecord.tags : []) {
+        const key = String(tag || "").trim();
+        if (!key) continue;
+        if (!byTag.has(key)) byTag.set(key, []);
+        byTag.get(key).push(serviceRecord);
+      }
+    }
+
+    const appInstances = Array.isArray(registry.appInstances) ? registry.appInstances : [];
+    const enrichedInstances = appInstances.map((instance) => {
+      const instanceId = String(instance?.id || "").trim();
+      const appId = String(instance?.appId || "").trim();
+      const explicitServiceId = String(instance?.settings?.serviceId || "").trim();
+
+      let matched = null;
+      if (explicitServiceId) {
+        matched = byId.get(explicitServiceId) || null;
+      } else if (instanceId || appId) {
+        const candidates = [];
+        const seen = new Set();
+        const addCandidates = (items) => {
+          for (const candidate of Array.isArray(items) ? items : []) {
+            const key = String(candidate?.id || "").trim();
+            if (key && seen.has(key)) continue;
+            if (key) seen.add(key);
+            candidates.push(candidate);
+          }
+        };
+        if (instanceId) addCandidates(byTag.get(`smallphone-instance:${instanceId}`) || []);
+        if (appId) addCandidates(byTag.get(`smallphone-app:${appId}`) || []);
+        matched = matchBestServiceRecord(candidates, { instanceId, appId });
+      }
+
+      return {
+        ...instance,
+        service: matched || null,
+      };
+    });
+
+    return {
+      ...registry,
+      appInstances: enrichedInstances,
+      serviceManager,
+    };
+  }
+
+  async getServiceManagerHealth() {
+    const response = await this.serviceManager.request({ method: "GET", path: "/health" });
+    const serviceManager = this.serviceManager.describePublic({ available: response.status > 0 });
+    if (!response.ok) {
+      return {
+        serviceManager,
+        ok: false,
+        error: response.error || (response.status ? `service-manager health returned ${response.status}` : "service-manager unavailable"),
+      };
+    }
+    return {
+      serviceManager,
+      ok: true,
+    };
+  }
+
+  async listServiceManagerServices() {
+    const response = await this.serviceManager.request({ method: "GET", path: "/services" });
+    const serviceManager = this.serviceManager.describePublic({ available: response.status > 0 });
+    if (!response.ok) {
+      return {
+        serviceManager,
+        services: [],
+        error: response.error || (response.status ? `service-manager returned ${response.status}` : "service-manager unavailable"),
+      };
+    }
+    const rawServices = extractServiceManagerServicesPayload(response.data);
+    return {
+      serviceManager,
+      services: rawServices.map((record) => sanitizeServiceManagerServiceRecord(record, serviceManager)).filter((item) => item.id),
+    };
+  }
+
+  async getServiceManagerServiceStatus(serviceId) {
+    const id = String(serviceId || "").trim();
+    if (!id) {
+      return {
+        serviceManager: this.serviceManager.describePublic({ available: false }),
+        service: null,
+        error: "Missing service id",
+      };
+    }
+    const response = await this.serviceManager.request({
+      method: "GET",
+      path: `/services/${encodeURIComponent(id)}/status`,
+    });
+    const serviceManager = this.serviceManager.describePublic({ available: response.status > 0 });
+    if (!response.ok) {
+      return {
+        serviceManager,
+        service: null,
+        error: response.error || (response.status ? `service-manager returned ${response.status}` : "service-manager unavailable"),
+      };
+    }
+
+    const record = extractServiceManagerServiceRecord(response.data);
+    return {
+      serviceManager,
+      service: record ? sanitizeServiceManagerServiceRecord(record, serviceManager) : null,
+    };
+  }
+
+  async getServiceManagerServiceLogs(serviceId, options = {}) {
+    const id = String(serviceId || "").trim();
+    if (!id) {
+      return {
+        serviceManager: this.serviceManager.describePublic({ available: false }),
+        logs: null,
+        error: "Missing service id",
+      };
+    }
+
+    const rawLimit = String(options?.limit || "").trim();
+    const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : NaN;
+    const limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(5000, parsedLimit)) : null;
+
+    const response = await this.serviceManager.request({
+      method: "GET",
+      path: `/services/${encodeURIComponent(id)}/logs`,
+      query: limit ? { limit: String(limit) } : {},
+    });
+    const serviceManager = this.serviceManager.describePublic({ available: response.status > 0 });
+    if (!response.ok) {
+      return {
+        serviceManager,
+        logs: null,
+        error: response.error || (response.status ? `service-manager returned ${response.status}` : "service-manager unavailable"),
+      };
+    }
+
+    return {
+      serviceManager,
+      logs: sanitizeServiceManagerLogsPayload(response.data, response.text, {
+        limit: limit || 5000,
+      }),
+    };
+  }
+
+  async runServiceManagerServiceAction(serviceId, action) {
+    const id = String(serviceId || "").trim();
+    const verb = String(action || "").trim();
+    if (!id) {
+      return {
+        serviceManager: this.serviceManager.describePublic({ available: false }),
+        service: null,
+        error: "Missing service id",
+      };
+    }
+    if (verb !== "start" && verb !== "stop" && verb !== "restart") {
+      return {
+        serviceManager: this.serviceManager.describePublic({ available: false }),
+        service: null,
+        error: `Unsupported action: ${verb}`,
+      };
+    }
+
+    const response = await this.serviceManager.request({
+      method: "POST",
+      path: `/services/${encodeURIComponent(id)}/${verb}`,
+    });
+    const serviceManager = this.serviceManager.describePublic({ available: response.status > 0 });
+    if (!response.ok) {
+      return {
+        serviceManager,
+        service: null,
+        error: response.error || (response.status ? `service-manager returned ${response.status}` : "service-manager unavailable"),
+      };
+    }
+
+    const record = extractServiceManagerServiceRecord(response.data);
+    return {
+      serviceManager,
+      service: record ? sanitizeServiceManagerServiceRecord(record, serviceManager) : null,
+      action: verb,
+      ok: true,
     };
   }
 
@@ -4704,6 +4936,507 @@ function normalizeRuntimeAssistantAttachments(input) {
       };
     })
     .filter(Boolean);
+}
+
+function createServiceManagerClient(options = {}) {
+  const resolvedBaseUrl = normalizeServiceManagerBaseUrl(
+    options.baseUrl ||
+      process.env.SMALLPHONE_SERVICE_MANAGER_URL ||
+      "http://127.0.0.1:8787",
+  );
+  const baseUrl = resolvedBaseUrl;
+  const token = String(options.token || process.env.SMALLPHONE_SERVICE_MANAGER_TOKEN || "").trim();
+  const timeoutMs = normalizeOptionalPositiveInt(
+    options.timeoutMs || process.env.SMALLPHONE_SERVICE_MANAGER_TIMEOUT_MS,
+    8000,
+  );
+
+  function describe() {
+    return {
+      baseUrl,
+      configured: Boolean(baseUrl),
+      timeoutMs,
+    };
+  }
+
+  function describePublic(params = {}) {
+    return {
+      available: Boolean(params?.available),
+      configured: Boolean(token),
+    };
+  }
+
+  async function request(params) {
+    const resolvedPath = resolveServiceManagerApiPath(baseUrl, params.path);
+    const url = buildServiceManagerUrl(baseUrl, resolvedPath, params.query);
+    if (!url) {
+      return {
+        ok: false,
+        status: 0,
+        data: null,
+        text: "",
+        error: "service-manager is not configured",
+      };
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const headers = {};
+      if (token) {
+        headers.authorization = `Bearer ${token}`;
+      }
+      if (params.body !== undefined) {
+        headers["content-type"] = "application/json";
+      }
+      const response = await fetch(url, {
+        method: params.method,
+        headers,
+        body: params.body !== undefined ? JSON.stringify(params.body) : undefined,
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let data = null;
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = null;
+        }
+      }
+      if (!response.ok) {
+        return {
+          ok: false,
+          status: response.status,
+          data,
+          text,
+          error: inferServiceManagerErrorMessage(data, text, response.status),
+        };
+      }
+      return {
+        ok: true,
+        status: response.status,
+        data,
+        text,
+        error: "",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        status: 0,
+        data: null,
+        text: "",
+        error: message || "service-manager request failed",
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return {
+    describe,
+    describePublic,
+    request,
+  };
+}
+
+function normalizeServiceManagerBaseUrl(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function normalizeOptionalPositiveInt(input, fallback) {
+  const raw = String(input || "").trim();
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function buildServiceManagerUrl(baseUrl, reqPath, query) {
+  const root = String(baseUrl || "").trim();
+  if (!root) return "";
+  const pathPart = String(reqPath || "").trim();
+  if (!pathPart.startsWith("/")) return "";
+  try {
+    const url = new URL(root);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    url.pathname = pathPart;
+    const params = query && typeof query === "object" ? query : {};
+    for (const [key, value] of Object.entries(params)) {
+      const k = String(key || "").trim();
+      const v = String(value || "").trim();
+      if (!k || !v) continue;
+      url.searchParams.set(k, v);
+    }
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function resolveServiceManagerApiPath(baseUrl, reqPath) {
+  const rawEndpoint = String(reqPath || "").trim();
+  if (!rawEndpoint.startsWith("/")) return "";
+
+  const root = String(baseUrl || "").trim();
+  let basePath = "";
+  try {
+    const parsed = new URL(root);
+    basePath = String(parsed.pathname || "");
+  } catch {
+    basePath = "";
+  }
+  basePath = String(basePath || "").trim().replace(/\/+$/, "");
+  if (basePath === "/") basePath = "";
+
+  const apiV1 = "/api/v1";
+  let apiBase = basePath;
+  if (!apiBase.endsWith(apiV1)) {
+    apiBase = joinUrlPaths(apiBase, apiV1);
+  }
+
+  let endpoint = rawEndpoint;
+  if (endpoint === apiV1) {
+    endpoint = "/";
+  } else if (endpoint.startsWith(`${apiV1}/`)) {
+    endpoint = endpoint.slice(apiV1.length);
+  }
+
+  return joinUrlPaths(apiBase, endpoint);
+}
+
+function joinUrlPaths(left, right) {
+  const base = String(left || "").trim().replace(/\/+$/, "");
+  const add = String(right || "").trim().replace(/^\/+/, "");
+  const baseWithSlash = base ? (base.startsWith("/") ? base : `/${base}`) : "";
+  if (!add) {
+    return baseWithSlash || "/";
+  }
+  if (!baseWithSlash) {
+    return `/${add}`;
+  }
+  return `${baseWithSlash}/${add}`;
+}
+
+function inferServiceManagerErrorMessage(data, text, status) {
+  if (data && typeof data === "object") {
+    const message = String(data.error || data.message || "").trim();
+    if (message) return message;
+  }
+  if (status) return `service-manager returned ${status}`;
+  return "service-manager request failed";
+}
+
+function extractServiceManagerServicesPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.services)) return payload.services;
+    if (Array.isArray(payload.data)) return payload.data;
+    if (payload.data && typeof payload.data === "object" && Array.isArray(payload.data.services)) return payload.data.services;
+  }
+  return [];
+}
+
+function extractServiceManagerServiceRecord(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  if (Array.isArray(payload)) {
+    return payload.length ? payload[0] : null;
+  }
+  if (payload.service && typeof payload.service === "object") return payload.service;
+  if (payload.data && typeof payload.data === "object") {
+    if (payload.data.service && typeof payload.data.service === "object") return payload.data.service;
+    return payload.data;
+  }
+  return payload;
+}
+
+function sanitizeServiceManagerLogsPayload(data, text, options = {}) {
+  const limit = Number.isFinite(Number(options.limit)) ? Math.max(1, Math.min(5000, Number(options.limit))) : 500;
+
+  const rawEntries = extractServiceManagerLogsPayload(data, text);
+  const sliced = rawEntries.length > limit ? rawEntries.slice(rawEntries.length - limit) : rawEntries;
+
+  const entries = sliced.map((entry) => {
+    if (typeof entry === "string") {
+      return { at: "", level: "", message: "[REDACTED]" };
+    }
+    if (entry && typeof entry === "object") {
+      const at = String(entry.at || entry.time || entry.ts || entry.timestamp || entry.createdAt || entry.created_at || "").trim();
+      const level = String(entry.level || entry.severity || entry.kind || "").trim();
+      return { at, level, message: "[REDACTED]" };
+    }
+    return { at: "", level: "", message: "[REDACTED]" };
+  });
+
+  return {
+    redacted: true,
+    entryCount: entries.length,
+    entries,
+  };
+}
+
+function extractServiceManagerLogsPayload(data, text) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object") {
+    if (Array.isArray(data.logs)) return data.logs;
+    if (Array.isArray(data.entries)) return data.entries;
+    if (data.data && typeof data.data === "object") {
+      if (Array.isArray(data.data.logs)) return data.data.logs;
+      if (Array.isArray(data.data.entries)) return data.data.entries;
+    }
+  }
+  const raw = String(text || "").trim();
+  if (!raw) return [];
+  return raw.split(/\r?\n/).filter(Boolean);
+}
+
+function sanitizeServiceManagerServiceRecord(record, serviceManager) {
+  const raw = record && typeof record === "object" ? record : {};
+  const spec = raw.spec && typeof raw.spec === "object" ? raw.spec : {};
+  const health = spec.health && typeof spec.health === "object" ? spec.health : {};
+
+  const id = String(raw.id || raw.service_id || raw.serviceId || "").trim();
+  const tagsSource = Array.isArray(raw.tags) ? raw.tags : Array.isArray(spec.tags) ? spec.tags : [];
+  const tags = tagsSource.map((tag) => String(tag || "").trim()).filter(Boolean);
+  const enabled =
+    typeof raw.enabled === "boolean"
+      ? raw.enabled
+      : typeof spec.enabled === "boolean"
+        ? spec.enabled
+        : Boolean(raw.enabled || spec.enabled);
+
+  const observedAt = String(
+    raw.observedAt ||
+      raw.observed_at ||
+      health.observedAt ||
+      health.observed_at ||
+      "",
+  ).trim();
+  const startedAt = String(
+    raw.startedAt ||
+      raw.started_at ||
+      health.startedAt ||
+      health.started_at ||
+      "",
+  ).trim();
+  const exitCodeValue =
+    raw.exitCode ??
+    raw.exit_code ??
+    health.exitCode ??
+    health.exit_code ??
+    null;
+  const pidValue = raw.pid ?? health.pid ?? null;
+  const capabilitiesSource = raw.capabilities ?? spec.capabilities ?? null;
+  return {
+    id,
+    name: String(raw.name || spec.name || "").trim(),
+    description: String(raw.description || spec.description || "").trim(),
+    provider: String(raw.provider || spec.provider || "").trim(),
+    tags,
+    enabled,
+    state: String(raw.state || health.state || health.status || spec.state || "").trim(),
+    message: String(raw.message || health.message || "").trim(),
+    pid: Number.isFinite(Number(pidValue)) ? Number(pidValue) : null,
+    observedAt,
+    startedAt,
+    exitCode: Number.isFinite(Number(exitCodeValue)) ? Number(exitCodeValue) : null,
+    capabilities: Array.isArray(capabilitiesSource)
+      ? capabilitiesSource.map((capability) => String(capability || "").trim()).filter(Boolean)
+      : Object.keys(capabilitiesSource && typeof capabilitiesSource === "object" ? capabilitiesSource : {})
+        .map((capability) => String(capability || "").trim())
+        .filter(Boolean),
+    serviceManager: serviceManager && typeof serviceManager === "object" ? serviceManager : { available: false, configured: false },
+  };
+}
+
+function matchBestServiceRecord(records, criteria) {
+  const candidates = Array.isArray(records) ? records : [];
+  if (!candidates.length) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  const instanceId = String(criteria?.instanceId || "").trim();
+  const appId = String(criteria?.appId || "").trim();
+  const tagInstance = instanceId ? `smallphone-instance:${instanceId}` : "";
+  const tagApp = appId ? `smallphone-app:${appId}` : "";
+
+  const scored = [];
+  for (const record of candidates) {
+    const tags = new Set(Array.isArray(record?.tags) ? record.tags : []);
+    let score = 0;
+    if (tagInstance && tags.has(tagInstance)) score += 10;
+    if (tagApp && tags.has(tagApp)) score += 5;
+    if (record?.enabled) score += 1;
+    scored.push({ record, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.record || null;
+}
+
+function sanitizePublicRegistryPayload(registry) {
+  return sanitizePublicPayload(registry, {
+    stripEntry: false,
+    stripCommand: true,
+    stripEnv: true,
+    stripRuntime: true,
+  });
+}
+
+function sanitizeRuntimeInfoPublic(runtimeInfo) {
+  return sanitizePublicPayload(runtimeInfo, {
+    stripEntry: true,
+    stripCommand: true,
+    stripEnv: true,
+    stripRuntime: false,
+  });
+}
+
+function sanitizePublicPayload(value, options = {}) {
+  const seen = new WeakMap();
+  return sanitizePublicPayloadInner(value, options, seen, "");
+}
+
+function sanitizePublicPayloadInner(value, options, seen, keyHint) {
+  if (value === null || value === undefined) return value;
+
+  if (typeof value === "string") {
+    return sanitizePublicString(value, keyHint);
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return seen.get(value);
+    const out = [];
+    seen.set(value, out);
+    for (const item of value) {
+      out.push(sanitizePublicPayloadInner(item, options, seen, keyHint));
+    }
+    return out;
+  }
+
+  if (typeof value === "object") {
+    if (seen.has(value)) return seen.get(value);
+    const out = {};
+    seen.set(value, out);
+    for (const [key, item] of Object.entries(value)) {
+      if (shouldStripPublicKey(key, options)) {
+        continue;
+      }
+      const sanitized = sanitizePublicPayloadInner(item, options, seen, key);
+      if (sanitized === undefined) continue;
+      out[key] = sanitized;
+    }
+    return out;
+  }
+
+  return undefined;
+}
+
+function sanitizePublicString(value, keyHint) {
+  const hint = String(keyHint || "").trim();
+  const normalizedHint = normalizePublicKeyHint(hint);
+  const raw = String(value || "");
+  if (normalizedHint.includes("url") || normalizedHint.includes("uri") || normalizedHint === "entry" || normalizedHint.includes("href")) {
+    return redactPublicUrlString(raw);
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw.trim())) {
+    return redactPublicUrlString(raw);
+  }
+  return raw;
+}
+
+function normalizePublicKeyHint(key) {
+  return String(key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function shouldStripPublicKey(key, options) {
+  const normalized = normalizePublicKeyHint(key);
+  if (!normalized) return false;
+
+  if (normalized === "token" || normalized === "apikey" || normalized === "secret" || normalized === "password" || normalized === "authorization" || normalized === "credentials" || normalized === "auth") {
+    return true;
+  }
+  if (normalized.endsWith("token") && normalized !== "tokens") {
+    return true;
+  }
+  if (normalized.endsWith("apikey")) {
+    return true;
+  }
+  if (normalized.endsWith("secret")) {
+    return true;
+  }
+  if (normalized.endsWith("password")) {
+    return true;
+  }
+  if (normalized.endsWith("authorization")) {
+    return true;
+  }
+  if (normalized.endsWith("credentials")) {
+    return true;
+  }
+
+  if (options?.stripEnv && (normalized === "env" || normalized === "environment")) {
+    return true;
+  }
+  if (options?.stripRuntime && normalized === "runtime") {
+    return true;
+  }
+  if (options?.stripCommand && normalized === "command") {
+    return true;
+  }
+  if (options?.stripEntry && normalized === "entry") {
+    return true;
+  }
+  return false;
+}
+
+function redactPublicUrlString(value) {
+  if (typeof value !== "string") return value;
+  const raw = value.trim();
+  if (!raw) return raw;
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) {
+    const queryIndex = raw.indexOf("?");
+    const hashIndex = raw.indexOf("#");
+    const cutIndex =
+      queryIndex >= 0 && hashIndex >= 0
+        ? Math.min(queryIndex, hashIndex)
+        : queryIndex >= 0
+          ? queryIndex
+          : hashIndex;
+    return cutIndex >= 0 ? raw.slice(0, cutIndex) : raw;
+  }
+  try {
+    const url = new URL(raw);
+    if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) {
+      return raw;
+    }
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return raw;
+  }
 }
 
 function safeRealpath(value) {

@@ -20,6 +20,9 @@ const TASK_POLL_MS = Number.parseInt(process.env.SMALLPHONE_TASK_POLL_MS || "500
 const WEBCLIENT_POLL_INTERVAL_MS = process.env.SMALLPHONE_WEBCLIENT_POLL_INTERVAL_MS;
 const WEBCLIENT_HISTORY_LIMIT = process.env.SMALLPHONE_WEBCLIENT_HISTORY_LIMIT;
 const DATA_FILE = SMALLPHONE_PATHS.dataFile;
+const SERVICE_MANAGER_URL = process.env.SMALLPHONE_SERVICE_MANAGER_URL || "http://127.0.0.1:8787";
+const SERVICE_MANAGER_TIMEOUT_MS = process.env.SMALLPHONE_SERVICE_MANAGER_TIMEOUT_MS;
+const SERVICE_MANAGER_TOKEN = process.env.SMALLPHONE_SERVICE_MANAGER_TOKEN || "";
 
 const service = new SmallPhoneService({
   dataFile: DATA_FILE,
@@ -53,6 +56,11 @@ const service = new SmallPhoneService({
     ccConnectManagementToken: process.env.SMALLPHONE_CCCONNECT_MANAGEMENT_TOKEN || "",
     clientId: process.env.SMALLPHONE_CLIENT_ID || "smallphone",
     appId: process.env.SMALLPHONE_APP_ID || "chat",
+  },
+  serviceManager: {
+    baseUrl: SERVICE_MANAGER_URL,
+    token: SERVICE_MANAGER_TOKEN,
+    timeoutMs: SERVICE_MANAGER_TIMEOUT_MS || "",
   },
 });
 
@@ -139,7 +147,27 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, service.updateUserContent(body));
   }
   if (method === "GET" && url.pathname === "/api/app-registry") {
-    return sendJson(res, 200, service.getAppRegistry());
+    return sendJson(res, 200, await service.getAppRegistry({ includeServiceManager: true }));
+  }
+
+  if (method === "GET" && url.pathname === "/api/service-manager/health") {
+    return sendJson(res, 200, await service.getServiceManagerHealth());
+  }
+  if (method === "GET" && url.pathname === "/api/service-manager/services") {
+    return sendJson(res, 200, await service.listServiceManagerServices());
+  }
+  const serviceStatusMatch = url.pathname.match(/^\/api\/service-manager\/services\/([^/]+)\/status$/);
+  if (method === "GET" && serviceStatusMatch) {
+    return sendJson(res, 200, await service.getServiceManagerServiceStatus(serviceStatusMatch[1]));
+  }
+  const serviceLogsMatch = url.pathname.match(/^\/api\/service-manager\/services\/([^/]+)\/logs$/);
+  if (method === "GET" && serviceLogsMatch) {
+    const limit = url.searchParams.get("limit") || "";
+    return sendJson(res, 200, await service.getServiceManagerServiceLogs(serviceLogsMatch[1], { limit }));
+  }
+  const serviceActionMatch = url.pathname.match(/^\/api\/service-manager\/services\/([^/]+)\/(start|stop|restart)$/);
+  if (method === "POST" && serviceActionMatch) {
+    return sendJson(res, 200, await service.runServiceManagerServiceAction(serviceActionMatch[1], serviceActionMatch[2]));
   }
   if (method === "POST" && url.pathname === "/api/attachments") {
     const body = await readJsonWithLimit(req, ATTACHMENT_UPLOAD_MAX_JSON_BYTES);

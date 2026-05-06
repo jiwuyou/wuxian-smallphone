@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>手机桌面</title>
-  <link rel="stylesheet" href="style.css?v=13">
+  <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
   <div class="app-shell">
@@ -339,17 +339,22 @@
                 <p class="permission-panel-summary">这里配置独立后端 App 的入口地址。桌面图标会直接使用该地址，不再要求用户打开后手动填写。</p>
                 <button type="submit" class="soft-button small-button">保存 App 配置</button>
               </form>
-              <div class="app-manager-actions">
-                <button type="button" class="soft-button small-button" id="like-girl-open-public">进入 LikeGirl 前台</button>
-                <button type="button" class="secondary-button small-button" id="like-girl-open-admin">进入 LikeGirl 后台</button>
-                <button type="button" class="soft-button small-button" id="like-girl-clone-open-public">进入 LikeGirl 分身前台</button>
-                <button type="button" class="secondary-button small-button" id="like-girl-clone-open-admin">进入 LikeGirl 分身后台</button>
-              </div>
-              <div class="app-registry-controls">
-                <button type="button" class="secondary-button small-button" id="app-registry-refresh">刷新 App 注册表</button>
-                <p class="registry-status" id="app-registry-status">后端未连接，使用内置 App。</p>
-              </div>
-              <article class="info-card">
+	              <div class="app-manager-actions">
+	                <button type="button" class="soft-button small-button" id="like-girl-open-public">进入 LikeGirl 前台</button>
+	                <button type="button" class="secondary-button small-button" id="like-girl-open-admin">进入 LikeGirl 后台</button>
+	                <button type="button" class="soft-button small-button" id="like-girl-clone-open-public">进入 LikeGirl 分身前台</button>
+	                <button type="button" class="secondary-button small-button" id="like-girl-clone-open-admin">进入 LikeGirl 分身后台</button>
+	              </div>
+	              <div class="service-manager-controls">
+	                <button type="button" class="secondary-button small-button" id="service-manager-refresh">刷新服务状态</button>
+	                <p class="registry-status" id="service-manager-status">后端未连接，服务管理不可用。</p>
+	              </div>
+	              <div class="stack-grid service-manager-grid" id="service-manager-list"></div>
+	              <div class="app-registry-controls">
+	                <button type="button" class="secondary-button small-button" id="app-registry-refresh">刷新 App 注册表</button>
+	                <p class="registry-status" id="app-registry-status">后端未连接，使用内置 App。</p>
+	              </div>
+	              <article class="info-card">
                 <p class="eyebrow">运行说明</p>
                 <strong>LikeGirl 是独立 Node/SQLite 服务</strong>
                 <p>先启动 LikeGirl 服务，再从桌面图标进入。分身使用同一份源码，但应配置独立端口、SQLite 文件和上传目录。</p>
@@ -603,6 +608,6 @@
     </div>
   </div>
 
-  <script type="module" src="scripts/main.js?v=15"></script>
+  <script type="module" src="scripts/main.js?v=18"></script>
 </body>
 </html>

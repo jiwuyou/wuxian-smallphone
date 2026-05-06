@@ -50,6 +50,30 @@ function normalizePublicId(value) {
   return normalizeString(value).replace(/[^a-zA-Z0-9:_-]/g, '-');
 }
 
+function normalizeServiceMeta(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const id = normalizeString(value);
+    return id ? { id } : null;
+  }
+  if (!isPlainObject(value)) return null;
+  const output = { ...value };
+  const candidateId = typeof output.id === 'string'
+    ? output.id
+    : (typeof output.serviceId === 'string' ? output.serviceId : '');
+  const normalizedId = normalizeString(candidateId);
+  if (normalizedId) output.id = normalizedId;
+  return output;
+}
+
+function normalizeServiceMetaList(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeServiceMeta).filter(Boolean);
+  }
+  const single = normalizeServiceMeta(value);
+  return single ? [single] : [];
+}
+
 function trimTrailingSlash(value) {
   return normalizeString(value).replace(/\/+$/, '');
 }
@@ -102,6 +126,8 @@ function normalizeRegistryApp(app) {
     entry: normalizeString(app.entry),
     icon: normalizeString(app.icon),
     version: normalizeString(app.version),
+    service: normalizeServiceMeta(app.service || app.serviceManager || app.service_manager),
+    services: normalizeServiceMetaList(app.services || app.serviceList || app.service_list),
   };
 }
 
@@ -111,6 +137,29 @@ function normalizeRegistryInstance(instance) {
   if (!id) return null;
 
   const settings = isPlainObject(instance.settings) ? instance.settings : {};
+  const state = isPlainObject(instance.state) ? instance.state : {};
+  const service = normalizeServiceMeta(
+    instance.service ||
+    instance.serviceManager ||
+    instance.service_manager ||
+    settings.service ||
+    settings.serviceManager ||
+    settings.service_manager ||
+    state.service ||
+    state.serviceManager ||
+    state.service_manager,
+  );
+  const services = normalizeServiceMetaList(
+    instance.services ||
+    instance.serviceList ||
+    instance.service_list ||
+    settings.services ||
+    settings.serviceList ||
+    settings.service_list ||
+    state.services ||
+    state.serviceList ||
+    state.service_list,
+  );
   return {
     id,
     appId: normalizePublicId(instance.appId || instance.app_id),
@@ -118,6 +167,10 @@ function normalizeRegistryInstance(instance) {
     source: normalizeString(instance.source),
     entry: normalizeString(instance.entry),
     settingsUrl: normalizeString(settings.url),
+    settings,
+    state,
+    service,
+    services,
   };
 }
 
@@ -165,6 +218,11 @@ function createDynamicDesktopAppEntry(instance, app, options = {}) {
     launchUrl: launch.url,
     launchSource: launch.source,
     dynamic: true,
+    service: normalizeServiceMeta(instance?.service) || normalizeServiceMeta(app?.service),
+    services: normalizeServiceMetaList([
+      ...(Array.isArray(instance?.services) ? instance.services : []),
+      ...(Array.isArray(app?.services) ? app.services : []),
+    ]),
   };
 }
 

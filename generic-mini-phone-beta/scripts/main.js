@@ -1,12 +1,18 @@
-import * as dom from './dom.js?v=13';
+import * as dom from './dom.js?v=14';
 import {
   appModules,
   appSpaceTemplates,
   fetchDynamicAppRegistry,
   mergeStaticAndDynamicDesktopApps,
   registeredApps,
-} from './app-registry.js?v=8';
-import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=7';
+} from './app-registry.js?v=9';
+import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=8';
+import {
+  buildServiceManagerDefinitions,
+  createServiceFromDefinition,
+  getManagedServiceTargets,
+  mergeServiceManagerDefinitionWithStatus,
+} from './service-manager-logic.js?v=1';
 import { applyDesktopMode, bindWorld, renderWorld, renderWorldToolbar } from './world.js?v=3';
 
 const DEFAULT_BACKEND_PORT = '3100';
@@ -31,6 +37,13 @@ let dynamicRegistryStatus = {
   isError: false,
   loading: false,
 };
+let serviceManagerSnapshot = { services: [] };
+let serviceManagerStatus = {
+  text: '后端未连接，服务管理不可用。',
+  isError: false,
+  loading: false,
+};
+const serviceManagerActionInflight = new Set();
 let activeDynamicApp = null;
 let characterRuntimeSettingsState = {
   threadId: '',
@@ -2649,6 +2662,82 @@ function setDynamicRegistryStatus(text, isError = false, loading = false) {
   renderDynamicRegistryStatus();
 }
 
+function renderServiceManagerStatus() {
+  if (dom.serviceManagerStatus) {
+    dom.serviceManagerStatus.textContent = serviceManagerStatus.text;
+    dom.serviceManagerStatus.classList.toggle('registry-status-error', Boolean(serviceManagerStatus.isError));
+  }
+  if (dom.serviceManagerRefreshButton) {
+    dom.serviceManagerRefreshButton.disabled = Boolean(serviceManagerStatus.loading);
+    dom.serviceManagerRefreshButton.textContent = serviceManagerStatus.loading ? '刷新中...' : '刷新服务状态';
+  }
+}
+
+function setServiceManagerStatus(text, isError = false, loading = false) {
+  serviceManagerStatus = { text, isError, loading };
+  renderServiceManagerStatus();
+}
+
+function renderServiceManagerPanel() {
+  renderServiceManagerStatus();
+  if (!dom.serviceManagerList) return;
+
+  const targets = getManagedServiceTargets({ serviceManagerSnapshot, dynamicAppRegistry });
+  const snapshot = serviceManagerSnapshot || { services: [], byId: new Map() };
+
+  dom.serviceManagerList.innerHTML = targets.map((target) => {
+    const service = snapshot.byId?.get?.(target.serviceId) || null;
+    const availability = service?.availability || '';
+    const provider = service?.provider || '';
+    const state = service?.state || '';
+    const message = service?.message || '';
+    const hasService = Boolean(service);
+    const inflight = serviceManagerActionInflight.has(target.serviceId);
+    const openDisabled = target.open?.kind === 'url' && !target.open.url;
+    const actionDisabled = !backendEnabled || inflight;
+
+    const pills = [
+      availability ? `<span class="service-pill service-pill-strong">${escapeHtml(availability)}</span>` : '',
+      provider ? `<span class="service-pill">${escapeHtml(provider)}</span>` : '',
+    ].filter(Boolean).join('');
+
+    const kindLabel = target.kind === 'standalone'
+      ? 'standalone'
+      : target.kind === 'dynamic'
+        ? 'dynamic'
+        : 'service-manager';
+    const subtitleBits = [kindLabel, target.serviceId].filter(Boolean).join(' · ');
+
+    return `
+      <article class="service-card" data-service-card="${escapeHtml(target.serviceId)}">
+        <div class="service-topline">
+          <div>
+            <strong>${escapeHtml(target.label)}</strong>
+            <p>${escapeHtml(subtitleBits)}</p>
+          </div>
+          <span class="runtime-pill">${escapeHtml(state || (hasService ? 'unknown' : 'unavailable'))}</span>
+        </div>
+        <div class="service-pill-row">${pills || '<span class="service-pill">未返回服务状态</span>'}</div>
+        ${message ? `<p>${escapeHtml(message)}</p>` : ''}
+        <div class="service-actions">
+          <button type="button" class="secondary-button small-button" data-service-action="refresh" data-service-id="${escapeHtml(target.serviceId)}" ${serviceManagerStatus.loading ? 'disabled' : ''}>刷新</button>
+          <button type="button" class="secondary-button small-button" data-service-action="start" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>启动</button>
+          <button type="button" class="secondary-button small-button" data-service-action="stop" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>停止</button>
+          <button type="button" class="secondary-button small-button" data-service-action="restart" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>重启</button>
+          <button type="button" class="soft-button small-button" data-service-action="open" data-service-id="${escapeHtml(target.serviceId)}" ${(openDisabled || inflight) ? 'disabled' : ''}>打开</button>
+        </div>
+      </article>
+    `;
+  }).join('');
+
+  dom.serviceManagerList.querySelectorAll('[data-service-action][data-service-id]').forEach((button) => {
+    const serviceId = button.dataset.serviceId;
+    const action = button.dataset.serviceAction;
+    if (!serviceId || !action) return;
+    button.addEventListener('click', () => void handleServiceManagerAction(serviceId, action));
+  });
+}
+
 function summarizeDynamicRegistry(registry) {
   const visibleCount = Array.isArray(registry?.dynamicAppEntries) ? registry.dynamicAppEntries.length : 0;
   if (visibleCount) return `已载入 ${visibleCount} 个动态 App。`;
@@ -2750,6 +2839,7 @@ async function refreshDynamicAppRegistry({ manual = false } = {}) {
     renderDesktopApps();
     renderDesktopBadge();
     syncActiveDynamicAppAfterRegistryRefresh();
+    renderServiceManagerPanel();
     return false;
   }
 
@@ -2762,6 +2852,7 @@ async function refreshDynamicAppRegistry({ manual = false } = {}) {
     renderDesktopApps();
     renderDesktopBadge();
     syncActiveDynamicAppAfterRegistryRefresh();
+    renderServiceManagerPanel();
     return true;
   } catch {
     const hasExistingEntries = Boolean(dynamicAppRegistry.dynamicAppEntries?.length);
@@ -2773,8 +2864,185 @@ async function refreshDynamicAppRegistry({ manual = false } = {}) {
       dynamicAppRegistry = { dynamicAppEntries: [] };
       renderDesktopApps();
       renderDesktopBadge();
+      renderServiceManagerPanel();
     }
     return false;
+  }
+}
+
+async function fetchServiceManagerHealth() {
+  return requestBackend('/service-manager/health', { preserveBackendOnError: true });
+}
+
+async function fetchServiceManagerServices() {
+  return requestBackend('/service-manager/services', { preserveBackendOnError: true });
+}
+
+async function fetchServiceManagerServiceStatus(serviceId) {
+  const normalizedId = String(serviceId || '').trim();
+  if (!normalizedId) throw new Error('缺少 serviceId');
+  return requestBackend(`/service-manager/services/${encodeURIComponent(normalizedId)}/status`, {
+    preserveBackendOnError: true,
+  });
+}
+
+async function refreshServiceManagerSnapshot({ manual = false } = {}) {
+  if (serviceManagerStatus.loading) return false;
+  setServiceManagerStatus('正在刷新服务状态...', false, true);
+
+  if (!backendEnabled && manual) {
+    try {
+      await bootstrapState();
+    } catch {}
+  }
+
+  if (!backendEnabled) {
+    serviceManagerSnapshot = { services: [], byId: new Map() };
+    setServiceManagerStatus('后端未连接，服务管理不可用。');
+    renderServiceManagerPanel();
+    return false;
+  }
+
+  try {
+	    await fetchServiceManagerHealth();
+    const payload = await fetchServiceManagerServices();
+    const definitions = buildServiceManagerDefinitions(payload);
+
+    const statusResults = await Promise.allSettled(definitions.map(async (def) => {
+      const statusPayload = await fetchServiceManagerServiceStatus(def.id);
+      return mergeServiceManagerDefinitionWithStatus(def, statusPayload);
+	    }));
+
+    const services = statusResults
+      .map((result, index) => {
+        if (result.status === 'fulfilled') return result.value;
+        const error = result.reason instanceof Error ? result.reason.message : 'status unavailable';
+        return createServiceFromDefinition(definitions[index], {
+          state: 'unknown',
+          message: error,
+          raw: { error },
+        });
+      })
+      .filter(Boolean);
+
+    serviceManagerSnapshot = {
+      services,
+      byId: new Map(services.map((service) => [service.id, service])),
+      definitions,
+    };
+
+    const count = definitions.length;
+    setServiceManagerStatus(count ? `已载入 ${count} 个服务。` : '服务管理可用，但未返回服务列表。');
+    renderServiceManagerPanel();
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '服务状态刷新失败';
+    setServiceManagerStatus(`服务状态刷新失败：${message}`, true);
+    renderServiceManagerPanel();
+    return false;
+  }
+}
+
+async function callServiceManagerAction(serviceId, action) {
+  const normalizedId = String(serviceId || '').trim();
+  const normalizedAction = String(action || '').trim().toLowerCase();
+  if (!normalizedId) throw new Error('缺少 serviceId');
+  if (!normalizedAction) throw new Error('缺少 action');
+
+  if (!['start', 'stop', 'restart'].includes(normalizedAction)) {
+    throw new Error(`不支持的服务操作：${normalizedAction}`);
+  }
+
+  return requestBackend(`/service-manager/services/${encodeURIComponent(normalizedId)}/${normalizedAction}`, {
+    method: 'POST',
+    preserveBackendOnError: true,
+  });
+}
+
+function openServiceTarget(target) {
+  const open = target?.open || null;
+  if (!open || typeof open !== 'object') return;
+
+  if (open.kind === 'static-app') {
+    if (open.appId === 'like-girl') setLikeGirlLaunch(open.path || '');
+    if (open.appId === 'like-girl-clone') setLikeGirlCloneLaunch(open.path || '');
+    closePanel();
+    setPhoneShell('app');
+    setActiveView(open.appId);
+    refreshRegisteredApps();
+    return;
+  }
+
+  if (open.kind === 'dynamic-entry') {
+    const instanceId = String(open.instanceId || '').trim();
+    const entry = (dynamicAppRegistry.dynamicAppEntries || []).find((item) => (
+      String(item?.instanceId || item?.id || '').trim() === instanceId
+    )) || null;
+    if (entry) {
+      openDynamicApp(entry);
+    } else {
+      setServiceManagerStatus('未找到对应动态 App。', true);
+      renderServiceManagerPanel();
+    }
+    return;
+  }
+
+  if (open.kind === 'url') {
+    const url = String(open.url || '').trim();
+    if (!url) return;
+    openDynamicApp({
+      id: `service:${target.serviceId}`,
+      instanceId: `service:${target.serviceId}`,
+      appId: 'service',
+      name: target.label || target.serviceId,
+      title: target.label || target.serviceId,
+      launchUrl: url,
+      launchSource: 'service.url',
+      dynamic: true,
+    });
+  }
+}
+
+async function handleServiceManagerAction(serviceId, action) {
+  const normalizedId = String(serviceId || '').trim();
+  const normalizedAction = String(action || '').trim().toLowerCase();
+  if (!normalizedId || !normalizedAction) return;
+
+  if (normalizedAction === 'open') {
+    const target = getManagedServiceTargets({ serviceManagerSnapshot, dynamicAppRegistry })
+      .find((item) => item.serviceId === normalizedId) || null;
+    if (!target) {
+      setServiceManagerStatus(`无法打开：未知服务 ${normalizedId}`, true);
+      return;
+    }
+    openServiceTarget(target);
+    return;
+  }
+
+  if (normalizedAction === 'refresh') {
+    await refreshServiceManagerSnapshot({ manual: true });
+    return;
+  }
+
+  if (!backendEnabled) {
+    setServiceManagerStatus('后端未连接，无法操作服务。', true);
+    return;
+  }
+
+  if (serviceManagerActionInflight.has(normalizedId)) return;
+  serviceManagerActionInflight.add(normalizedId);
+  renderServiceManagerPanel();
+
+  try {
+    await callServiceManagerAction(normalizedId, normalizedAction);
+    await refreshServiceManagerSnapshot({ manual: false });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '服务操作失败';
+    setServiceManagerStatus(`服务操作失败：${message}`, true);
+    renderServiceManagerPanel();
+  } finally {
+    serviceManagerActionInflight.delete(normalizedId);
+    renderServiceManagerPanel();
   }
 }
 
@@ -3723,6 +3991,7 @@ function renderAll() {
   renderJournals();
   refreshRegisteredApps();
   renderDynamicRegistryStatus();
+  renderServiceManagerPanel();
   renderDynamicAppView();
   renderProfile();
   renderDesktopBadge();
@@ -4138,6 +4407,10 @@ dom.appRegistryRefreshButton?.addEventListener('click', () => {
   void refreshDynamicAppRegistry({ manual: true });
 });
 
+dom.serviceManagerRefreshButton?.addEventListener('click', () => {
+  void refreshServiceManagerSnapshot({ manual: true });
+});
+
 dom.appManagerForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   const url = normalizeStandaloneUrl(dom.likeGirlServiceUrlInput?.value);
@@ -4280,7 +4553,10 @@ window.setInterval(updateClock, 60 * 1000);
 setActiveView('messages');
 
 bootstrapState()
-  .then(() => refreshDynamicAppRegistry())
+  .then(async () => {
+    await refreshDynamicAppRegistry();
+    await refreshServiceManagerSnapshot();
+  })
   .finally(() => {
     renderAll();
     setChatStatus(
