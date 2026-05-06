@@ -6,6 +6,25 @@ export const panelTitle = document.querySelector('#panel-title');
 export const panelEyebrow = document.querySelector('#panel-eyebrow');
 export const panelBackButton = document.querySelector('#panel-back-button');
 export const closePanelButton = document.querySelector('#close-panel');
+
+function selectAny(selectors) {
+  for (const selector of selectors) {
+    const el = document.querySelector(selector);
+    if (el) return el;
+  }
+  return null;
+}
+
+function selectAllAny(selectors) {
+  for (const selector of selectors) {
+    const list = document.querySelectorAll(selector);
+    if (list?.length) return list;
+  }
+  return document.querySelectorAll('[data-dom-empty-node-list]');
+}
+
+export const safeQuery = (selector) => document.querySelector(selector);
+export const safeQueryAll = (selector) => document.querySelectorAll(selector);
 export const lockScreen = document.querySelector('#lock-screen');
 export const desktopScreen = document.querySelector('#desktop-screen');
 export const unlockButton = document.querySelector('#unlock-button');
@@ -60,27 +79,52 @@ export const dynamicAppFrame = document.querySelector('#dynamic-app-frame');
 export const dynamicAppEmpty = document.querySelector('#dynamic-app-empty');
 
 export const messageList = document.querySelector('#message-list');
+export const messageOverview = selectAny(['#message-overview', '[data-message-overview]', '.message-overview']);
+export const messageOverviewTitle = selectAny(['#message-overview-title', '[data-message-overview-title]']);
+export const messageOverviewSubtitle = selectAny(['#message-overview-subtitle', '[data-message-overview-subtitle]']);
+export const messageOverviewBadge = selectAny(['#message-overview-badge', '[data-message-overview-badge]', '.message-overview-badge']);
+export const messageSearchInput = selectAny(['#message-search', '#message-search-input', '[data-message-search]', 'input[name="message-search"]']);
+export const messageFilterControls = selectAny(['#message-filter-controls', '[data-message-filters]', '.message-filter-controls']);
+export const messageFilterButtons = selectAllAny(['[data-message-filter]', '[data-message-filter-kind]', '.message-filter [data-filter]', '.message-filter-button']);
 export const contactList = document.querySelector('#contact-list');
+export const contactOverview = selectAny(['#contact-overview', '[data-contact-overview]', '.contact-overview']);
+export const contactSearchInput = selectAny(['#contact-search', '#contact-search-input', '[data-contact-search]', 'input[name="contact-search"]']);
+export const contactFilterControls = selectAny(['#contact-filter-controls', '[data-contact-filters]', '.contact-filter-controls']);
+export const contactCategorySelect = selectAny(['#contact-category', '#contact-category-select', '[data-contact-category]']);
+export const contactCategoryButtons = selectAllAny(['[data-contact-category]', '[data-contact-segment]', '.contact-category [data-category]']);
 export const momentsList = document.querySelector('#moments-list');
 export const momentsMainList = document.querySelector('#moments-main-list');
 export const forumList = document.querySelector('#forum-list');
 export const memoryList = document.querySelector('#memory-list');
-export const worldbookList = document.querySelector('#worldbook-list');
 export const journalList = document.querySelector('#journal-list');
 export const characterHighlight = document.querySelector('#character-highlight');
 export const promptPreview = document.querySelector('#prompt-preview');
 export const permissionContactSelect = document.querySelector('#permission-contact-select');
-export const permissionPanelSummary = document.querySelector('#permission-panel-summary');
-export const permissionPanelSource = document.querySelector('#permission-panel-source');
+export const permissionPanelSummary = selectAny([
+  '#permission-panel-summary',
+  '[data-permission-panel-summary]',
+  '[data-permission-summary]',
+]);
+export const permissionPanelSource = selectAny([
+  '#permission-panel-source',
+  '[data-permission-panel-source]',
+  '[data-permission-source]',
+]);
 export const permissionTemplateGrid = document.querySelector('#permission-template-grid');
 export const permissionDecisionStack = document.querySelector('#permission-decision-stack');
+export const permissionCapabilitiesContainer = selectAny([
+  '#permission-capabilities',
+  '[data-permission-capabilities]',
+  '.permission-capabilities',
+]);
+export const permissionCapabilityCards = selectAllAny([
+  '[data-permission-capability]',
+  '[data-capability]',
+  '.permission-capability',
+]);
 
 export const memoryForm = document.querySelector('#memory-form');
 export const memoryInput = document.querySelector('#memory-input');
-export const worldbookForm = document.querySelector('#worldbook-form');
-export const worldbookTitleInput = document.querySelector('#worldbook-title');
-export const worldbookKeysInput = document.querySelector('#worldbook-keys');
-export const worldbookTextInput = document.querySelector('#worldbook-text');
 export const momentsForm = document.querySelector('#moments-form');
 export const momentsInput = document.querySelector('#moments-input');
 export const momentsMainForm = document.querySelector('#moments-main-form');
@@ -92,6 +136,20 @@ export const journalForm = document.querySelector('#journal-form');
 export const journalTitle = document.querySelector('#journal-title');
 export const journalInput = document.querySelector('#journal-input');
 export const settingsForm = document.querySelector('#settings-form');
+export const settingsSecondaryActions = selectAllAny([
+  '[data-panel="settings"] .secondary-button',
+  '[data-settings-secondary-action]',
+  '#settings-secondary-actions button',
+]);
+export const settingsDetailsContainer = selectAny([
+  '#settings-details',
+  '[data-settings-details]',
+  '[data-panel="settings"] .settings-details',
+]);
+export const settingsInfoCards = selectAllAny([
+  '[data-panel="settings"] .info-card',
+  '[data-settings-info-card]',
+]);
 export const themeSelect = document.querySelector('#theme-select');
 export const apiNameInput = document.querySelector('#api-name');
 export const apiUrlInput = document.querySelector('#api-url');
@@ -101,6 +159,14 @@ export const temperatureInput = document.querySelector('#temperature');
 export const maxTokensInput = document.querySelector('#max-tokens');
 export const systemPromptInput = document.querySelector('#system-prompt');
 export const appManagerForm = document.querySelector('#app-manager-form');
+export const appManagerActions = selectAny(['.app-manager-actions', '#app-manager-actions', '[data-app-manager-actions]']);
+export const appManagerCards = selectAllAny(['[data-app-manager-card]', '.app-manager-card', '[data-panel="app-manager"] .info-card']);
+export const appManagerStatusElements = selectAllAny([
+  '#service-manager-status',
+  '#app-registry-status',
+  '[data-app-manager-status]',
+  '.registry-status',
+]);
 export const likeGirlServiceUrlInput = document.querySelector('#like-girl-service-url');
 export const likeGirlCloneServiceUrlInput = document.querySelector('#like-girl-clone-service-url');
 export const likeGirlOpenPublicButton = document.querySelector('#like-girl-open-public');
@@ -134,6 +200,9 @@ export const myBioInput = document.querySelector('#my-bio');
 export const myPreviewName = document.querySelector('#my-preview-name');
 export const myPreviewSignature = document.querySelector('#my-preview-signature');
 export const characterForm = document.querySelector('#character-form');
+export const characterSection = selectAny(['#character-section', '[data-panel="character"]', '[data-character-section]']);
+export const characterSectionTabs = selectAllAny(['[data-character-tab]', '[data-character-section-tab]', '.character-tabs [role="tab"]']);
+export const characterSectionControls = selectAllAny(['[data-character-control]', '[data-character-action]', '.character-controls button']);
 export const characterSelect = document.querySelector('#character-select');
 export const characterNameInput = document.querySelector('#character-name');
 export const characterAvatarPreview = document.querySelector('#character-avatar-preview');
@@ -159,9 +228,7 @@ export const characterTimeInjectionToggle = document.querySelector('#character-t
 export const characterTimezoneInput = document.querySelector('#character-timezone');
 export const characterSubtitleInput = document.querySelector('#character-subtitle');
 export const characterSummaryInput = document.querySelector('#character-summary');
-export const characterPersonalityInput = document.querySelector('#character-personality');
-export const characterScenarioInput = document.querySelector('#character-scenario');
-export const characterSystemPromptInput = document.querySelector('#character-system-prompt');
+export const characterCardTextInput = document.querySelector('#character-card-text');
 export const characterProactiveToggle = document.querySelector('#character-proactive-toggle');
 export const characterSubmitButton = document.querySelector('#character-submit-button');
 

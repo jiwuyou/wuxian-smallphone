@@ -1,4 +1,4 @@
-import * as dom from './dom.js?v=14';
+import * as dom from './dom.js?v=15';
 import {
   appModules,
   appSpaceTemplates,
@@ -6,7 +6,7 @@ import {
   mergeStaticAndDynamicDesktopApps,
   registeredApps,
 } from './app-registry.js?v=9';
-import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=8';
+import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=9';
 import {
   buildServiceManagerDefinitions,
   createServiceFromDefinition,
@@ -63,10 +63,8 @@ const recentPersistedAssistantByThreadId = new Map();
 const CORE_DESKTOP_APPS = [
   { id: 'messages', name: '消息', shortName: '聊', orbClass: 'orb-chat', target: 'messages', badge: 'unread' },
   { id: 'contacts', name: '联系人', shortName: '人', orbClass: 'orb-character', target: 'contacts' },
-  { id: 'character', name: '角色', shortName: '角', orbClass: 'orb-world', panel: 'character' },
-  { id: 'app-manager', name: 'App 管理', shortName: '管', orbClass: 'orb-app-manager', panel: 'app-manager' },
-  { id: 'settings', name: '调试', shortName: '调', orbClass: 'orb-settings', panel: 'settings' },
-  { id: 'permissions', name: '权限', shortName: '权', orbClass: 'orb-permission', panel: 'permissions' },
+  { id: 'app-manager', name: '应用管理', shortName: '管', orbClass: 'orb-app-manager', panel: 'app-manager' },
+  { id: 'settings', name: '设置', shortName: '设', orbClass: 'orb-settings', panel: 'settings' },
 ];
 
 const CORE_DESKTOP_APP_ALIASES = [
@@ -96,6 +94,24 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function extractCardTextLineValue(cardText, labels = []) {
+  const text = String(cardText || '').trim();
+  if (!text) return '';
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    for (const label of labels) {
+      const prefix = String(label || '').trim();
+      if (!prefix) continue;
+      if (line.startsWith(prefix)) {
+        let rest = line.slice(prefix.length);
+        if (rest.startsWith(':') || rest.startsWith('：')) rest = rest.slice(1);
+        return rest.trim();
+      }
+    }
+  }
+  return '';
 }
 
 function normalizeApiBaseUrl(url) {
@@ -189,7 +205,7 @@ async function apiRequest(path, init = {}) {
 
 function replaceState(nextState) {
   const defaults = cloneDefaultState();
-  const incoming = JSON.parse(JSON.stringify(nextState));
+  const incoming = sanitizeIncomingReplaceStatePayload(JSON.parse(JSON.stringify(nextState)));
   const cloned = {
     ...defaults,
     ...incoming,
@@ -223,6 +239,65 @@ function replaceState(nextState) {
   });
   Object.assign(state, cloned);
   saveState();
+}
+
+function sanitizeIncomingReplaceStatePayload(payload) {
+  const incoming = payload && typeof payload === 'object' ? payload : {};
+
+  // Legacy state shape: `worldbook` previously lived at the root. We no longer
+  // want it to survive a backend-driven replaceState, otherwise it keeps getting
+  // re-saved even though the UI doesn't use it anymore.
+  if (Object.prototype.hasOwnProperty.call(incoming, 'worldbook')) {
+    delete incoming.worldbook;
+  }
+
+  const chats = incoming.chats;
+  if (!chats || typeof chats !== 'object') return incoming;
+
+  Object.entries(chats).forEach(([, chat]) => {
+    if (!chat || typeof chat !== 'object') return;
+
+    // Drop deprecated per-chat fields. Do NOT migrate these into `cardText`;
+    // preserve `cardText` as-is if it already exists.
+    [
+      'personality',
+      'scenario',
+      'systemPrompt',
+      'system_prompt',
+      'worldbook',
+      'worldbookContent',
+      'worldbook_content',
+      'data',
+      // Legacy role-card fields commonly carried over from imports.
+      'first_mes',
+      'firstMes',
+      'firstMessage',
+      'greeting',
+      'mes_example',
+      'mesExample',
+      'example_dialogue',
+      'exampleDialogue',
+      'post_history_instructions',
+      'postHistoryInstructions',
+      'creator_notes',
+      'creatorNotes',
+      'alternate_greetings',
+      'alternateGreetings',
+      'character_book',
+      'characterBook',
+      // Legacy card wrappers.
+      'roleCard',
+      'role_card',
+      'characterCard',
+      'character_card',
+    ].forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(chat, key)) {
+        delete chat[key];
+      }
+    });
+  });
+
+  return incoming;
 }
 
 function getChatEntries(source = state) {
@@ -632,16 +707,6 @@ function mapMessagesToChatMessages(messages) {
     .filter((message) => message.text || message.attachments.length || message.actions.length);
 }
 
-function mapWorldbookEntriesToFrontendWorldbook(entries) {
-  return (Array.isArray(entries) ? entries : []).map((entry) => ({
-    title: String(entry.name || '未命名词条').trim(),
-    text: String(entry.content || '').trim(),
-    tags: Array.isArray(entry.tags) ? entry.tags.map((tag) => String(tag)).filter(Boolean) : [],
-    keys: Array.isArray(entry.triggers?.keywords) ? entry.triggers.keywords.map((key) => String(key)).filter(Boolean) : [],
-    enabled: entry.enabled !== false,
-  }));
-}
-
 function buildReminderIndex(reminders) {
   const map = new Map();
   for (const reminder of Array.isArray(reminders) ? reminders : []) {
@@ -653,18 +718,9 @@ function buildReminderIndex(reminders) {
   return map;
 }
 
-function findThreadScopedWorldbookEntry(entries, contactId, threadId) {
-  return (Array.isArray(entries) ? entries : []).find((entry) => {
-    const contactIds = Array.isArray(entry?.triggers?.contactIds) ? entry.triggers.contactIds : [];
-    const threadIds = Array.isArray(entry?.triggers?.threadIds) ? entry.triggers.threadIds : [];
-    return contactIds.includes(contactId) || threadIds.includes(threadId);
-  }) || null;
-}
-
-function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntries, previousChat }) {
+function mapThreadToChat({ thread, contact, messages, reminders, previousChat }) {
   const relationshipState = thread?.relationshipState || contact?.relationshipState || null;
   const character = contact?.character || null;
-  const scopedWorldbook = findThreadScopedWorldbookEntry(worldbookEntries, contact?.id, thread?.id);
   const timeSettings = normalizeTimeSettings(thread?.timeSettings || contact?.timeSettings || previousChat?.timeSettings || {});
   const waifuTextSettings = normalizeWaifuSettings(previousChat?.waifuTextSettings || {});
   const chatKey = String(thread?.id || '').trim();
@@ -698,6 +754,13 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
   const fallbackDescription = previousDescription && previousDescription !== latestMessageText && previousDescription !== threadSummary
     ? previousDescription
     : '这个联系人正在通过 SmallPhone 后端提供回复。';
+  const cardText = (() => {
+    const backendCardText = String(character?.cardText || '').trim();
+    const previousCardText = String(previousChat?.cardText || '').trim();
+    if (backendCardText) return backendCardText;
+    if (previousCardText) return previousCardText;
+    return '';
+  })();
 
   return {
     name: String(contact?.displayName || thread?.title || character?.name || '未命名联系人').trim(),
@@ -715,9 +778,7 @@ function mapThreadToChat({ thread, contact, messages, reminders, worldbookEntrie
     agentType: normalizeAgentType(thread?.runtime?.agentType || previousChat?.agentType),
     waifuTextSettings,
     timeSettings,
-    personality: String(character?.style || previousChat?.personality || '').trim(),
-    scenario: String(relationshipState?.guidance?.join(' / ') || previousChat?.scenario || '').trim(),
-    systemPrompt: String(scopedWorldbook?.content || previousChat?.systemPrompt || '').trim(),
+    cardText,
     pendingOutbox,
     messages: [...chatMessages, ...pendingMessages],
     backend: {
@@ -783,9 +844,7 @@ function createBlankChatDraft() {
       agentType: '',
       waifuTextSettings: normalizeWaifuSettings({}),
       timeSettings: normalizeTimeSettings({ timezone: getBrowserTimezone() }),
-      personality: '',
-      scenario: '',
-      systemPrompt: '',
+      cardText: '',
       messages: [],
     },
   };
@@ -795,7 +854,6 @@ function mapBootstrapToFrontendState(snapshot, previousState = state) {
   const bootstrap = snapshot?.bootstrap || {};
   const threadList = Array.isArray(bootstrap.threads) ? bootstrap.threads : [];
   const contactList = Array.isArray(bootstrap.contacts) ? bootstrap.contacts : [];
-  const worldbookEntries = Array.isArray(snapshot?.worldbookEntries) ? snapshot.worldbookEntries : [];
   const reminderIndex = buildReminderIndex(snapshot?.reminders || []);
   const messagesByThreadId = snapshot?.messagesByThreadId || {};
   const contactsById = new Map(contactList.map((contact) => [contact.id, contact]));
@@ -807,7 +865,6 @@ function mapBootstrapToFrontendState(snapshot, previousState = state) {
       contact,
       messages: messagesByThreadId[thread.id],
       reminders: reminderIndex.get(thread.id) || [],
-      worldbookEntries,
       previousChat,
     })];
   }));
@@ -815,14 +872,12 @@ function mapBootstrapToFrontendState(snapshot, previousState = state) {
   return {
     ...previousState,
     chats,
-    worldbook: mapWorldbookEntriesToFrontendWorldbook(worldbookEntries),
   };
 }
 
 async function loadBackendSnapshot(requester = apiRequest, options = {}) {
-  const [bootstrap, worldbookEntries, reminders] = await Promise.all([
+  const [bootstrap, reminders] = await Promise.all([
     requester('/bootstrap'),
-    requester('/worldbook'),
     requester('/reminders'),
   ]);
   const messagesByThreadId = {};
@@ -832,7 +887,6 @@ async function loadBackendSnapshot(requester = apiRequest, options = {}) {
   }
   return {
     bootstrap,
-    worldbookEntries,
     reminders,
     messagesByThreadId,
   };
@@ -991,12 +1045,17 @@ async function syncCharacterEdits(threadId, chat) {
     saveState();
     return false;
   }
+  const cardText = String(chat.cardText || '').trim();
+  const personaFromCard = extractCardTextLineValue(cardText, ['描述', '简介', 'Description']);
+  const styleFromCard = extractCardTextLineValue(cardText, ['性格', '风格', 'Style']);
+  const persona = (String(chat.description || '').trim() || personaFromCard || chat.name).trim();
+  const style = (styleFromCard || chat.subtitle || 'concise, private, mobile-native').trim();
   const payload = {
     name: chat.name,
     displayName: chat.name,
-    style: chat.personality || chat.subtitle || 'concise, private, mobile-native',
-    persona: [chat.description, chat.scenario].filter(Boolean).join('\n\n') || chat.description || chat.name,
-    worldbookContent: [chat.systemPrompt, chat.scenario, chat.description].filter(Boolean).join('\n\n') || chat.description || chat.name,
+    style,
+    persona,
+    cardText,
     threadSummary: chat.summary || chat.description || chat.name,
     roleLevel: normalizeRoleLevel(chat.roleLevel),
     agentType: normalizeAgentType(chat.agentType),
@@ -1041,12 +1100,17 @@ function resolveChatKeyByBackendContactId(contactId) {
 }
 
 function buildCompanionPayload(chat) {
+  const cardText = String(chat?.cardText || '').trim();
+  const personaFromCard = extractCardTextLineValue(cardText, ['描述', '简介', 'Description']);
+  const styleFromCard = extractCardTextLineValue(cardText, ['性格', '风格', 'Style']);
+  const persona = (String(chat.description || '').trim() || personaFromCard || chat.name).trim();
+  const style = (styleFromCard || chat.subtitle || 'concise, private, mobile-native').trim();
   return {
     name: chat.name,
     displayName: chat.name,
-    style: chat.personality || chat.subtitle || 'concise, private, mobile-native',
-    persona: [chat.description, chat.scenario].filter(Boolean).join('\n\n') || chat.description || chat.name,
-    worldbookContent: [chat.systemPrompt, chat.scenario, chat.description].filter(Boolean).join('\n\n') || chat.description || chat.name,
+    style,
+    persona,
+    cardText,
     threadSummary: chat.summary || chat.description || chat.name,
     roleLevel: normalizeRoleLevel(chat.roleLevel),
     agentType: normalizeAgentType(chat.agentType),
@@ -1078,31 +1142,6 @@ function discardUnsavedContactDraft() {
     delete state.chats[characterCreateDraftKey];
   }
   characterCreateDraftKey = '';
-}
-
-async function syncWorldbookEntry(entry) {
-  const result = await requestBackend('/worldbook', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: entry.title,
-      content: entry.text,
-      enabled: entry.enabled !== false,
-      tags: Array.isArray(entry.tags) ? entry.tags : [],
-      triggers: {
-        keywords: Array.isArray(entry.keys) ? entry.keys : [],
-        contactIds: [],
-        threadIds: [],
-        requiresTags: [],
-        excludesTags: [],
-      },
-      scope: 'global',
-      type: 'lore',
-      mode: 'always_on',
-      priority: 50,
-    }),
-  });
-  state.worldbook = mapWorldbookEntriesToFrontendWorldbook(result);
-  saveState();
 }
 
 async function loadActivePermissions({ force = false } = {}) {
@@ -1143,7 +1182,7 @@ function getAgentModeOptions(agentType) {
       { key: 'acceptEdits', label: '接受编辑 · 自动允许文件编辑' },
       { key: 'plan', label: '计划模式 · 只规划不执行' },
       { key: 'auto', label: '自动模式 · Claude 判断何时确认' },
-      { key: 'bypassPermissions', label: 'YOLO · 全部自动通过' },
+      { key: 'bypassPermissions', label: '完全自动模式（高风险） · 全部自动通过' },
       { key: 'dontAsk', label: '静默拒绝 · 未授权工具自动拒绝' },
     ];
   }
@@ -1151,7 +1190,7 @@ function getAgentModeOptions(agentType) {
     { key: 'suggest', label: '建议 · 每次工具调用确认' },
     { key: 'auto-edit', label: '自动编辑 · 文件编辑自动通过' },
     { key: 'full-auto', label: '全自动 · 工作区沙箱内自动通过' },
-    { key: 'yolo', label: 'YOLO · 跳过审批和沙箱' },
+    { key: 'yolo', label: '完全自动模式（高风险） · 跳过审批与沙箱' },
   ];
 }
 
@@ -1304,7 +1343,7 @@ function renderCharacterRuntimeSettings({ preserveControlValues = false } = {}) 
   } else if (phase === 'error') {
     statusText = runtimeState?.error ? `错误 · ${runtimeState.error}` : '读取失败';
   } else if (phase === 'unavailable') {
-    statusText = runtimeState?.reason || 'Runtime 项目不可用';
+    statusText = runtimeState?.reason || '运行时项目不可用';
   }
 
   dom.characterRuntimeStatus.textContent = statusText;
@@ -1349,7 +1388,7 @@ async function loadCharacterRuntimeSettingsForCurrent({ force = false } = {}) {
     setCharacterRuntimeSettingsState({
       threadId: '',
       phase: 'creating',
-      reason: '创建联系人后可编辑 9840 Runtime。',
+      reason: '创建联系人后可编辑高级运行设置。',
     });
     renderCharacterRuntimeSettings();
     return characterRuntimeSettingsState;
@@ -1360,7 +1399,7 @@ async function loadCharacterRuntimeSettingsForCurrent({ force = false } = {}) {
     setCharacterRuntimeSettingsState({
       threadId,
       phase: 'unavailable',
-      reason: backendEnabled ? '当前联系人缺少后端 thread。' : '后端未连接，无法读取 9840 Runtime。',
+      reason: backendEnabled ? '当前联系人缺少后端会话。' : '后端未连接，无法读取高级运行设置。',
     });
     renderCharacterRuntimeSettings();
     return characterRuntimeSettingsState;
@@ -1413,7 +1452,7 @@ async function loadCharacterRuntimeSettingsForCurrent({ force = false } = {}) {
       threadId,
       phase: 'unavailable',
       project: String(result?.project || chat?.backend?.runtimeProject || '').trim(),
-      reason: String(result?.reason || '9840 Runtime 项目不可用。').trim(),
+      reason: String(result?.reason || '运行时项目不可用。').trim(),
       settings: null,
     });
     renderCharacterRuntimeSettings();
@@ -1483,7 +1522,7 @@ async function saveCharacterRuntimeSettingsIfAvailable(threadId, chat = null) {
       threadId: targetThreadId,
       phase: 'unavailable',
       project: String(result?.project || characterRuntimeSettingsState.project || '').trim(),
-      reason: String(result?.reason || '9840 Runtime 项目不可用。').trim(),
+      reason: String(result?.reason || '运行时项目不可用。').trim(),
       settings: null,
     });
     return false;
@@ -1630,11 +1669,6 @@ async function fetchPromptPreviewFromBackend(userInput = '') {
     '[Context Preview]',
     payload?.activeMask ? `Mask: ${payload.activeMask.id} (${Number(payload.activeMask.confidence || 0).toFixed(2)})` : 'Mask: none',
     payload?.relationshipState ? `Relationship: ${payload.relationshipState.id} (${Number(payload.relationshipState.intensity || 0).toFixed(2)})` : 'Relationship: none',
-    '',
-    '[Matched Worldbook]',
-    Array.isArray(payload?.matchedWorldbookEntries)
-      ? payload.matchedWorldbookEntries.map((entry) => `- ${entry.name}: ${entry.content}`).join('\n')
-      : '',
     '',
     '[Reply Guidance]',
     Array.isArray(payload?.replyGuidance) ? payload.replyGuidance.map((item) => `- ${item}`).join('\n') : '',
@@ -1973,27 +2007,9 @@ function getRecentMemories(limit = 4) {
   return state.memories.slice(0, limit);
 }
 
-function matchWorldbookEntries(chat, userInput = '') {
-  const haystack = [
-    chat.name,
-    chat.description,
-    chat.personality || '',
-    chat.scenario || '',
-    userInput,
-    ...chat.messages.slice(-8).map((message) => message.text),
-  ].join('\n').toLowerCase();
-
-  return state.worldbook.filter((entry) => {
-    if (entry.enabled === false) return false;
-    const keys = Array.isArray(entry.keys) ? entry.keys : [];
-    if (!keys.length) return true;
-    return keys.some((key) => haystack.includes(String(key).toLowerCase()));
-  });
-}
-
 function buildPromptBundle(chat, userInput = '') {
   const memories = getRecentMemories();
-  const worldbookEntries = matchWorldbookEntries(chat, userInput);
+  const cardText = String(chat.cardText || '').trim();
   const systemParts = [
     state.apiSettings.systemPrompt,
     `当前用户人设`,
@@ -2004,23 +2020,14 @@ function buildPromptBundle(chat, userInput = '') {
     `当前角色卡`,
     `名字：${chat.name}`,
     `简介：${chat.description}`,
-    `性格：${chat.personality || '未设置'}`,
-    `场景：${chat.scenario || '未设置'}`,
-    `补充提示词：${chat.systemPrompt || '无'}`,
+    cardText ? '卡片内容：' : '卡片内容：未设置',
   ];
+  if (cardText) systemParts.push(cardText);
 
   if (memories.length) {
     systemParts.push('', '长期记忆');
     memories.forEach((memory, index) => {
       systemParts.push(`${index + 1}. ${memory.title}：${memory.text}`);
-    });
-  }
-
-  if (worldbookEntries.length) {
-    systemParts.push('', '命中的世界书词条');
-    worldbookEntries.forEach((entry, index) => {
-      const keywords = Array.isArray(entry.keys) && entry.keys.length ? `（关键词：${entry.keys.join('、')}）` : '';
-      systemParts.push(`${index + 1}. ${entry.title}${keywords}：${entry.text}`);
     });
   }
 
@@ -2420,10 +2427,8 @@ async function flushPendingOutbox() {
 }
 
 function buildFallbackReply(chat, userInput = '') {
-  const relatedEntry = matchWorldbookEntries(chat, userInput)[0];
   const memory = getRecentMemories(1)[0];
   const snippets = [
-    relatedEntry ? `想到${relatedEntry.title}这件事，${relatedEntry.text}` : '',
     memory ? `我也记得你之前提过：${memory.text}` : '',
     userInput ? `关于你刚才说的“${userInput}”，我想顺着这个感觉继续陪你聊。` : '如果继续说下去，我会先把这段气氛轻轻接住。',
   ].filter(Boolean);
@@ -2440,7 +2445,7 @@ async function generateAssistantReply(userInput = '', { continueOnly = false } =
 
   uiState.isGenerating = true;
   dom.chatInput.disabled = true;
-  setChatStatus('正在按角色卡、人设、世界书和记忆拼装上下文...');
+  setChatStatus('正在按角色卡、人设和记忆拼装上下文...');
 
   try {
     const bundle = buildPromptBundle(chat, continueOnly ? '' : userInput);
@@ -2488,7 +2493,7 @@ async function generateAssistantReply(userInput = '', { continueOnly = false } =
     renderLockNotification();
     renderChat();
     updatePromptPreview();
-    setChatStatus(apiUrl && apiKey ? '已通过 OpenAI 兼容接口生成回复。' : '当前未配置 API，已使用前端本地回退回复。');
+    setChatStatus(apiUrl && apiKey ? '已通过模型服务生成回复。' : '当前未连接模型服务，已使用本地演示回复。');
   } catch (error) {
     setChatStatus(error instanceof Error ? error.message : '生成失败', true);
   } finally {
@@ -3198,7 +3203,23 @@ function bindRegisteredApps() {
 function renderMessages() {
   dom.messageList.innerHTML = '';
 
-  Object.entries(state.chats).forEach(([key, chat]) => {
+  const entries = Object.entries(state.chats);
+  const unreadTotal = entries.reduce((sum, [, chat]) => sum + Number(chat.unread || 0), 0);
+  const latest = entries.find(([, chat]) => Number(chat.unread || 0) > 0) || entries[0];
+
+  if (dom.messageOverviewTitle) {
+    dom.messageOverviewTitle.textContent = latest?.[1]?.name
+      ? `最近联系人：${latest[1].name}`
+      : '最近联系人';
+  }
+  if (dom.messageOverviewSubtitle) {
+    dom.messageOverviewSubtitle.textContent = latest?.[1]?.summary || '从桌面进入消息后，继续最近的 AI 联系人对话。';
+  }
+  if (dom.messageOverviewBadge) {
+    dom.messageOverviewBadge.textContent = unreadTotal ? `${unreadTotal} 条未读` : '已读';
+  }
+
+  entries.forEach(([key, chat]) => {
     const button = document.createElement('button');
     button.className = 'message-item';
     button.dataset.openChat = key;
@@ -3220,10 +3241,31 @@ function renderMessages() {
   });
 }
 
+function getContactCategory(key, chat) {
+  if (key === 'group' || String(chat?.avatarText || '').includes('群') || String(chat?.subtitle || '').includes('人在线')) {
+    return 'groups';
+  }
+  return 'characters';
+}
+
+function matchesContactFilter(key, chat, filter) {
+  if (filter === 'all') return true;
+  if (filter === 'unread') return Number(chat?.unread || 0) > 0;
+  return getContactCategory(key, chat) === filter;
+}
+
 function renderContacts() {
   dom.contactList.innerHTML = '';
 
-  Object.entries(state.chats).forEach(([key, chat]) => {
+  const activeFilter = uiState.contactFilter || 'all';
+  dom.contactCategoryButtons?.forEach((button) => {
+    const value = button.dataset.contactCategory || button.dataset.contactSegment || '';
+    button.classList.toggle('filter-chip-active', value === activeFilter);
+  });
+
+  Object.entries(state.chats)
+    .filter(([key, chat]) => matchesContactFilter(key, chat, activeFilter))
+    .forEach(([key, chat]) => {
     const item = document.createElement('article');
     item.className = 'contact-item';
     item.innerHTML = `
@@ -3241,16 +3283,18 @@ function renderContacts() {
     dom.contactList.appendChild(item);
   });
 
-  const self = document.createElement('article');
-  self.className = 'contact-item';
-  self.innerHTML = `
-    ${renderAvatar(personaAvatarSource())}
-    <div class="contact-meta">
-      <strong>我的人设</strong>
-      <p class="contact-copy">${state.persona.bio}</p>
-    </div>
-  `;
-  dom.contactList.appendChild(self);
+  if (activeFilter === 'all') {
+    const self = document.createElement('article');
+    self.className = 'contact-item';
+    self.innerHTML = `
+      ${renderAvatar(personaAvatarSource())}
+      <div class="contact-meta">
+        <strong>我的人设</strong>
+        <p class="contact-copy">${state.persona.bio}</p>
+      </div>
+    `;
+    dom.contactList.appendChild(self);
+  }
 }
 
 function renderCharacterHighlight() {
@@ -3259,6 +3303,8 @@ function renderCharacterHighlight() {
     dom.characterHighlight.innerHTML = '';
     return;
   }
+  const cardText = String(chat.cardText || '').trim();
+  const cardTextPreview = cardText ? escapeHtml(cardText).replaceAll('\n', '<br>') : '未设置';
   dom.characterHighlight.innerHTML = `
     <div class="character-detail-top">
       ${renderAvatar(chat)}
@@ -3269,8 +3315,7 @@ function renderCharacterHighlight() {
       </div>
     </div>
     <div class="detail-copy">
-      <p><strong>性格：</strong>${escapeHtml(chat.personality || '未设置')}</p>
-      <p><strong>场景：</strong>${escapeHtml(chat.scenario || '未设置')}</p>
+      <p><strong>角色卡：</strong>${cardTextPreview}</p>
       <p><strong>主动联系：</strong>${chat.proactiveContactEnabled !== false ? '已开启' : '已关闭'}</p>
     </div>
     <div class="character-detail-actions">
@@ -3509,25 +3554,6 @@ function renderMemories() {
   });
 }
 
-function renderWorldbook() {
-  dom.worldbookList.innerHTML = '';
-
-  state.worldbook.forEach((entry) => {
-    const card = document.createElement('article');
-    card.className = 'world-card';
-    const keywords = Array.isArray(entry.keys) && entry.keys.length
-      ? `<div class="tag-row">${entry.keys.map((key) => `<span class="tag">${escapeHtml(key)}</span>`).join('')}</div>`
-      : '';
-    card.innerHTML = `
-      <strong>${escapeHtml(entry.title)}</strong>
-      <p>${escapeHtml(entry.text)}</p>
-      ${keywords}
-      <div class="tag-row">${entry.tags.map((tag) => `<span class="tag">${tag}</span>`).join('')}</div>
-    `;
-    dom.worldbookList.appendChild(card);
-  });
-}
-
 function renderJournals() {
   dom.journalList.innerHTML = '';
 
@@ -3623,9 +3649,9 @@ function renderCharacterEditor() {
   );
   dom.characterSubtitleInput.value = chat.subtitle;
   dom.characterSummaryInput.value = chat.summary;
-  dom.characterPersonalityInput.value = chat.personality || '';
-  dom.characterScenarioInput.value = chat.scenario || '';
-  dom.characterSystemPromptInput.value = chat.systemPrompt || '';
+  if (dom.characterCardTextInput) {
+    dom.characterCardTextInput.value = chat.cardText || '';
+  }
   dom.characterProactiveToggle.checked = chat.proactiveContactEnabled !== false;
   if (dom.characterWaifuTextModeToggle) dom.characterWaifuTextModeToggle.checked = waifuSettings.enabled;
   if (dom.characterWaifuRemovePunctuationToggle) dom.characterWaifuRemovePunctuationToggle.checked = waifuSettings.removePunctuation;
@@ -3737,26 +3763,27 @@ function renderPermissionContactSelect() {
 function renderPermissionPanel(errorMessage = '') {
   renderPermissionContactSelect();
   if (!dom.permissionTemplateGrid || !dom.permissionDecisionStack) return;
+  if (!dom.permissionPanelSummary || !dom.permissionPanelSource) return;
   const targetKey = resolvePermissionTargetChatKey();
   const chat = getPermissionTargetChat();
   const snapshot = uiState.permissionSnapshot;
   if (!backendEnabled) {
     dom.permissionPanelSummary.textContent = '当前为本地前端模式，权限需要连接 smallphone-app 后端。';
-    dom.permissionPanelSource.textContent = 'local';
+    dom.permissionPanelSource.textContent = '来源：本地（未连接）';
     dom.permissionTemplateGrid.innerHTML = '';
     dom.permissionDecisionStack.innerHTML = '';
     return;
   }
   if (errorMessage) {
     dom.permissionPanelSummary.textContent = errorMessage;
-    dom.permissionPanelSource.textContent = 'error';
+    dom.permissionPanelSource.textContent = '来源：错误';
     dom.permissionTemplateGrid.innerHTML = '';
     dom.permissionDecisionStack.innerHTML = '';
     return;
   }
   if (!chat || !snapshot) {
     dom.permissionPanelSummary.textContent = '打开权限面板后会读取当前联系人的权限。';
-    dom.permissionPanelSource.textContent = 'loading';
+    dom.permissionPanelSource.textContent = '来源：读取中';
     dom.permissionTemplateGrid.innerHTML = '';
     dom.permissionDecisionStack.innerHTML = '';
     return;
@@ -3765,14 +3792,22 @@ function renderPermissionPanel(errorMessage = '') {
   const capabilities = snapshot.agentCapabilities || {};
   const modes = normalizeRuntimeModeOptions(capabilities.modes) || getAgentModeOptions(snapshot.agentType || chat.agentType);
   const currentMode = snapshot.agentMode || chat.agentMode || modes[0]?.key || '';
-  dom.permissionPanelSummary.textContent = `${snapshot.contactName || chat.name} · agent=${snapshot.agentType || chat.agentType || 'codex'} · project=${snapshot.runtimeProject || snapshot.project || ''}`;
+  const contactName = snapshot.contactName || chat.name || targetKey || '当前联系人';
+  const projectName = String(snapshot.runtimeProject || snapshot.project || '').trim();
+  const modeLabel = modes.find((mode) => mode.key === currentMode)?.label || currentMode;
+  const [modeTitle] = String(modeLabel || '').split(' · ');
+  const summaryParts = [`${contactName} · 权限设置`];
+  if (modeTitle) summaryParts.push(`模式：${modeTitle}`);
+  if (projectName) summaryParts.push(`项目：${projectName}`);
+  dom.permissionPanelSummary.textContent = summaryParts.join(' · ');
+
   dom.permissionPanelSource.textContent = capabilities.source === 'cc-connect-project'
-    ? 'cc-connect project'
+    ? '来源：cc-connect（项目）'
     : snapshot.evaluation?.remote_error
-      ? 'local fallback'
+      ? '来源：本地回退'
       : snapshot.configured
-        ? 'cc-connect'
-        : 'local';
+        ? '来源：cc-connect'
+        : '来源：本地';
   dom.permissionTemplateGrid.innerHTML = modes
     .map((mode) => {
       const [title, description] = String(mode.label || mode.key).split(' · ');
@@ -3793,14 +3828,19 @@ function renderPermissionPanel(errorMessage = '') {
   });
 
   const decisions = Object.values(snapshot.evaluation?.decisions || {});
+  const decisionLevelLabel = {
+    allow: '允许',
+    ask: '每次确认',
+    deny: '拒绝',
+  };
   dom.permissionDecisionStack.innerHTML = decisions.length
     ? decisions.map((decision) => `
         <article class="permission-decision permission-${escapeHtml(decision.level || 'ask')}">
           <div>
             <strong>${escapeHtml(decision.permission)}</strong>
-            <span>source: ${escapeHtml(decision.source || '-')}</span>
+            <span>来源：${escapeHtml(decision.source || '-')}</span>
           </div>
-          <em>${escapeHtml(decision.level || 'ask')}</em>
+          <em>${escapeHtml(decisionLevelLabel[decision.level] || decision.level || 'ask')}</em>
         </article>
       `).join('')
     : '<article class="info-card">暂无权限评估。</article>';
@@ -3844,72 +3884,46 @@ function normalizeChatMessages(messages) {
 }
 
 function importCharacter(payload) {
-  const data = payload.data || payload;
-  const name = String(data.name || data.character_name || '').trim();
+  const data = payload && typeof payload === 'object' ? payload : {};
+  const name = String(data.name || '').trim();
   if (!name) throw new Error('角色卡缺少名称');
 
   const key = name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '-').replace(/^-|-$/g, '') || `char-${Date.now()}`;
-  const firstLine = String(data.first_mes || data.greeting || data.firstMessage || '').trim();
-  const description = String(data.description || data.personality || data.scenario || '已导入角色').trim();
-  const mesExample = String(data.mes_example || data.example_dialogue || '').trim();
-  const avatarImage = normalizeImportedAvatarImage(data.avatarImage || data.avatar_image || data.extensions?.avatarImage || data.extensions?.avatar_image);
+  const description = String(data.description || '已导入角色').trim();
+  const avatarUrl = normalizeImportedAvatarUrl(data.avatarUrl);
+  const avatarImage = avatarUrl ? attachmentDownloadUrl({ downloadUrl: avatarUrl }) : '';
+  const cardText = String(data.cardText || '').trim();
+  const avatarText = String(data.avatarText || data.avatar || '').trim().slice(0, 2) || name.slice(0, 1);
 
   state.chats[key] = {
     name,
     subtitle: '已导入角色',
     avatarClass: 'avatar-pink',
-    avatarText: name.slice(0, 1),
+    avatarText,
     avatarImage,
     avatarAttachmentId: '',
     proactiveContactEnabled: true,
     unread: 0,
-    summary: firstLine || description.slice(0, 34) || '已导入角色卡',
+    summary: description.slice(0, 34) || '已导入角色卡',
     time: '刚刚',
     description,
     roleLevel: 'contact',
     agentType: '',
-    personality: String(data.personality || '').trim(),
-    scenario: String(data.scenario || '').trim(),
-    systemPrompt: String(data.system_prompt || data.systemPrompt || '').trim(),
-    messages: normalizeChatMessages([
-      firstLine ? { text: firstLine } : null,
-      mesExample ? { text: mesExample } : null,
-    ].filter(Boolean)),
+    cardText,
+    messages: [],
   };
 
   uiState.activeChatKey = key;
   uiState.editingCharacterKey = key;
 }
 
-function normalizeImportedAvatarImage(value) {
+function normalizeImportedAvatarUrl(value) {
   const raw = String(value || '').trim();
-  return raw.startsWith('data:image/') ? raw : '';
-}
-
-function importWorldbook(payload, mode) {
-  const entries = Array.isArray(payload.entries)
-    ? payload.entries
-    : Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload.worldbook)
-        ? payload.worldbook
-        : [];
-
-  if (!entries.length) throw new Error('世界书内容为空');
-
-  const mappedEntries = entries.map((entry, index) => ({
-    title: String(entry.title || entry.key || entry.name || `词条 ${index + 1}`).trim(),
-    text: String(entry.text || entry.content || entry.comment || '').trim() || '已导入世界书词条',
-    tags: Array.isArray(entry.tags) && entry.tags.length ? entry.tags.map((tag) => String(tag)) : ['导入'],
-    keys: Array.isArray(entry.key)
-      ? entry.key.map((item) => String(item))
-      : Array.isArray(entry.keys)
-        ? entry.keys.map((item) => String(item))
-        : String(entry.key || '').split(',').map((item) => item.trim()).filter(Boolean),
-    enabled: entry.enabled !== false,
-  }));
-
-  state.worldbook = mode === 'append' ? [...state.worldbook, ...mappedEntries] : mappedEntries;
+  if (!raw) return '';
+  if (raw.startsWith('data:image/')) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('/apps/') || raw.startsWith('/attachments/') || raw.startsWith('/api/')) return raw;
+  return '';
 }
 
 function importChat(payload, mode) {
@@ -3946,31 +3960,26 @@ function importChat(payload, mode) {
 }
 
 function detectImportType(payload) {
-  if (payload.character || payload.data?.character_book || payload.first_mes || payload.name) return 'character';
-  if (payload.worldbook || payload.entries || Array.isArray(payload.entries)) return 'worldbook';
-  if (payload.chat || payload.history || payload.messages || Array.isArray(payload)) return 'chat';
+  if (Array.isArray(payload)) return 'chat';
+  if (payload && typeof payload === 'object') {
+    if (Array.isArray(payload.messages)) return 'chat';
+    if (Array.isArray(payload.chat)) return 'chat';
+    if (payload.chat && typeof payload.chat === 'object' && Array.isArray(payload.chat.messages)) return 'chat';
+    if (payload.character && typeof payload.character === 'object') return 'character';
+    if (payload.name && Object.prototype.hasOwnProperty.call(payload, 'cardText')) return 'character';
+  }
   throw new Error('无法自动识别导入类型');
 }
 
 function handleImport(type, mode, payload) {
   const importType = type === 'auto' ? detectImportType(payload) : type;
 
-  if (payload.character && (type === 'auto' || type === 'character')) {
-    importCharacter(payload.character);
-  } else if (importType === 'character') {
-    importCharacter(payload);
+  if (importType === 'character') {
+    importCharacter(payload?.character && typeof payload.character === 'object' ? payload.character : payload);
+    return;
   }
-
-  if (payload.worldbook && (type === 'auto' || type === 'worldbook')) {
-    importWorldbook(payload.worldbook, mode);
-  } else if (importType === 'worldbook') {
-    importWorldbook(payload, mode);
-  }
-
-  if (payload.chat && (type === 'auto' || type === 'chat')) {
-    importChat(payload.chat, mode);
-  } else if (importType === 'chat') {
-    importChat(payload, mode);
+  if (importType === 'chat') {
+    importChat(payload?.chat && typeof payload.chat === 'object' ? payload.chat : payload, mode);
   }
 }
 
@@ -3987,7 +3996,6 @@ function renderAll() {
   renderMoments();
   renderForumPosts();
   renderMemories();
-  renderWorldbook();
   renderJournals();
   refreshRegisteredApps();
   renderDynamicRegistryStatus();
@@ -4008,6 +4016,13 @@ dom.tabs.forEach((tab) => {
     closePanel();
     setPhoneShell('app');
     setActiveView(tab.dataset.tab);
+  });
+});
+
+dom.contactCategoryButtons?.forEach((button) => {
+  button.addEventListener('click', () => {
+    uiState.contactFilter = button.dataset.contactCategory || button.dataset.contactSegment || 'all';
+    renderContacts();
   });
 });
 
@@ -4312,9 +4327,11 @@ dom.characterForm.addEventListener('submit', async (event) => {
   chat.agentMode = normalizeAgentPermissionMode(dom.characterAgentModeSelect?.value || chat.agentMode, chat.agentType);
   chat.subtitle = dom.characterSubtitleInput.value.trim() || chat.subtitle;
   chat.summary = dom.characterSummaryInput.value.trim() || chat.summary;
-  chat.personality = dom.characterPersonalityInput.value.trim();
-  chat.scenario = dom.characterScenarioInput.value.trim();
-  chat.systemPrompt = dom.characterSystemPromptInput.value.trim();
+  if (dom.characterCardTextInput) {
+    chat.cardText = dom.characterCardTextInput.value.trim();
+  } else {
+    chat.cardText = String(chat.cardText || '').trim();
+  }
   chat.proactiveContactEnabled = dom.characterProactiveToggle.checked;
   chat.waifuTextSettings = normalizeWaifuSettings({
     enabled: dom.characterWaifuTextModeToggle?.checked,
@@ -4338,7 +4355,7 @@ dom.characterForm.addEventListener('submit', async (event) => {
         uiState.activeChatKey = createdKey || resolvePreferredChatKey(state.chats, uiState.activeChatKey) || uiState.activeChatKey;
         uiState.editingCharacterKey = uiState.activeChatKey;
         await loadCharacterRuntimeSettingsForCurrent({ force: true });
-        setChatStatus('联系人已创建，9840 Runtime 已刷新。');
+        setChatStatus('联系人已创建，高级运行设置已刷新。');
       } else {
         const syncedCharacter = await syncCharacterEdits(editingKey, chat);
         if (syncedCharacter) {
@@ -4348,8 +4365,8 @@ dom.characterForm.addEventListener('submit', async (event) => {
             await loadCharacterRuntimeSettingsForCurrent({ force: true });
           }
           setChatStatus(savedRuntimeSettings
-            ? '角色卡和 9840 Runtime 已同步到 smallphone-app。'
-            : '角色卡已同步到 smallphone-app，9840 Runtime 当前不可用。');
+            ? '角色卡和高级运行设置已同步到 smallphone-app。'
+            : '角色卡已同步到 smallphone-app，高级运行设置当前不可用。');
         } else {
           await loadCharacterRuntimeSettingsForCurrent({ force: true });
           setChatStatus('角色卡已保存，当前联系人还没有后端项目。');
@@ -4361,7 +4378,7 @@ dom.characterForm.addEventListener('submit', async (event) => {
     }
     renderAll();
   } catch (error) {
-    setChatStatus(error instanceof Error ? error.message : '角色或 9840 Runtime 同步失败', true);
+    setChatStatus(error instanceof Error ? error.message : '角色或高级运行设置同步失败', true);
   }
 });
 
@@ -4400,7 +4417,7 @@ dom.settingsForm.addEventListener('submit', (event) => {
   renderProfile();
   applyTheme();
   updatePromptPreview();
-  queueStateSync('设置已保存。之后发送消息会按当前角色卡、人设、记忆和世界书拼装上下文。');
+  queueStateSync('设置已保存。之后发送的消息会使用当前设置。');
 });
 
 dom.appRegistryRefreshButton?.addEventListener('click', () => {
@@ -4475,7 +4492,7 @@ dom.importsForm.addEventListener('submit', async (event) => {
     setImportResult(
       backendEnabled
         ? '导入完成；当前版本仍保留前端本地导入，不写入 smallphone-app。'
-        : '导入完成，已同步到角色、世界书或聊天记录。',
+        : '导入完成，已同步到角色或聊天记录。',
     );
   } catch (error) {
     setImportResult(error instanceof Error ? error.message : '导入失败', true);
@@ -4507,40 +4524,6 @@ dom.myProfileForm?.addEventListener('submit', (event) => {
   updatePromptPreview();
 });
 
-dom.worldbookForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const title = dom.worldbookTitleInput.value.trim();
-  const text = dom.worldbookTextInput.value.trim();
-  const keys = dom.worldbookKeysInput.value.split(',').map((item) => item.trim()).filter(Boolean);
-  if (!title || !text) return;
-
-  const entry = {
-    title,
-    text,
-    keys,
-    enabled: true,
-    tags: ['手动新增'],
-  };
-
-  try {
-    if (backendEnabled) {
-      await syncWorldbookEntry(entry);
-      setChatStatus('世界书已同步到 smallphone-app。');
-    } else {
-      state.worldbook.unshift(entry);
-      saveState();
-      queueStateSync('世界书已保存。');
-    }
-    dom.worldbookTitleInput.value = '';
-    dom.worldbookKeysInput.value = '';
-    dom.worldbookTextInput.value = '';
-    renderWorldbook();
-    updatePromptPreview();
-  } catch (error) {
-    setChatStatus(error instanceof Error ? error.message : '世界书同步失败', true);
-  }
-});
-
 dom.chatInput.addEventListener('input', () => {
   updatePromptPreview(dom.chatInput.value.trim());
 });
@@ -4561,7 +4544,7 @@ bootstrapState()
     renderAll();
     setChatStatus(
       backendEnabled
-        ? '已连接小手机后端。角色、记忆、世界书和聊天会通过后端统一管理。'
-        : '当前为纯前端模式。可直接编辑角色卡、世界书、记忆；配置 OpenAI 兼容接口后即可真实聊天。',
+        ? '已连接小手机后端。角色、记忆和聊天会通过后端统一管理。'
+        : '当前为纯前端模式。可直接编辑角色卡和记忆；连接模型服务后即可真实聊天。',
     );
   });

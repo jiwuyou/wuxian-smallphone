@@ -151,6 +151,17 @@ test("cc-webclient adapter wraps user text by default", async () => {
   assert.notEqual(sendBody.message, "/help");
 });
 
+test("cc-webclient adapter does not include roster fields in outbound prompt", async () => {
+  const rosterMarker = "ROSTER_SHOULD_NOT_LEAK";
+  const { sendBody } = await sendWebclientTestTurn({
+    contacts: [{ id: "c2", displayName: rosterMarker }],
+    characters: [{ id: "ch2", name: rosterMarker }],
+  });
+
+  assert.match(sendBody.message, /^SmallPhone turn/);
+  assert.doesNotMatch(sendBody.message, new RegExp(rosterMarker));
+});
+
 test("cc-webclient adapter sends explicit raw text in pass-through mode", async () => {
   const { sendBody } = await sendWebclientTestTurn({
     runtimePassThrough: true,

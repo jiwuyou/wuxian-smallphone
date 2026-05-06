@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>手机桌面</title>
-  <link rel="stylesheet" href="style.css?v=14">
+  <link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
   <div class="app-shell">
@@ -23,7 +23,7 @@
             <p id="lock-notice-text">我把今天的晚霞拍下来了，要不要一起去看海边夜市？</p>
           </div>
         </div>
-        <button class="soft-button unlock-button" id="unlock-button">上滑解锁</button>
+        <button class="soft-button unlock-button" id="unlock-button">进入桌面</button>
       </section>
 
         <section class="overlay-screen desktop-screen" id="desktop-screen" aria-hidden="true">
@@ -32,6 +32,7 @@
               <p class="eyebrow">桌面</p>
               <h2 id="desktop-greeting">晚上好，晚风</h2>
               <p class="desktop-weather" id="desktop-weather">晴 23°C · 海边风轻</p>
+              <p class="desktop-guidance">从桌面选择应用；世界模式是空间导航，图标模式是快速启动。</p>
             </div>
             <div class="desktop-head-actions">
               <div class="desktop-mode-switch" aria-label="桌面模式">
@@ -79,21 +80,13 @@
             <span class="icon-orb orb-character">人</span>
             <strong>联系人</strong>
           </button>
-          <button class="dock-app" data-panel-target="character">
-            <span class="icon-orb orb-world">角</span>
-            <strong>角色</strong>
-          </button>
-          <button class="dock-app" data-panel-target="settings">
-            <span class="icon-orb orb-settings">调</span>
-            <strong>调试</strong>
-          </button>
           <button class="dock-app" data-panel-target="app-manager">
             <span class="icon-orb orb-app-manager">管</span>
-            <strong>App</strong>
+            <strong>应用</strong>
           </button>
-          <button class="dock-app" data-panel-target="permissions">
-            <span class="icon-orb orb-permission">权</span>
-            <strong>权限</strong>
+          <button class="dock-app" data-panel-target="settings">
+            <span class="icon-orb orb-settings">设</span>
+            <strong>设置</strong>
           </button>
         </div>
       </section>
@@ -116,6 +109,15 @@
             <button class="ghost-button" id="mark-read-button">全部已读</button>
           </div>
 
+          <section class="message-overview" id="message-overview" data-message-overview>
+            <div>
+              <p class="eyebrow">桌面应用</p>
+              <strong id="message-overview-title" data-message-overview-title>最近联系人</strong>
+              <p id="message-overview-subtitle" data-message-overview-subtitle>从桌面进入消息后，继续最近的 AI 联系人对话。</p>
+            </div>
+            <span class="message-overview-badge" id="message-overview-badge" data-message-overview-badge>未读</span>
+          </section>
+
           <div class="list-card message-list" id="message-list"></div>
         </section>
 
@@ -123,6 +125,13 @@
           <div class="section-title-row sticky-title">
             <h2>联系人</h2>
             <button class="ghost-button" id="add-contact-button" type="button">新增联系人</button>
+          </div>
+
+          <div class="contact-filter-row" id="contact-filter-controls" data-contact-filters aria-label="联系人筛选">
+            <button class="filter-chip filter-chip-active" data-contact-category="all" type="button">全部</button>
+            <button class="filter-chip" data-contact-category="characters" type="button">AI 角色</button>
+            <button class="filter-chip" data-contact-category="groups" type="button">群聊</button>
+            <button class="filter-chip" data-contact-category="unread" type="button">未读</button>
           </div>
 
           <div class="stack-grid compact-gap">
@@ -204,7 +213,7 @@
           <div class="chat-thread" id="chat-thread"></div>
 
           <div class="attachment-strip" id="attachment-strip"></div>
-          <div class="chat-status" id="chat-status">当前为纯前端模式。配置 OpenAI 兼容接口后可直接聊天。</div>
+          <div class="chat-status" id="chat-status">当前可使用本地演示回复；连接模型服务后可真实聊天。</div>
 
           <form class="input-bar" id="chat-form">
             <input id="chat-attachment-input" type="file" multiple hidden>
@@ -247,28 +256,18 @@
               <div class="stack-grid" id="forum-list"></div>
             </section>
 
-            <section class="panel-view" data-panel="memory">
-              <form class="inline-form" id="memory-form">
-                <input type="text" id="memory-input" placeholder="新增一条长期记忆，例如：喜欢海风和旧书店">
-                <button type="submit" class="soft-button small-button">保存</button>
-              </form>
-              <div class="stack-grid" id="memory-list"></div>
-            </section>
+	            <section class="panel-view" data-panel="memory">
+	              <form class="inline-form" id="memory-form">
+	                <input type="text" id="memory-input" placeholder="新增一条长期记忆，例如：喜欢海风和旧书店">
+	                <button type="submit" class="soft-button small-button">保存</button>
+	              </form>
+	              <div class="stack-grid" id="memory-list"></div>
+	            </section>
 
-            <section class="panel-view" data-panel="worldbook">
-              <form class="journal-form" id="worldbook-form">
-                <input type="text" id="worldbook-title" placeholder="词条标题，比如：海街夜市">
-                <input type="text" id="worldbook-keys" placeholder="触发关键词，用逗号分隔，比如：夜市,码头,晚霞">
-                <textarea id="worldbook-text" rows="4" placeholder="词条内容，会像 SillyTavern 一样在命中关键词时进入上下文。"></textarea>
-                <button type="submit" class="soft-button small-button">新增词条</button>
-              </form>
-              <div class="stack-grid" id="worldbook-list"></div>
-            </section>
-
-            <section class="panel-view" data-panel="journal">
-              <form class="journal-form" id="journal-form">
-                <input type="text" id="journal-title" placeholder="标题，比如：今天的海风">
-                <textarea id="journal-input" rows="5" placeholder="写下今天的聊天碎片、情绪和小事..."></textarea>
+	            <section class="panel-view" data-panel="journal">
+	              <form class="journal-form" id="journal-form">
+	                <input type="text" id="journal-title" placeholder="标题，比如：今天的海风">
+	                <textarea id="journal-input" rows="5" placeholder="写下今天的聊天碎片、情绪和小事..."></textarea>
                 <button type="submit" class="soft-button small-button">写入手账</button>
               </form>
               <div class="stack-grid" id="journal-list"></div>
@@ -276,11 +275,24 @@
 
             <section class="panel-view" data-panel="settings">
               <form class="settings-form" id="settings-form">
-                <label>
-                  <span>系统入口说明</span>
-                  <input type="text" value="主题、API、人设、角色管理等系统项统一收拢到设置" readonly>
-                </label>
-                <button type="button" class="secondary-button" data-panel-target="character">进入角色管理</button>
+                <section class="settings-home-grid" aria-label="设置入口">
+                  <button type="button" class="settings-shortcut" data-panel-target="character">
+                    <strong>角色与联系人</strong>
+                    <span>编辑头像、简介、语气和主动联系</span>
+                  </button>
+                  <button type="button" class="settings-shortcut" data-panel-target="permissions">
+                    <strong>权限</strong>
+                    <span>设置联系人能做什么</span>
+                  </button>
+	                  <button type="button" class="settings-shortcut" data-panel-target="imports">
+	                    <strong>导入</strong>
+	                    <span>导入角色卡和聊天记录</span>
+	                  </button>
+	                  <button type="button" class="settings-shortcut" data-panel-target="persona">
+	                    <strong>我的资料</strong>
+	                    <span>调整昵称、签名和人设</span>
+	                  </button>
+                </section>
                 <label>
                   <span>主题</span>
                   <select id="theme-select">
@@ -289,79 +301,135 @@
                     <option value="mint">奶油薄荷</option>
                   </select>
                 </label>
-                <label>
-                  <span>API 名称</span>
-                  <input type="text" id="api-name" placeholder="例如：OpenAI / OpenRouter / 自定义">
-                </label>
-                <label>
-                  <span>Base URL</span>
-                  <input type="text" id="api-url" placeholder="例如：https://api.openai.com/v1">
-                </label>
-                <label>
-                  <span>API Key</span>
-                  <input type="password" id="api-key" placeholder="仅本地保存，直接由浏览器发请求">
-                </label>
-                <label>
-                  <span>模型名称</span>
-                  <input type="text" id="model-name" placeholder="例如：gpt-4o-mini">
-                </label>
-                <label>
-                  <span>Temperature</span>
-                  <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="0.8">
-                </label>
-                <label>
-                  <span>Max Tokens</span>
-                  <input type="number" id="max-tokens" min="64" max="8192" step="1" placeholder="512">
-                </label>
-                <label>
-                  <span>全局系统提示词</span>
-                  <textarea id="system-prompt" rows="5" placeholder="这里会作为全局 system prompt，与角色卡、人设、世界书、记忆一起拼装。"></textarea>
-                </label>
+                <details class="details-panel settings-details" id="settings-details">
+                  <summary>开发者选项</summary>
+                  <div class="details-panel-body">
+                    <label>
+                      <span>模型服务名称</span>
+                      <input type="text" id="api-name" placeholder="例如：OpenAI / OpenRouter / 自定义">
+                    </label>
+                    <label>
+                      <span>服务地址</span>
+                      <input type="text" id="api-url" placeholder="例如：https://api.openai.com/v1">
+                    </label>
+                    <label>
+                      <span>访问密钥</span>
+                      <input type="password" id="api-key" placeholder="保存在本机浏览器">
+                    </label>
+                    <label>
+                      <span>模型名称</span>
+                      <input type="text" id="model-name" placeholder="例如：gpt-4o-mini">
+                    </label>
+                    <label>
+                      <span>回复随机度</span>
+                      <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="0.8">
+                    </label>
+                    <label>
+                      <span>回复长度上限</span>
+                      <input type="number" id="max-tokens" min="64" max="8192" step="1" placeholder="512">
+                    </label>
+                    <label>
+                      <span>系统提示词</span>
+                      <textarea id="system-prompt" rows="5" placeholder="高级用户可在这里调整全局行为规则。"></textarea>
+                    </label>
+                  </div>
+                </details>
                 <button type="submit" class="soft-button small-button">保存设置</button>
               </form>
-              <article class="info-card">
-                <p class="eyebrow">Prompt Preview</p>
-                <strong>当前聊天上下文预览</strong>
-                <pre class="prompt-preview" id="prompt-preview"></pre>
-              </article>
+              <details class="details-panel">
+                <summary>上下文预览</summary>
+                <article class="info-card">
+                  <p class="eyebrow">高级预览</p>
+                  <strong>当前聊天上下文</strong>
+                  <pre class="prompt-preview" id="prompt-preview"></pre>
+                </article>
+              </details>
             </section>
 
             <section class="panel-view" data-panel="app-manager">
-              <form class="settings-form" id="app-manager-form">
-                <label>
-                  <span>LikeGirl 服务地址</span>
-                  <input type="url" id="like-girl-service-url" inputmode="url" placeholder="http://127.0.0.1:4103/">
-                </label>
-                <label>
-                  <span>LikeGirl 分身服务地址</span>
-                  <input type="url" id="like-girl-clone-service-url" inputmode="url" placeholder="http://127.0.0.1:4108/">
-                </label>
-                <p class="permission-panel-summary">这里配置独立后端 App 的入口地址。桌面图标会直接使用该地址，不再要求用户打开后手动填写。</p>
-                <button type="submit" class="soft-button small-button">保存 App 配置</button>
-              </form>
-	              <div class="app-manager-actions">
-	                <button type="button" class="soft-button small-button" id="like-girl-open-public">进入 LikeGirl 前台</button>
-	                <button type="button" class="secondary-button small-button" id="like-girl-open-admin">进入 LikeGirl 后台</button>
-	                <button type="button" class="soft-button small-button" id="like-girl-clone-open-public">进入 LikeGirl 分身前台</button>
-	                <button type="button" class="secondary-button small-button" id="like-girl-clone-open-admin">进入 LikeGirl 分身后台</button>
-	              </div>
-	              <div class="service-manager-controls">
-	                <button type="button" class="secondary-button small-button" id="service-manager-refresh">刷新服务状态</button>
-	                <p class="registry-status" id="service-manager-status">后端未连接，服务管理不可用。</p>
-	              </div>
-	              <div class="stack-grid service-manager-grid" id="service-manager-list"></div>
-	              <div class="app-registry-controls">
-	                <button type="button" class="secondary-button small-button" id="app-registry-refresh">刷新 App 注册表</button>
-	                <p class="registry-status" id="app-registry-status">后端未连接，使用内置 App。</p>
-	              </div>
-	              <article class="info-card">
-                <p class="eyebrow">运行说明</p>
-                <strong>LikeGirl 是独立 Node/SQLite 服务</strong>
-                <p>先启动 LikeGirl 服务，再从桌面图标进入。分身使用同一份源码，但应配置独立端口、SQLite 文件和上传目录。</p>
-              </article>
+              <div class="app-manager-card-grid">
+                <article class="app-manager-card" data-app-manager-card>
+                  <div>
+                    <p class="eyebrow">应用</p>
+                    <strong>LikeGirl</strong>
+                    <p>独立陪伴应用，支持前台体验和后台管理。</p>
+                  </div>
+                  <span class="app-card-status">桌面应用</span>
+                  <div class="app-card-actions">
+                    <button type="button" class="soft-button small-button" id="like-girl-open-public">打开</button>
+                    <button type="button" class="secondary-button small-button" id="like-girl-open-admin">设置</button>
+                  </div>
+                </article>
+                <article class="app-manager-card" data-app-manager-card>
+                  <div>
+                    <p class="eyebrow">应用</p>
+                    <strong>LikeGirl 分身</strong>
+                    <p>同一应用的独立实例，可配置不同端口和数据目录。</p>
+                  </div>
+                  <span class="app-card-status">独立实例</span>
+                  <div class="app-card-actions">
+                    <button type="button" class="soft-button small-button" id="like-girl-clone-open-public">打开</button>
+                    <button type="button" class="secondary-button small-button" id="like-girl-clone-open-admin">设置</button>
+                  </div>
+                </article>
+              </div>
+              <details class="details-panel">
+                <summary>服务状态</summary>
+                <div class="details-panel-body">
+                  <div class="service-manager-controls">
+                    <button type="button" class="secondary-button small-button" id="service-manager-refresh">刷新服务状态</button>
+                    <p class="registry-status" id="service-manager-status">后端未连接，服务管理不可用。</p>
+                  </div>
+                  <div class="stack-grid service-manager-grid" id="service-manager-list"></div>
+                </div>
+              </details>
+              <details class="details-panel">
+                <summary>高级配置</summary>
+                <div class="details-panel-body">
+                  <form class="settings-form" id="app-manager-form">
+                    <label>
+                      <span>LikeGirl 服务地址</span>
+                      <input type="url" id="like-girl-service-url" inputmode="url" placeholder="http://127.0.0.1:4103/">
+                    </label>
+                    <label>
+                      <span>LikeGirl 分身服务地址</span>
+                      <input type="url" id="like-girl-clone-service-url" inputmode="url" placeholder="http://127.0.0.1:4108/">
+                    </label>
+                    <p class="permission-panel-summary">服务地址只影响桌面图标打开的独立应用入口。</p>
+                    <button type="submit" class="soft-button small-button">保存 App 配置</button>
+                  </form>
+                  <div class="app-registry-controls">
+                    <button type="button" class="secondary-button small-button" id="app-registry-refresh">刷新 App 注册表</button>
+                    <p class="registry-status" id="app-registry-status">后端未连接，使用内置 App。</p>
+                  </div>
+                  <article class="info-card">
+                    <p class="eyebrow">运行说明</p>
+                    <strong>独立 App 使用自己的服务</strong>
+                    <p>先启动服务，再从桌面图标进入。分身应配置独立端口、SQLite 文件和上传目录。</p>
+                  </article>
+                </div>
+              </details>
             </section>
 
             <section class="panel-view" data-panel="permissions">
+              <div class="permission-capability-grid" id="permission-capabilities" data-permission-capabilities>
+                <article class="permission-capability" data-permission-capability>
+                  <strong>读取文件</strong>
+                  <span>允许联系人理解项目内容</span>
+                </article>
+                <article class="permission-capability" data-permission-capability>
+                  <strong>修改文件</strong>
+                  <span>允许联系人直接帮你编辑</span>
+                </article>
+                <article class="permission-capability" data-permission-capability>
+                  <strong>运行命令</strong>
+                  <span>用于测试、构建和自动化</span>
+                </article>
+                <article class="permission-capability" data-permission-capability>
+                  <strong>自动确认</strong>
+                  <span>高风险能力，谨慎开启</span>
+                </article>
+              </div>
               <div class="permission-panel-head">
                 <label class="permission-contact-field">
                   <span>联系人</span>
@@ -370,23 +438,32 @@
                 <span class="runtime-pill" id="permission-panel-source">local</span>
               </div>
               <p class="permission-panel-summary" id="permission-panel-summary">当前联系人权限。</p>
-              <div class="permission-template-grid" id="permission-template-grid"></div>
-              <div class="permission-decision-stack" id="permission-decision-stack"></div>
+              <details class="details-panel">
+                <summary>权限模式</summary>
+                <div class="details-panel-body">
+                  <div class="permission-template-grid" id="permission-template-grid"></div>
+                </div>
+              </details>
+              <details class="details-panel">
+                <summary>技术明细</summary>
+                <div class="details-panel-body">
+                  <div class="permission-decision-stack" id="permission-decision-stack"></div>
+                </div>
+              </details>
             </section>
 
-            <section class="panel-view" data-panel="imports">
-              <form class="settings-form" id="imports-form">
-                <label>
-                  <span>导入类型</span>
-                  <select id="import-type">
-                    <option value="auto">自动识别</option>
-                    <option value="character">角色卡</option>
-                    <option value="worldbook">世界书</option>
-                    <option value="chat">聊天记录</option>
-                  </select>
-                </label>
-                <label>
-                  <span>导入模式</span>
+	            <section class="panel-view" data-panel="imports">
+	              <form class="settings-form" id="imports-form">
+	                <label>
+	                  <span>导入类型</span>
+	                  <select id="import-type">
+	                    <option value="auto">自动识别</option>
+	                    <option value="character">角色卡</option>
+	                    <option value="chat">聊天记录</option>
+	                  </select>
+	                </label>
+	                <label>
+	                  <span>导入模式</span>
                   <select id="import-mode">
                     <option value="replace">覆盖现有内容</option>
                     <option value="append">追加到现有内容</option>
@@ -396,18 +473,18 @@
                   <span>选择 JSON 文件</span>
                   <input type="file" id="import-file" accept="application/json,.json,text/plain">
                 </label>
-                <label>
-                  <span>粘贴 JSON</span>
-                  <textarea id="import-json" rows="10" placeholder='支持粘贴角色卡、世界书、聊天记录，或包含 character / worldbook / chat 的对象'></textarea>
-                </label>
-                <button type="submit" class="soft-button small-button">导入到当前项目</button>
-              </form>
-              <article class="info-card import-note-card">
-                <p class="eyebrow">支持范围</p>
-                <strong>角色卡 / 世界书 / 聊天记录</strong>
-                <p id="import-result">可粘贴 JSON 或选择本地 JSON 文件。世界书和聊天记录支持覆盖或追加。</p>
-              </article>
-            </section>
+	                <label>
+	                  <span>粘贴 JSON</span>
+	                  <textarea id="import-json" rows="10" placeholder='支持粘贴角色卡、聊天记录，或包含 character / chat 的对象'></textarea>
+	                </label>
+	                <button type="submit" class="soft-button small-button">导入到当前项目</button>
+	              </form>
+	              <article class="info-card import-note-card">
+	                <p class="eyebrow">支持范围</p>
+	                <strong>角色卡 / 聊天记录</strong>
+	                <p id="import-result">可粘贴 JSON 或选择本地 JSON 文件。聊天记录支持覆盖或追加。</p>
+	              </article>
+	            </section>
 
             <section class="panel-view" data-panel="persona">
               <form class="settings-form" id="persona-form">
@@ -434,161 +511,166 @@
 
             <section class="panel-view" data-panel="character">
               <form class="settings-form" id="character-form">
-                <label>
-                  <span>角色选择</span>
-                  <select id="character-select"></select>
-                </label>
-                <label>
-                  <span>角色名</span>
-                  <input type="text" id="character-name" placeholder="角色昵称">
-                </label>
-                <section class="avatar-editor" aria-label="角色头像">
-                  <div class="avatar-editor-preview" id="character-avatar-preview"></div>
-                  <div class="avatar-editor-fields">
-                    <label>
-                      <span>头像文字</span>
-                      <input type="text" id="character-avatar-text" maxlength="2" placeholder="林">
-                    </label>
-                    <div class="avatar-editor-actions">
-                      <input type="file" id="character-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-                      <button type="button" class="secondary-button" id="character-avatar-upload">上传头像</button>
-                      <button type="button" class="ghost-button" id="character-avatar-remove">移除图片</button>
-                    </div>
-                  </div>
-                </section>
-                <label>
-                  <span>角色简介</span>
-                  <textarea id="character-description" rows="4" placeholder="一句话介绍角色定位、语气和相处感"></textarea>
-                </label>
-                <label>
-                  <span>上下文类型</span>
-                  <select id="character-role-level">
-                    <option value="contact">私人联系人</option>
-                    <option value="admin">管理员级角色</option>
-                  </select>
-                </label>
-                <label>
-                  <span>执行引擎</span>
-                  <select id="character-agent-type">
-                    <option value="">默认项目配置</option>
-                    <option value="codex">Codex</option>
-                    <option value="claudecode">Claude Code</option>
-                  </select>
-                </label>
-                <section class="runtime-settings-section" aria-labelledby="character-runtime-heading">
-                  <div class="runtime-settings-head">
-                    <div>
-                      <p class="eyebrow">9840 Runtime</p>
-                      <strong id="character-runtime-heading">项目设置</strong>
-                    </div>
-                    <span class="runtime-settings-status" id="character-runtime-status">未加载</span>
-                  </div>
+                <section class="character-form-section" id="character-section">
+                  <p class="eyebrow">基础资料</p>
                   <label>
-                    <span>权限模式</span>
-                    <select id="character-agent-mode">
-                      <option value="suggest">建议 · 每次工具调用确认</option>
-                      <option value="auto-edit">自动编辑 · 文件编辑自动通过</option>
-                      <option value="full-auto">全自动 · 工作区沙箱内自动通过</option>
-                      <option value="yolo">YOLO · 跳过审批和沙箱</option>
-                    </select>
+                    <span>角色选择</span>
+                    <select id="character-select"></select>
                   </label>
-                  <div class="runtime-toggle-grid">
-                    <label>
-                      <span>Reply footer</span>
-                      <div class="toggle-row">
-                        <input type="checkbox" id="character-runtime-reply-footer">
-                        <span>回复后缀</span>
+                  <label>
+                    <span>角色名</span>
+                    <input type="text" id="character-name" placeholder="角色昵称">
+                  </label>
+                  <section class="avatar-editor" aria-label="角色头像">
+                    <div class="avatar-editor-preview" id="character-avatar-preview"></div>
+                    <div class="avatar-editor-fields">
+                      <label>
+                        <span>头像文字</span>
+                        <input type="text" id="character-avatar-text" maxlength="2" placeholder="林">
+                      </label>
+                      <div class="avatar-editor-actions">
+                        <input type="file" id="character-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                        <button type="button" class="secondary-button" id="character-avatar-upload">上传头像</button>
+                        <button type="button" class="ghost-button" id="character-avatar-remove">移除图片</button>
                       </div>
-                    </label>
-                    <label>
-                      <span>Context indicator</span>
-                      <div class="toggle-row">
-                        <input type="checkbox" id="character-runtime-context-indicator">
-                        <span>上下文标记</span>
-                      </div>
-                    </label>
-                  </div>
+                    </div>
+                  </section>
                   <label>
-                    <span>Work dir</span>
-                    <input type="text" id="character-runtime-work-dir" placeholder="/workspace/project">
+                    <span>角色简介</span>
+                    <textarea id="character-description" rows="4" placeholder="一句话介绍角色定位、语气和相处感"></textarea>
                   </label>
                   <label>
-                    <span>Disabled commands</span>
-                    <input type="text" id="character-runtime-disabled-commands" placeholder="rm, shutdown">
+                    <span>状态文案</span>
+                    <input type="text" id="character-subtitle" placeholder="例如：在线 · 海风很轻">
                   </label>
                   <label>
-                    <span>Admin from</span>
-                    <input type="text" id="character-runtime-admin-from" placeholder="admin@example.test">
+                    <span>聊天摘要</span>
+                    <input type="text" id="character-summary" placeholder="消息列表里显示的最后一条内容">
                   </label>
                 </section>
-                <section class="runtime-settings-section text-mode-settings-section" aria-labelledby="character-text-mode-heading">
-                  <div class="runtime-settings-head">
-                    <div>
-                      <p class="eyebrow">Text Waifu</p>
-                      <strong id="character-text-mode-heading">文本与时间</strong>
+
+	                <section class="character-form-section">
+	                  <p class="eyebrow">行为与人设</p>
+	                  <label>
+	                    <span>角色设定</span>
+	                    <textarea id="character-card-text" rows="6" placeholder="写下角色卡正文：人设、语气、关系、世界观等"></textarea>
+	                  </label>
+	                  <label>
+	                    <span>主动联系</span>
+	                    <div class="toggle-row">
+	                      <input type="checkbox" id="character-proactive-toggle">
+                      <span>允许系统在合适的时候主动给这个联系人发消息</span>
                     </div>
-                  </div>
-                  <div class="runtime-toggle-grid">
-                    <label>
-                      <span>Waifu 文本模式</span>
-                      <div class="toggle-row">
-                        <input type="checkbox" id="character-waifu-text-mode">
-                        <span>分段显示回复</span>
-                      </div>
-                    </label>
-                    <label>
-                      <span>去除标点</span>
-                      <div class="toggle-row">
-                        <input type="checkbox" id="character-waifu-remove-punctuation">
-                        <span>显示时隐藏句末标点</span>
-                      </div>
-                    </label>
-                    <label>
-                      <span>注入当前时间</span>
-                      <div class="toggle-row">
-                        <input type="checkbox" id="character-time-injection-enabled">
-                        <span>由后端加入运行时上下文</span>
-                      </div>
-                    </label>
-                  </div>
-                  <label class="range-field">
-                    <span>分段延迟 <strong id="character-waifu-delay-value">55 ms/字</strong></span>
-                    <input type="range" id="character-waifu-delay" min="20" max="160" step="5">
-                  </label>
-                  <label>
-                    <span>Timezone</span>
-                    <input type="text" id="character-timezone" placeholder="Etc/UTC">
                   </label>
                 </section>
-                <label>
-                  <span>状态文案</span>
-                  <input type="text" id="character-subtitle" placeholder="例如：在线 · 海风很轻">
-                </label>
-                <label>
-                  <span>聊天摘要</span>
-                  <input type="text" id="character-summary" placeholder="消息列表里显示的最后一条内容">
-                </label>
-                <label>
-                  <span>性格</span>
-                  <textarea id="character-personality" rows="3" placeholder="参考 SillyTavern 的 personality 字段"></textarea>
-                </label>
-                <label>
-                  <span>场景</span>
-                  <textarea id="character-scenario" rows="3" placeholder="角色常处于什么环境、什么关系阶段"></textarea>
-                </label>
-                <label>
-                  <span>角色补充提示词</span>
-                  <textarea id="character-system-prompt" rows="4" placeholder="类似角色卡 system prompt override"></textarea>
-                </label>
-                <label>
-                  <span>主动联系</span>
-                  <div class="toggle-row">
-                    <input type="checkbox" id="character-proactive-toggle">
-                    <span>允许系统在合适的时候主动给这个联系人发消息</span>
-                  </div>
-                </label>
-                <button type="submit" class="soft-button small-button" id="character-submit-button">保存角色</button>
-              </form>
+
+                <details class="details-panel">
+                  <summary>高级运行设置</summary>
+                  <div class="details-panel-body">
+                    <label>
+                      <span>上下文类型</span>
+                      <select id="character-role-level">
+                        <option value="contact">私人联系人</option>
+                        <option value="admin">管理员级角色</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>执行引擎</span>
+                      <select id="character-agent-type">
+                        <option value="">默认项目配置</option>
+                        <option value="codex">Codex</option>
+                        <option value="claudecode">Claude Code</option>
+                      </select>
+                    </label>
+                    <section class="runtime-settings-section" aria-labelledby="character-runtime-heading">
+                      <div class="runtime-settings-head">
+                        <div>
+                          <p class="eyebrow">运行时</p>
+                          <strong id="character-runtime-heading">项目设置</strong>
+                        </div>
+                        <span class="runtime-settings-status" id="character-runtime-status">未加载</span>
+                      </div>
+                      <label>
+                        <span>权限模式</span>
+                        <select id="character-agent-mode">
+                          <option value="suggest">建议 · 每次工具调用确认</option>
+                          <option value="auto-edit">自动编辑 · 文件编辑自动通过</option>
+                          <option value="full-auto">全自动 · 工作区沙箱内自动通过</option>
+                          <option value="yolo">完全自动模式（高风险） · 跳过审批与沙箱</option>
+                        </select>
+                      </label>
+                      <div class="runtime-toggle-grid">
+                        <label>
+                          <span>回复后缀</span>
+                          <div class="toggle-row">
+                            <input type="checkbox" id="character-runtime-reply-footer">
+                            <span>显示运行时回复后缀</span>
+                          </div>
+                        </label>
+                        <label>
+                          <span>上下文标记</span>
+                          <div class="toggle-row">
+                            <input type="checkbox" id="character-runtime-context-indicator">
+                            <span>显示上下文来源</span>
+                          </div>
+                        </label>
+                      </div>
+                      <label>
+                        <span>工作目录</span>
+                        <input type="text" id="character-runtime-work-dir" placeholder="/workspace/project">
+                      </label>
+                      <label>
+                        <span>禁用命令</span>
+                        <input type="text" id="character-runtime-disabled-commands" placeholder="rm, shutdown">
+                      </label>
+                      <label>
+                        <span>管理员来源</span>
+                        <input type="text" id="character-runtime-admin-from" placeholder="admin@example.test">
+                      </label>
+                    </section>
+                    <section class="runtime-settings-section text-mode-settings-section" aria-labelledby="character-text-mode-heading">
+                      <div class="runtime-settings-head">
+                        <div>
+                          <p class="eyebrow">显示方式</p>
+                          <strong id="character-text-mode-heading">文本与时间</strong>
+                        </div>
+                      </div>
+                      <div class="runtime-toggle-grid">
+                        <label>
+                          <span>分段回复</span>
+                          <div class="toggle-row">
+                            <input type="checkbox" id="character-waifu-text-mode">
+                            <span>按段落显示回复</span>
+                          </div>
+                        </label>
+                        <label>
+                          <span>隐藏标点</span>
+                          <div class="toggle-row">
+                            <input type="checkbox" id="character-waifu-remove-punctuation">
+                            <span>显示时隐藏句末标点</span>
+                          </div>
+                        </label>
+                        <label>
+                          <span>注入当前时间</span>
+                          <div class="toggle-row">
+                            <input type="checkbox" id="character-time-injection-enabled">
+                            <span>由后端加入运行时上下文</span>
+                          </div>
+                        </label>
+                      </div>
+                      <label class="range-field">
+                        <span>分段延迟 <strong id="character-waifu-delay-value">55 ms/字</strong></span>
+                        <input type="range" id="character-waifu-delay" min="20" max="160" step="5">
+	                      </label>
+	                      <label>
+	                        <span>时区</span>
+	                        <input type="text" id="character-timezone" placeholder="Etc/UTC">
+	                      </label>
+	                    </section>
+	                  </div>
+	                </details>
+	                <button type="submit" class="soft-button small-button" id="character-submit-button">保存角色</button>
+	              </form>
 
               <article class="info-card">
                 <p class="eyebrow">角色预览</p>
@@ -608,6 +690,6 @@
     </div>
   </div>
 
-  <script type="module" src="scripts/main.js?v=18"></script>
+  <script type="module" src="scripts/main.js?v=20"></script>
 </body>
 </html>

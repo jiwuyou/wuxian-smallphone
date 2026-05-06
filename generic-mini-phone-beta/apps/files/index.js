@@ -22,7 +22,7 @@ export const defaultState = {
   files: [
     { name: '地图草稿', type: 'folder', count: 8, updated: '今天', accent: 'green' },
     { name: '角色资料', type: 'folder', count: 12, updated: '昨天', accent: 'purple' },
-    { name: '世界书备份.json', type: 'file', count: 1, updated: '4 月 24 日', accent: 'blue' },
+    { name: '角色设定备份.json', type: 'file', count: 1, updated: '4 月 24 日', accent: 'blue' },
     { name: '待整理截图', type: 'folder', count: 31, updated: '4 月 21 日', accent: 'gold' },
   ],
 };
@@ -60,7 +60,7 @@ export const spaceTemplates = `
         <div class="archive-rack rack-right"><span>JSON</span><span>备份</span><span>素材</span></div>
       </div>
       <div class="warehouse-index">
-        <span>地图草稿</span><span>角色资料</span><span>世界书备份</span>
+        <span>地图草稿</span><span>角色资料</span><span>角色设定备份</span>
       </div>
     </div>
     <div class="space-actions">

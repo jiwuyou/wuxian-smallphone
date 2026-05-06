@@ -3568,20 +3568,54 @@ function resolveActiveMask(params) {
 
 function resolveWorldbookMatches(params) {
   const message = params.messageText.toLowerCase();
+  const contactId = String(params.contact?.id || "").trim();
+  const threadId = String(params.thread?.id || "").trim();
+  const contactWorldbookScopeIds = Array.isArray(params.contact?.worldbookScopeIds)
+    ? params.contact.worldbookScopeIds
+    : [];
   const matched = params.entries.filter((entry) => {
     if (entry.enabled === false) {
       return false;
     }
-    if (entry.mode === "always_on") {
+    const scope = String(entry.scope || "global").trim().toLowerCase();
+    const mode = String(entry.mode || "").trim().toLowerCase();
+    const triggers = entry.triggers && typeof entry.triggers === "object" ? entry.triggers : {};
+    const contactIds = Array.isArray(triggers.contactIds) ? triggers.contactIds : [];
+    const threadIds = Array.isArray(triggers.threadIds) ? triggers.threadIds : [];
+    const keywords = Array.isArray(triggers.keywords) ? triggers.keywords : [];
+
+    // Enforce semantic isolation: contact/thread-scoped entries only match within their scope.
+    // Global/turn-scoped entries can still apply across threads when otherwise matched.
+    if (scope === "contact") {
+      const contactMatched =
+        (contactId && contactIds.includes(contactId)) ||
+        (entry.id && contactWorldbookScopeIds.includes(entry.id)) ||
+        (threadId && threadIds.includes(threadId));
+      if (!contactMatched) {
+        return false;
+      }
+    } else if (scope === "thread") {
+      if (!(threadId && threadIds.includes(threadId))) {
+        return false;
+      }
+    }
+
+    if (mode === "always_on") {
+      // "always_on" means always-on within the current scope (global entries apply everywhere,
+      // contact/thread entries still require their scope to match the active contact/thread).
+      return scope !== "contact" && scope !== "thread"
+        ? true
+        : (contactId && contactIds.includes(contactId)) ||
+            (entry.id && contactWorldbookScopeIds.includes(entry.id)) ||
+            (threadId && threadIds.includes(threadId));
+    }
+    if (contactId && contactIds.includes(contactId)) {
       return true;
     }
-    if (entry.triggers.contactIds.includes(params.contact.id)) {
+    if (threadId && threadIds.includes(threadId)) {
       return true;
     }
-    if (entry.triggers.threadIds.includes(params.thread.id)) {
-      return true;
-    }
-    return entry.triggers.keywords.some((keyword) => keyword && message.includes(String(keyword).toLowerCase()));
+    return keywords.some((keyword) => keyword && message.includes(String(keyword).toLowerCase()));
   });
   return matched.sort((a, b) => b.priority - a.priority).slice(0, 6);
 }

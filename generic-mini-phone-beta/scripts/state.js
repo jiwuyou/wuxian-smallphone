@@ -9,7 +9,7 @@ export const defaultState = {
   },
   desktop: {
     page: 0,
-    mode: 'world',
+    mode: 'icons',
   },
   world: {
     version: 3,
@@ -70,9 +70,12 @@ export const defaultState = {
       summary: '我把今天的晚霞拍下来了，要不要一起去看海边夜市？',
       time: '10:16',
       description: '海边摄影师，语气温柔，擅长把日常说得很浪漫。',
-      personality: '温柔、观察细致、善于把普通时刻说得有画面感。',
-      scenario: '常出现在海边、码头、夜市和散步路线里，喜欢提出轻松的邀约。',
-      systemPrompt: '回复保持亲近感和自然停顿，不要说教，不要过度戏剧化。',
+      cardText: [
+        '描述：海边摄影师，语气温柔，擅长把日常说得很浪漫。',
+        '性格：温柔、观察细致、善于把普通时刻说得有画面感。',
+        '场景：常出现在海边、码头、夜市和散步路线里，喜欢提出轻松的邀约。',
+        '补充提示词：回复保持亲近感和自然停顿，不要说教，不要过度戏剧化。',
+      ].join('\n'),
       messages: [
         { side: 'other', text: '晚上海边风不大，适合慢慢走。你今天心情怎么样？' },
         { side: 'self', text: '有一点累，但想到出去透气就好多了。' },
@@ -89,9 +92,12 @@ export const defaultState = {
       summary: '记得把你的人设备注补完，我已经给你存进长期记忆了。',
       time: '昨天',
       description: '冷淡系记录员，负责整理记忆和提醒你收束剧情。',
-      personality: '克制、冷静、条理清晰，像一个负责收束长期记忆的观察者。',
-      scenario: '常在聊天里帮助整理偏好、关系和最近事件。',
-      systemPrompt: '说话简洁明确，尽量结构化，但保持有人味。',
+      cardText: [
+        '描述：冷淡系记录员，负责整理记忆和提醒你收束剧情。',
+        '性格：克制、冷静、条理清晰，像一个负责收束长期记忆的观察者。',
+        '场景：常在聊天里帮助整理偏好、关系和最近事件。',
+        '补充提示词：说话简洁明确，尽量结构化，但保持有人味。',
+      ].join('\n'),
       messages: [
         { side: 'other', text: '我刚刚把你最近提到的偏好整理好了，要不要顺便给角色关系打标签？' },
         { side: 'self', text: '好，先把“夜游”“胶片感”“慢节奏聊天”记进去。' },
@@ -108,9 +114,12 @@ export const defaultState = {
       summary: '苏苏：我已经把路线和拍照点发群里了。',
       time: '昨天',
       description: '群聊气氛担当小组，适合安排周末和多人剧情。',
-      personality: '热闹、轻松、适合多人协作和周末出行策划。',
-      scenario: '三人群聊，讨论路线、拍照点、零食和行程安排。',
-      systemPrompt: '群聊里保留人物区分感，让每个人说话各有特点。',
+      cardText: [
+        '描述：群聊气氛担当小组，适合安排周末和多人剧情。',
+        '性格：热闹、轻松、适合多人协作和周末出行策划。',
+        '场景：三人群聊，讨论路线、拍照点、零食和行程安排。',
+        '补充提示词：群聊里保留人物区分感，让每个人说话各有特点。',
+      ].join('\n'),
       messages: [
         { side: 'other', text: '苏苏：我把路线图发群里了，咖啡店和旧书店都顺路。' },
         { side: 'other', text: '林秋：傍晚去码头最合适，光线会很好。' },
@@ -155,11 +164,6 @@ export const defaultState = {
     { title: '关系节点', text: '林秋经常主动提出一起散步，是稳定的温柔陪伴型角色。', tags: ['关系', '林秋'] },
     { title: '剧情事件', text: '周末正在筹备一次海街夜市和码头散步的多人出游。', tags: ['事件', '群聊'] },
   ],
-  worldbook: [
-    { title: '海街', text: '角色共用主场景。白天是港口和旧书店，晚上是夜市和码头。', tags: ['地点', '主场景'], keys: ['海街', '码头', '夜市', '旧书店'], enabled: true },
-    { title: '相处规则', text: '整体氛围要柔和、留白，聊天更像日常碎语而不是任务对话。', tags: ['规则', '氛围'], keys: ['相处', '聊天', '氛围', '散步'], enabled: true },
-    { title: '摄影习惯', text: '林秋习惯拍傍晚的海面、路灯和走路时的背影。', tags: ['角色', '细节'], keys: ['林秋', '照片', '晚霞', '背影'], enabled: true },
-  ],
   journals: [
     {
       title: '今天的海风',
@@ -171,14 +175,120 @@ export const defaultState = {
 };
 
 export const panelMeta = {
-  settings: { eyebrow: '调试', title: '连接与提示词调试' },
-  'app-manager': { eyebrow: 'App', title: 'App 管理' },
-  character: { eyebrow: '角色', title: '角色详情与编辑' },
-  permissions: { eyebrow: '权限', title: '联系人权限' },
+  settings: { eyebrow: '设置', title: '系统设置' },
+  'app-manager': { eyebrow: '应用', title: '应用与服务' },
+  character: { eyebrow: '角色', title: '角色与运行设置' },
+  permissions: { eyebrow: '权限', title: '运行权限' },
+  imports: { eyebrow: '导入', title: '导入资料' },
+  persona: { eyebrow: '我的', title: '我的资料' },
+};
+
+export const uiMeta = {
+  contactCategories: [
+    { key: 'all', label: '全部' },
+    { key: 'unread', label: '未读' },
+    { key: 'groups', label: '群聊' },
+    { key: 'characters', label: '角色' },
+  ],
+  permissionModeLabels: {
+    suggest: { title: '建议', description: '每次工具调用确认' },
+    'auto-edit': { title: '自动编辑', description: '文件编辑自动通过' },
+    'full-auto': { title: '全自动', description: '工作区内自动通过' },
+    yolo: { title: '完全自动模式（高风险）', description: '跳过审批与沙箱' },
+    default: { title: '默认', description: '每次工具调用确认' },
+    acceptEdits: { title: '接受编辑', description: '自动允许文件编辑' },
+    plan: { title: '计划模式', description: '只规划不执行' },
+    auto: { title: '自动模式', description: '自动判断何时确认' },
+    bypassPermissions: { title: '完全自动模式（高风险）', description: '全部自动通过' },
+    dontAsk: { title: '静默拒绝', description: '未授权工具自动拒绝' },
+  },
 };
 
 export function cloneDefaultState() {
   return JSON.parse(JSON.stringify(defaultState));
+}
+
+function isPlainRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+const LEGACY_TOP_LEVEL_KEYS = new Set([
+  // Older versions stored a global worldbook in localStorage. We no longer support it.
+  'worldbook',
+]);
+
+const LEGACY_CHAT_KEYS = new Set([
+  // Deprecated per-chat role-card fields. We intentionally do not migrate them into cardText.
+  'personality',
+  'scenario',
+  'systemPrompt',
+  'system_prompt',
+  'worldbookContent',
+  'worldbook_content',
+  // Legacy role-card fields commonly carried over from imports.
+  'first_mes',
+  'firstMes',
+  'firstMessage',
+  'greeting',
+  'mes_example',
+  'mesExample',
+  'example_dialogue',
+  'exampleDialogue',
+  'post_history_instructions',
+  'postHistoryInstructions',
+  'creator_notes',
+  'creatorNotes',
+  'alternate_greetings',
+  'alternateGreetings',
+  'character_book',
+  'characterBook',
+  // Legacy card wrappers.
+  'roleCard',
+  'role_card',
+  'characterCard',
+  'character_card',
+  // Some older states may have stored worldbook blobs at the per-chat level.
+  'worldbook',
+  // Some imported character-card payloads wrap the entire card under a `data` key.
+  'data',
+]);
+
+function stripLegacyKeys(record, keys) {
+  if (!isPlainRecord(record)) return record;
+  let mutated = false;
+  const next = { ...record };
+  for (const key of keys) {
+    if (key in next) {
+      delete next[key];
+      mutated = true;
+    }
+  }
+  return mutated ? next : record;
+}
+
+function sanitizeLoadedState(incoming) {
+  if (!isPlainRecord(incoming)) return {};
+
+  const sanitized = stripLegacyKeys(incoming, LEGACY_TOP_LEVEL_KEYS);
+
+  if (!('chats' in sanitized)) return sanitized;
+  if (!isPlainRecord(sanitized.chats)) return sanitized;
+
+  const chats = sanitized.chats;
+  let changed = false;
+  const nextChats = { ...chats };
+
+  for (const [chatKey, chat] of Object.entries(chats)) {
+    if (!isPlainRecord(chat)) continue;
+    const cleaned = stripLegacyKeys(chat, LEGACY_CHAT_KEYS);
+    if (cleaned !== chat) {
+      nextChats[chatKey] = cleaned;
+      changed = true;
+    }
+  }
+
+  if (!changed) return sanitized;
+  return { ...sanitized, chats: nextChats };
 }
 
 export function loadState() {
@@ -186,7 +296,7 @@ export function loadState() {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return cloneDefaultState();
     const defaults = cloneDefaultState();
-    const incoming = JSON.parse(stored);
+    const incoming = sanitizeLoadedState(JSON.parse(stored));
     return {
       ...defaults,
       ...incoming,
@@ -231,9 +341,10 @@ export const uiState = {
   isGenerating: false,
   permissionSnapshot: null,
   permissionTargetChatKey: '',
+  contactFilter: 'all',
   pendingAttachments: [],
 };
 
 export function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizeLoadedState(state)));
 }

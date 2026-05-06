@@ -572,6 +572,7 @@ function createOpenClawHttpAdapter(config) {
         throw new Error("SMALLPHONE_OPENCLAW_HTTP_URL is required for openclaw-http mode.");
       }
       const routing = payload.thread?.runtime || {};
+      const outboundPayload = stripRuntimeRosterFields(payload);
       const response = await fetchWithTimeout(
         `${baseUrl.replace(/\/+$/, "")}/smallphone/turn`,
         {
@@ -581,7 +582,7 @@ function createOpenClawHttpAdapter(config) {
             ...(token ? { authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({
-            ...payload,
+            ...outboundPayload,
             runtimeRouting: {
               agentId: normalizeText(routing.agentId),
               workspaceDir: normalizeText(routing.workspaceDir),
@@ -612,6 +613,22 @@ function createOpenClawHttpAdapter(config) {
       };
     },
   };
+}
+
+function stripRuntimeRosterFields(payload) {
+  // Guardrail: runtime adapters should not forward whole rosters/state blobs
+  // (e.g. all contacts/personas). They should stick to per-turn fields supplied
+  // by domain (payload.character/contact/turnContext, etc).
+  if (!payload || typeof payload !== "object") {
+    return {};
+  }
+  const out = { ...payload };
+  for (const key of ["contacts", "characters", "personas"]) {
+    if (Object.prototype.hasOwnProperty.call(out, key)) {
+      delete out[key];
+    }
+  }
+  return out;
 }
 
 function createOpenAICompatibleAdapter(config) {
@@ -1512,4 +1529,11 @@ function sleep(ms) {
 
 module.exports = {
   createRuntimeAdapter,
+  _test: {
+    stripRuntimeRosterFields,
+    buildRuntimePrompt,
+    buildOpenAICompatibleMessages,
+    buildWebclientTurnMessage,
+    buildTurnContextBlock,
+  },
 };
