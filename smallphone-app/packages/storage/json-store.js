@@ -14,6 +14,7 @@ const DEFAULT_OFFICIAL_SHELL_ID = "official";
 const DEFAULT_THEME_ID = "default";
 const DEFAULT_DESKTOP_LAYOUT_ID = "default";
 const DEFAULT_APP_INSTANCE_ID = "instance-chat";
+const DEFAULT_WORKFLOWS_APP_INSTANCE_ID = "instance-workflows";
 const DEFAULT_CONTACT_WORKFLOW_ID = "smallphone.default.contact";
 const DEFAULT_CONTACT_WORKFLOW_VERSION = 1;
 const DEFAULT_CONTACT_WORKFLOW_USER_PERSONA =
@@ -539,6 +540,16 @@ function createDefaultUserContent(createdAt) {
         createdAt,
         updatedAt: createdAt,
       },
+      {
+        id: DEFAULT_WORKFLOWS_APP_INSTANCE_ID,
+        appId: "workflows",
+        title: "工作流",
+        source: "official",
+        settings: {},
+        state: {},
+        createdAt,
+        updatedAt: createdAt,
+      },
     ],
     themes: [
       {
@@ -559,6 +570,13 @@ function createDefaultUserContent(createdAt) {
           {
             instanceId: DEFAULT_APP_INSTANCE_ID,
             x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+          },
+          {
+            instanceId: DEFAULT_WORKFLOWS_APP_INSTANCE_ID,
+            x: 1,
             y: 0,
             w: 1,
             h: 1,
@@ -1269,10 +1287,30 @@ function normalizeDesktopLayouts(entries, defaults, createdAt) {
       id: String(entry.id || base.id || "").trim(),
       name: String(entry.name || entry.title || base.name || entry.id || "").trim(),
       source: normalizeContentSource(entry.source || base.source),
-      items: Array.isArray(entry.items) ? entry.items : Array.isArray(base.items) ? base.items : [],
+      items: normalizeDesktopLayoutItems(
+        Array.isArray(entry.items) ? entry.items : [],
+        Array.isArray(base.items) ? base.items : [],
+      ),
       createdAt: entry.createdAt || base.createdAt || createdAt,
       updatedAt: entry.updatedAt || base.updatedAt || entry.createdAt || createdAt,
     }));
+}
+
+function normalizeDesktopLayoutItems(items, defaultItems) {
+  const current = Array.isArray(items) ? items : [];
+  const defaults = Array.isArray(defaultItems) ? defaultItems : [];
+  const currentInstanceIds = new Set(
+    current
+      .map((item) => (item && typeof item.instanceId === "string" ? item.instanceId.trim() : ""))
+      .filter(Boolean),
+  );
+  return [
+    ...current,
+    ...defaults.filter((item) => {
+      const instanceId = item && typeof item.instanceId === "string" ? item.instanceId.trim() : "";
+      return instanceId && !currentInstanceIds.has(instanceId);
+    }),
+  ];
 }
 
 function normalizeShells(entries, defaults, createdAt) {

@@ -299,6 +299,42 @@ test("user content: default includes workflows app", () => {
     });
     const content = service.getUserContent();
     assert.ok(content.apps.find((app) => app.id === "workflows"));
+    assert.ok(content.appInstances.find((instance) => instance.id === "instance-workflows" && instance.appId === "workflows"));
+    const defaultLayout = content.desktopLayouts.find((layout) => layout.id === "default");
+    assert.ok(defaultLayout);
+    assert.ok(defaultLayout.items.find((item) => item.instanceId === "instance-workflows"));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("user content: existing default desktop layout backfills workflows app instance", () => {
+  const home = tmpHome();
+  try {
+    const service = new SmallPhoneService({
+      smallphoneHome: home,
+      runtime: { mode: "mock" },
+    });
+    const seeded = service.store.read();
+    const legacy = structuredClone(seeded);
+    legacy.appInstances = legacy.appInstances.filter((item) => item.id !== "instance-workflows");
+    legacy.desktopLayouts = legacy.desktopLayouts.map((layout) =>
+      layout.id === "default"
+        ? {
+            ...layout,
+            items: layout.items.filter((item) => item.instanceId !== "instance-workflows"),
+          }
+        : layout,
+    );
+    fs.writeFileSync(service.store.filePath, JSON.stringify(legacy, null, 2));
+
+    const content = service.getUserContent();
+
+    assert.ok(content.apps.find((app) => app.id === "workflows"));
+    assert.ok(content.appInstances.find((instance) => instance.id === "instance-workflows" && instance.appId === "workflows"));
+    const defaultLayout = content.desktopLayouts.find((layout) => layout.id === "default");
+    assert.ok(defaultLayout);
+    assert.ok(defaultLayout.items.find((item) => item.instanceId === "instance-workflows"));
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
