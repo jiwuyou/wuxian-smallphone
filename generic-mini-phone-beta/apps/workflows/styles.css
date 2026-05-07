@@ -1,0 +1,400 @@
+.promptboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.promptboard-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+
+.promptboard-meta {
+  margin: 0 0 14px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.promptboard-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 16px 0 12px;
+}
+
+.promptboard-preview-head strong {
+  display: block;
+  font-size: 15px;
+}
+
+.promptboard-subtitle {
+  margin: 6px 0 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.promptboard-pill {
+  flex: none;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: var(--surface-alt);
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.promptboard-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.promptboard-empty {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface-strong);
+}
+
+.promptboard-empty strong {
+  font-size: 16px;
+}
+
+.promptboard-empty p {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.prompt-segment-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface-strong);
+}
+
+.prompt-segment-disabled {
+  opacity: 0.72;
+}
+
+.prompt-segment-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-segment-title {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.prompt-segment-title strong {
+  font-size: 16px;
+}
+
+.prompt-segment-chip {
+  flex: none;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: var(--surface-alt);
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.prompt-segment-chip-override {
+  background: rgba(67, 151, 138, 0.12);
+  color: var(--primary);
+}
+
+.prompt-segment-toggle {
+  width: 58px;
+  height: 34px;
+  flex: 0 0 58px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 14px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.prompt-segment-toggle:hover,
+.prompt-segment-toggle-on {
+  transform: translateY(-1px);
+}
+
+.prompt-segment-toggle-on {
+  background: var(--primary);
+  color: var(--surface-strong);
+}
+
+.prompt-segment-desc {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.prompt-segment-text {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--surface);
+  outline: none;
+  resize: vertical;
+  min-height: 88px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.prompt-segment-text:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.prompt-segment-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.promptboard-preview-text {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--surface);
+  outline: none;
+  resize: vertical;
+  min-height: 120px;
+  line-height: 1.45;
+}
+
+.promptboard-final-text {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--surface);
+  outline: none;
+  resize: vertical;
+  min-height: 220px;
+  line-height: 1.45;
+}
+
+.promptboard-final-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 12px 0 0;
+}
+
+.promptboard-module-body {
+  display: grid;
+  gap: 12px;
+  overflow-y: auto;
+  max-height: calc(100% - 70px);
+  padding-right: 2px;
+}
+
+.promptboard-module-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.promptboard-chip {
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: var(--surface-alt);
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.promptboard-chip-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.promptboard-module-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.promptboard-trace-text {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--surface);
+  outline: none;
+  resize: vertical;
+  min-height: 160px;
+  line-height: 1.45;
+}
+
+.promptboard-trace-warnings p {
+  margin: 0 0 8px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.promptboard-trace-muted {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workflow-board-scene,
+.workflow-lab-scene {
+  position: relative;
+  min-height: 360px;
+  border-radius: 28px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(57, 142, 128, 0.18), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(221, 232, 240, 0.86));
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.workflow-node,
+.workflow-console-panel,
+.workflow-rack,
+.workflow-terminal,
+.workflow-orb {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: var(--shadow-soft);
+}
+
+.workflow-node {
+  width: 92px;
+  height: 92px;
+  border-radius: 26px;
+  font-weight: 750;
+}
+
+.workflow-node:nth-child(1) { left: 28px; top: 42px; }
+.workflow-node:nth-child(2) { right: 34px; top: 92px; }
+.workflow-node:nth-child(3) { left: 94px; bottom: 58px; }
+
+.workflow-node.node-active {
+  background: linear-gradient(135deg, #3fbaa6, #6879ff);
+  color: #fff;
+}
+
+.workflow-link {
+  position: absolute;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(80, 118, 160, 0.28);
+  transform-origin: left center;
+}
+
+.workflow-link.link-a {
+  width: 160px;
+  left: 112px;
+  top: 108px;
+  transform: rotate(14deg);
+}
+
+.workflow-link.link-b {
+  width: 130px;
+  left: 120px;
+  bottom: 128px;
+  transform: rotate(-24deg);
+}
+
+.workflow-console-panel {
+  right: 26px;
+  bottom: 28px;
+  width: 132px;
+  height: 86px;
+  border-radius: 22px;
+  text-align: center;
+}
+
+.workflow-console-panel strong {
+  font-size: 28px;
+}
+
+.workflow-console-panel span,
+.workflow-terminal span {
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.workflow-rack {
+  width: 98px;
+  height: 190px;
+  border-radius: 24px;
+  font-weight: 750;
+}
+
+.workflow-rack.rack-left {
+  left: 28px;
+  top: 82px;
+  transform: perspective(420px) rotateY(18deg);
+}
+
+.workflow-rack.rack-right {
+  right: 28px;
+  top: 82px;
+  transform: perspective(420px) rotateY(-18deg);
+}
+
+.workflow-orb {
+  left: 50%;
+  top: 64px;
+  width: 116px;
+  height: 116px;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #2bb39d, #7c87ff);
+  color: #fff;
+  font-weight: 800;
+}
+
+.workflow-terminal {
+  left: 50%;
+  bottom: 44px;
+  width: min(230px, calc(100% - 52px));
+  min-height: 92px;
+  transform: translateX(-50%);
+  border-radius: 24px;
+  padding: 14px;
+  text-align: center;
+}
