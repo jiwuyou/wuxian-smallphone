@@ -34,6 +34,9 @@ let promptBoardState = {
     open: false,
     moduleId: '',
   },
+  ui: {
+    showDisabledModules: false,
+  },
   caches: {
     messagesByThreadId: new Map(),
     turnContextByThreadId: new Map(),
@@ -91,8 +94,8 @@ export const template = `
 
     <div class="promptboard-preview-head">
       <div>
-        <strong>发送到 9840 的最终文本（按模块分段）</strong>
-        <p class="promptboard-subtitle">点模块标题进入编辑器；在分段文本框里修改的内容会保存为后端 contentOverride。</p>
+        <strong>合并预览（真实发送文本）</strong>
+        <p class="promptboard-subtitle">这是最终发给 9840 的文本；颜色只用于标记模块边界，点击对应颜色段进入编辑。</p>
       </div>
       <span class="promptboard-pill" id="promptboard-source">local</span>
     </div>
@@ -100,7 +103,7 @@ export const template = `
     <div class="promptboard-sections" id="promptboard-sections"></div>
 
     <details class="details-panel promptboard-details" id="promptboard-details">
-      <summary>合并预览（真实发送文本）</summary>
+      <summary>复制纯文本</summary>
       <div class="details-panel-body">
         <textarea id="promptboard-final-text" class="promptboard-final-text" rows="10" spellcheck="false" readonly></textarea>
         <div class="promptboard-final-actions">
@@ -202,31 +205,37 @@ export function bind() {
   sections?.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
-    if (target.closest('textarea, button, input, select, a')) return;
+
+    const disabledToggle = target.closest('[data-prompt-disabled-toggle]');
+    if (disabledToggle) {
+      event.preventDefault();
+      promptBoardState = {
+        ...promptBoardState,
+        ui: {
+          ...promptBoardState.ui,
+          showDisabledModules: !promptBoardState.ui?.showDisabledModules,
+        },
+      };
+      renderPromptBoard();
+      return;
+    }
+
+    const toggle = target.closest('[data-prompt-toggle]');
+    if (toggle) {
+      const moduleId = String(toggle.getAttribute('data-prompt-toggle') || '').trim();
+      if (!moduleId) return;
+      event.preventDefault();
+      toggleModuleEnabled(moduleId);
+      return;
+    }
+
+    if (target.closest('textarea, input, select, a')) return;
+    if (target.closest('button') && !target.closest('[data-prompt-module]')) return;
     const card = target.closest('[data-prompt-module]');
     if (!card) return;
     const moduleId = String(card.getAttribute('data-prompt-module') || '').trim();
     if (!moduleId) return;
     openModuleEditor(moduleId);
-  });
-
-  sections?.addEventListener('input', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLTextAreaElement)) return;
-    const moduleId = String(target.getAttribute('data-prompt-output') || '').trim();
-    if (!moduleId) return;
-    setModuleContentOverride(moduleId, target.value);
-  });
-
-  sections?.addEventListener('click', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const toggle = target.closest('[data-prompt-toggle]');
-    if (!toggle) return;
-    const moduleId = String(toggle.getAttribute('data-prompt-toggle') || '').trim();
-    if (!moduleId) return;
-    event.preventDefault();
-    toggleModuleEnabled(moduleId);
   });
 
   qs('#promptboard-preview-text')?.addEventListener('input', (event) => {
@@ -256,22 +265,6 @@ function renderPromptBoard() {
   const finalTextArea = qs('#promptboard-final-text');
   const previewTextArea = qs('#promptboard-preview-text');
   if (!status || !meta || !threadSelect || !sections || !source || !finalTextArea || !previewTextArea) return;
-
-  let focusedModuleId = '';
-  let focusedModuleSelection = null;
-  let focusedModuleScrollTop = 0;
-  if (document.activeElement instanceof HTMLTextAreaElement) {
-    const active = document.activeElement;
-    const moduleId = String(active.getAttribute('data-prompt-output') || '').trim();
-    if (moduleId) {
-      focusedModuleId = moduleId;
-      focusedModuleSelection = {
-        start: Number.isFinite(active.selectionStart) ? active.selectionStart : 0,
-        end: Number.isFinite(active.selectionEnd) ? active.selectionEnd : 0,
-      };
-      focusedModuleScrollTop = active.scrollTop;
-    }
-  }
 
   const workflowKey = promptBoardState.selectedWorkflowKey;
   const moduleCount = promptBoardState.modules.length;
@@ -313,15 +306,7 @@ function renderPromptBoard() {
   }
 
   const compiled = compile.result;
-  const sectionsHtml = promptBoardState.modules.length
-    ? promptBoardState.modules.map((module) => renderModuleSegment(module, compiled)).join('')
-    : `
-      <article class="promptboard-empty">
-        <strong>没有模块</strong>
-        <p>当前工作流没有 promptBoard/modules，已用内置模块模板填充。</p>
-      </article>
-    `;
-  sections.innerHTML = sectionsHtml;
+  sections.innerHTML = renderPromptBoardPreview(compiled);
 
   if (document.activeElement !== finalTextArea) {
     finalTextArea.value = compiled?.finalText || '';
@@ -329,21 +314,6 @@ function renderPromptBoard() {
 
   if (document.activeElement !== previewTextArea) {
     previewTextArea.value = promptBoardState.previewText || inferPreviewText(thread);
-  }
-
-  if (focusedModuleId) {
-    const textarea = sections.querySelector(`[data-prompt-output="${cssEscape(focusedModuleId)}"]`);
-    if (textarea instanceof HTMLTextAreaElement && !textarea.disabled) {
-      textarea.focus({ preventScroll: true });
-      if (focusedModuleSelection) {
-        try {
-          textarea.setSelectionRange(focusedModuleSelection.start, focusedModuleSelection.end);
-        } catch {
-          // ignore
-        }
-      }
-      textarea.scrollTop = focusedModuleScrollTop;
-    }
   }
 
   if (promptBoardState.editor.open) {
@@ -370,37 +340,147 @@ function renderThreadOption(thread, selectedId) {
   return `<option value="${escapeHtml(id)}"${id === selectedId ? ' selected' : ''}>${escapeHtml(label)}</option>`;
 }
 
-function renderModuleSegment(module, compiled) {
+function renderPromptBoardPreview(compiled) {
+  const modules = Array.isArray(promptBoardState.modules) ? promptBoardState.modules : [];
+  if (!modules.length) {
+    return `
+      <article class="promptboard-empty">
+        <strong>没有模块</strong>
+        <p>当前工作流没有 promptBoard/modules，已用内置模块模板填充。</p>
+      </article>
+    `;
+  }
+
+  const enabledModules = modules.filter((module) => module?.enabled !== false);
+  const disabledModules = modules.filter((module) => module?.enabled === false);
+  const body = enabledModules.length
+    ? renderMergedPreview(enabledModules, compiled)
+    : `
+      <article class="promptboard-empty">
+        <strong>没有启用的模块</strong>
+        <p>打开底部的未启用模块列表，启用至少一个模块后会生成合并预览。</p>
+      </article>
+    `;
+
+  return `
+    <div class="prompt-preview-canvas" aria-label="合并预览">
+      ${body}
+    </div>
+    ${renderDisabledModuleDrawer(disabledModules, compiled)}
+  `;
+}
+
+function renderMergedPreview(enabledModules, compiled) {
+  return `
+    <div class="prompt-merged-preview" aria-label="纯文本合并预览">
+      ${enabledModules.map((module, index) => renderMergedSegment(module, compiled, index)).join('<span class="prompt-merged-gap" aria-hidden="true">\\n\\n</span>')}
+    </div>
+  `;
+}
+
+function renderMergedSegment(module, compiled, index) {
+  const id = String(module?.id || '').trim();
+  const title = String(module?.title || id).trim() || id;
+  const displayText = getCompiledModuleText(module, compiled);
+  const usingOverride = Boolean(String(module?.contentOverride || '').trim());
+  const empty = !String(displayText || '').trim();
+  const colorClass = `prompt-preview-color-${Math.abs(index) % 8}`;
+
+  return `
+    <button class="prompt-merged-segment ${colorClass}${empty ? ' prompt-preview-empty' : ''}" data-prompt-module="${escapeHtml(id)}" type="button" title="${escapeHtml(title)} · ${escapeHtml(id)}">
+      <span class="prompt-merged-label">${escapeHtml(title)}${usingOverride ? ' · 已改写' : ''}</span>
+      <span class="prompt-merged-text">${escapeHtml(displayText || '空模块：点击补充模板或覆盖内容。')}</span>
+    </button>
+  `;
+}
+
+function renderDisabledModuleDrawer(disabledModules, compiled) {
+  const count = disabledModules.length;
+  const open = Boolean(promptBoardState.ui?.showDisabledModules);
+  if (!count) {
+    return `
+      <div class="promptboard-disabled-drawer">
+        <span class="promptboard-disabled-empty">没有未启用的模块</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="promptboard-disabled-drawer${open ? ' promptboard-disabled-drawer-open' : ''}">
+      <button class="secondary-button promptboard-disabled-toggle" data-prompt-disabled-toggle type="button" aria-expanded="${open ? 'true' : 'false'}">
+        ${open ? '收起未启用模块' : `展开全部（${count} 个未启用）`}
+      </button>
+      ${open ? `
+        <div class="promptboard-disabled-list">
+          ${disabledModules.map((module, index) => renderDisabledModule(module, compiled, index)).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderDisabledModule(module, compiled, index) {
   const id = String(module?.id || '').trim();
   const title = String(module?.title || id).trim() || id;
   const description = String(module?.description || '').trim();
-  const enabled = module?.enabled !== false;
-  const trace = compiled?.traceByModuleId?.[id] || null;
-  const text = typeof trace?.text === 'string' ? trace.text : '';
-  const override = String(module?.contentOverride || '').trim();
-  const usingOverride = Boolean(override);
-  const displayText = usingOverride ? module.contentOverride : text;
+  const displayText = getCompiledModuleText(module, compiled);
+  const colorClass = `prompt-preview-color-${Math.abs(index) % 8}`;
 
   return `
-    <article class="prompt-segment-card${enabled ? '' : ' prompt-segment-disabled'}" data-prompt-module="${escapeHtml(id)}">
-      <div class="prompt-segment-head">
-        <div class="prompt-segment-title">
-          <strong>${escapeHtml(title)}</strong>
-          <span class="prompt-segment-chip">标题/说明不发送</span>
-          ${usingOverride ? '<span class="prompt-segment-chip prompt-segment-chip-override">已手动改写</span>' : ''}
-        </div>
-        <button class="prompt-segment-toggle${enabled ? ' prompt-segment-toggle-on' : ''}" data-prompt-toggle="${escapeHtml(id)}" type="button" aria-pressed="${enabled ? 'true' : 'false'}">
-          ${enabled ? '启用' : '停用'}
-        </button>
+    <article class="prompt-disabled-card ${colorClass}" data-prompt-module="${escapeHtml(id)}">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(description || '停用后不会进入发送文本。')}</p>
       </div>
-      ${description ? `<p class="prompt-segment-desc">${escapeHtml(description)}</p>` : ''}
-      <textarea class="prompt-segment-text" rows="4" spellcheck="false" data-prompt-output="${escapeHtml(id)}"${enabled ? '' : ' disabled'}>${escapeHtml(displayText)}</textarea>
-      <div class="prompt-segment-foot">
-        <span>${escapeHtml(id)}</span>
-        <span>${enabled ? (displayText ? `${displayText.length} 字符` : '空') : '已停用'}</span>
-      </div>
+      <pre>${escapeHtml(displayText || module?.template || '空模块')}</pre>
+      <button class="prompt-segment-toggle" data-prompt-toggle="${escapeHtml(id)}" type="button" aria-pressed="false">启用</button>
     </article>
   `;
+}
+
+function getCompiledModuleText(module, compiled) {
+  const id = String(module?.id || '').trim();
+  if (!id) return '';
+
+  const override = String(module?.contentOverride || '').replaceAll('\r\n', '\n');
+  if (override.trim()) return override;
+
+  const section = findCompiledSection(compiled?.sections, id);
+  const sectionText = getSectionText(section);
+  if (sectionText) return sectionText;
+
+  const traceSection = findCompiledSection(compiled?.trace?.sections, id);
+  const traceSectionText = getSectionText(traceSection);
+  if (traceSectionText) return traceSectionText;
+
+  const trace = compiled?.traceByModuleId?.[id] || null;
+  const traceText = getSectionText(trace);
+  if (traceText) return traceText;
+
+  const traceListItem = findCompiledSection(Array.isArray(compiled?.trace) ? compiled.trace : [], id);
+  const traceListText = getSectionText(traceListItem);
+  return traceListText || '';
+}
+
+function findCompiledSection(list, moduleId) {
+  const id = String(moduleId || '').trim();
+  if (!id || !Array.isArray(list)) return null;
+  return list.find((item) => {
+    const candidate = String(item?.moduleId || item?.module_id || item?.id || item?.module?.id || '').trim();
+    return candidate === id;
+  }) || null;
+}
+
+function getSectionText(section) {
+  if (!section || typeof section !== 'object') return '';
+  const value = typeof section.text === 'string'
+    ? section.text
+    : typeof section.content === 'string'
+      ? section.content
+      : typeof section.output === 'string'
+        ? section.output
+        : '';
+  return String(value || '').replaceAll('\r\n', '\n');
 }
 
 function ensurePromptBoardLoaded() {
