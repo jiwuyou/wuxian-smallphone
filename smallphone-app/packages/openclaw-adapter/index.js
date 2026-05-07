@@ -1259,6 +1259,9 @@ async function buildWebclientImages(imageAttachments) {
 }
 
 function buildWebclientTurnMessage(payload, fileAttachments) {
+  if (typeof payload?.promptBoardCompiled?.finalText === "string") {
+    return payload.promptBoardCompiled.finalText;
+  }
   const latestUserText = getLatestRuntimeUserText(payload);
   const triggerNote = normalizeText(payload?.trigger?.note);
   const primaryText =

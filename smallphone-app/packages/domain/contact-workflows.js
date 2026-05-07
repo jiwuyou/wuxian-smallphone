@@ -1,9 +1,15 @@
+const { createDefaultPromptBoardModulesV1 } = require("../shared/prompt-board");
+
 const CONTACT_WORKFLOWS = [
   {
     id: "smallphone.default.contact",
     version: 1,
     name: "Default Contact",
     description: "Default SmallPhone 1:1 contact workflow (workspace + contact persona + user persona).",
+    promptBoardDefaults: {
+      version: 1,
+      modules: createDefaultPromptBoardModulesV1(),
+    },
     contactConfigSchema: {
       type: "object",
       additionalProperties: true,
@@ -64,6 +70,10 @@ const CONTACT_WORKFLOWS = [
     version: 1,
     name: "Task Agent",
     description: "Workflow for a task-focused agent contact (still requires workspace + personas).",
+    promptBoardDefaults: {
+      version: 1,
+      modules: createDefaultPromptBoardModulesV1(),
+    },
     contactConfigSchema: {
       type: "object",
       additionalProperties: true,

@@ -301,7 +301,7 @@ test("shell paths: empty shell asset path resolves shell entry", () => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-test("server: /shells/<id>/ serves shell entry when asset path is empty", async () => {
+test("server: /shells/<id>/ serves shell entry when asset path is empty", async (t) => {
   const home = tmpHome();
   const shellRoot = path.join(home, "shells", "custom-shell");
   fs.mkdirSync(path.join(shellRoot, "dist"), { recursive: true });
@@ -324,7 +324,17 @@ test("server: /shells/<id>/ serves shell entry when asset path is empty", async 
     activeShell: "custom-shell",
   });
 
-  const port = await getFreePort();
+  let port = 0;
+  try {
+    port = await getFreePort();
+  } catch (err) {
+    if (String(err?.code) === "EPERM") {
+      t.skip("network listen not permitted in this environment");
+      fs.rmSync(home, { recursive: true, force: true });
+      return;
+    }
+    throw err;
+  }
   const child = spawn(process.execPath, ["./apps/core/server.js"], {
     cwd: path.join(__dirname, ".."),
     env: {

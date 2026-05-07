@@ -10,6 +10,11 @@ const {
 const { createRuntimeAdapter } = require("../openclaw-adapter");
 const { createId, nowIso } = require("../shared/types");
 const {
+  compilePromptBoard,
+  normalizePromptBoardModules,
+  createDefaultPromptBoardModulesV1,
+} = require("../shared/prompt-board");
+const {
   isPathInside,
   resolveShellAssetPath,
   resolveSmallPhonePaths,
@@ -2092,6 +2097,27 @@ class SmallPhoneService {
       messageText: reminder.note,
       persist: true,
     });
+    const promptBoardCompiled =
+      this.runtimeInfo.id === "cc-webclient"
+        ? compileCcWebclientPromptBoard({
+            modules: this.resolveThreadPromptBoardModules(thread),
+            thread: routedThread,
+            contact,
+            character,
+            relationship: contact.relationship,
+            memories,
+            messages,
+            runtimeUserText: "",
+            timeContext: buildRuntimeTimeContext(resolveThreadTimeSettings({ contact, thread })),
+            turnContext,
+            attachments: [],
+            trigger: {
+              type: "scheduled_check",
+              note: reminder.note,
+              mode: "decision_only",
+            },
+          })
+        : null;
     const resolved = await this.runtime.sendTurn({
       runtimeSessionId: routedThread.runtimeSessionId,
       thread: routedThread,
@@ -2107,6 +2133,7 @@ class SmallPhoneService {
         note: reminder.note,
         mode: "decision_only",
       },
+      ...(promptBoardCompiled ? { promptBoardCompiled } : {}),
     });
     const decision = normalizeReminderDecision(resolved?.decision, resolved?.assistantText);
     if (decision.action === "skip") {
@@ -2378,6 +2405,34 @@ class SmallPhoneService {
     });
     assertPermissionAllowed(permissionEvaluation, ["chat.send", "model.use"]);
 
+    const runtimeAttachments = attachmentIds
+      .map((id) => nextState.attachments.find((item) => item.id === id) || null)
+      .filter(Boolean)
+      .map((attachment) => ({
+        ...attachment,
+        // Ensure runtime always sees local paths when present.
+        localPath: attachment.localPath || "",
+        url: attachment.url || "",
+      }));
+
+    const promptBoardCompiled =
+      this.runtimeInfo.id === "cc-webclient"
+        ? compileCcWebclientPromptBoard({
+            modules: this.resolveThreadPromptBoardModules(thread),
+            thread: routedThread,
+            contact,
+            character,
+            relationship: contact.relationship,
+            memories,
+            messages,
+            runtimeUserText,
+            timeContext,
+            turnContext,
+            attachments: runtimeAttachments,
+            trigger: null,
+          })
+        : null;
+
     let runtimeResult;
     try {
       runtimeResult = await this.runtime.sendTurn({
@@ -2396,15 +2451,8 @@ class SmallPhoneService {
         ...(runtimePassThrough
           ? { runtimePassThroughText: runtimeTextParts.length > 1 ? runtimeUserText : rawText }
           : {}),
-        attachments: attachmentIds
-          .map((id) => nextState.attachments.find((item) => item.id === id) || null)
-          .filter(Boolean)
-          .map((attachment) => ({
-            ...attachment,
-            // Ensure runtime always sees local paths when present.
-            localPath: attachment.localPath || "",
-            url: attachment.url || "",
-          })),
+        ...(promptBoardCompiled ? { promptBoardCompiled } : {}),
+        attachments: runtimeAttachments,
         turnContext,
         permissions: permissionEvaluation,
         onEvent: (event) => {
@@ -2663,6 +2711,137 @@ class SmallPhoneService {
       messageText: text,
       persist: false,
     });
+  }
+
+  getThreadPromptBoard(threadId) {
+    const state = this.store.read();
+    const thread = state.threads.find((item) => item.id === threadId);
+    if (!thread) {
+      throw new Error(`Thread not found: ${threadId}`);
+    }
+    const stored = isPlainObject(thread.promptBoard) ? thread.promptBoard : null;
+    const resolvedModules = this.resolveThreadPromptBoardModules(thread);
+    return {
+      threadId: thread.id,
+      version: Number.isFinite(Number(stored?.version)) ? Number(stored.version) : 1,
+      modules: resolvedModules,
+      source: Array.isArray(stored?.modules) && stored.modules.length ? "thread" : "workflow",
+      updatedAt: stored?.updatedAt || "",
+    };
+  }
+
+  saveThreadPromptBoard(threadId, input = {}) {
+    const state = this.store.read();
+    const thread = state.threads.find((item) => item.id === threadId);
+    if (!thread) {
+      throw new Error(`Thread not found: ${threadId}`);
+    }
+    const modules = normalizePromptBoardModules(input?.modules);
+    const updatedAt = nowIso();
+    this.store.update((draft) => {
+      const liveThread = draft.threads.find((item) => item.id === threadId);
+      if (!liveThread) return draft;
+      liveThread.promptBoard = {
+        version: 1,
+        modules,
+        updatedAt,
+      };
+      liveThread.updatedAt = updatedAt;
+      return draft;
+    });
+    return this.getThreadPromptBoard(threadId);
+  }
+
+  previewThreadPromptBoard(threadId, input = {}) {
+    const state = this.store.read();
+    const thread = state.threads.find((item) => item.id === threadId);
+    if (!thread) {
+      throw new Error(`Thread not found: ${threadId}`);
+    }
+    const contact = state.contacts.find((item) => item.id === thread.contactId);
+    if (!contact) {
+      throw new Error(`Contact not found for thread: ${threadId}`);
+    }
+    const character = state.characters.find((item) => item.id === contact.characterId);
+    if (!character) {
+      throw new Error(`Character not found for contact: ${contact.id}`);
+    }
+
+    const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
+
+    const attachmentIds = normalizeAttachmentIds(input?.attachments || input?.attachmentIds || []);
+    const resolvedAttachments = attachmentIds.map((id) => state.attachments.find((item) => item.id === id) || null);
+    if (resolvedAttachments.some((item) => !item)) {
+      const missing = attachmentIds.filter((id, idx) => !resolvedAttachments[idx]);
+      throw new Error(`Attachment(s) not found: ${missing.join(", ")}`);
+    }
+
+    const textParts = normalizeRuntimeTextParts(input?.textParts || input?.messageParts || input?.parts);
+    const rawText = input?.text == null ? textParts.join("\n") : String(input.text);
+    const displayText = rawText.trim();
+    const escapedPassThrough = displayText.startsWith("//");
+    const text = escapedPassThrough ? displayText.slice(1) : displayText;
+    const runtimeTextParts = textParts.length ? textParts : text ? [text] : [];
+    const runtimeUserText = buildRuntimeUserText(runtimeTextParts);
+
+    const messages = state.messages.filter((item) => item.threadId === threadId);
+    const timeContext = buildRuntimeTimeContext(resolveThreadTimeSettings({ contact, thread }));
+    const turnContext = text
+      ? this.buildTurnContext({
+          state,
+          threadId,
+          messageText: text,
+          persist: false,
+        })
+      : null;
+
+    const runtimeAttachments = resolvedAttachments
+      .filter(Boolean)
+      .map((attachment) => ({
+        ...attachment,
+        // Keep parity with runtime sendTurn payloads.
+        localPath: attachment.localPath || "",
+        url: attachment.url || "",
+      }));
+
+    const modulesOverride = hasOwn(input, "modules") ? normalizePromptBoardModules(input.modules) : null;
+    const compiled = compileCcWebclientPromptBoard({
+      modules: modulesOverride || this.resolveThreadPromptBoardModules(thread),
+      thread: routedThread,
+      contact,
+      character,
+      relationship: contact.relationship,
+      memories: state.memories
+        .filter((item) => item.threadId === threadId || item.scope === "global")
+        .sort((a, b) => b.salience - a.salience)
+        .slice(0, 5),
+      messages,
+      runtimeUserText,
+      timeContext,
+      turnContext,
+      attachments: runtimeAttachments,
+      trigger: null,
+    });
+
+    return {
+      threadId: thread.id,
+      compiled,
+      ...compiled,
+    };
+  }
+
+  resolveThreadPromptBoardModules(thread) {
+    const stored = isPlainObject(thread?.promptBoard) ? thread.promptBoard : null;
+    const storedModules = Array.isArray(stored?.modules) ? stored.modules : null;
+    if (storedModules && storedModules.length) {
+      return normalizePromptBoardModules(storedModules);
+    }
+    const def = getWorkflowDefinition(thread?.workflowId, thread?.workflowVersion);
+    const workflowDefaults = def?.promptBoardDefaults?.modules;
+    if (Array.isArray(workflowDefaults) && workflowDefaults.length) {
+      return normalizePromptBoardModules(workflowDefaults);
+    }
+    return normalizePromptBoardModules(createDefaultPromptBoardModulesV1());
   }
 
   buildTurnContext(params) {
@@ -3247,6 +3426,10 @@ function buildRuntimeUserText(parts) {
   return normalizedParts.map((part, index) => `当前消息第${index + 1}条：${part}`).join("\n");
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function assertNoLegacyCompanionFields(input) {
   const legacyKeys = ["persona", "workspaceDir", "worldbookContent"];
   const found = legacyKeys.filter((key) => hasOwn(input, key));
@@ -3397,6 +3580,121 @@ function buildRuntimeTimeContext(settings = {}, date = new Date()) {
       `- utc: ${utcIso}`,
     ].join("\n"),
   };
+}
+
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function buildPromptBoardTurnContextBlock(turnContext) {
+  if (!turnContext) {
+    return "";
+  }
+  const lines = ["Dynamic SmallPhone context:"];
+  if (turnContext.activeMask?.id) {
+    lines.push(
+      `- Active mask: ${turnContext.activeMask.id} (${Number(turnContext.activeMask.confidence || 0).toFixed(2)})`,
+    );
+  }
+  if (turnContext.relationshipState?.id) {
+    lines.push(
+      `- Relationship state: ${turnContext.relationshipState.id} (${Number(turnContext.relationshipState.intensity || 0).toFixed(2)})`,
+    );
+  }
+  if (Array.isArray(turnContext.matchedWorldbookEntries) && turnContext.matchedWorldbookEntries.length) {
+    lines.push("- Matched worldbook:");
+    for (const entry of turnContext.matchedWorldbookEntries) {
+      lines.push(`  - ${entry.name || entry.id}: ${entry.content}`);
+    }
+  }
+  if (Array.isArray(turnContext.replyGuidance) && turnContext.replyGuidance.length) {
+    lines.push("- Reply guidance:");
+    for (const guidance of turnContext.replyGuidance) {
+      lines.push(`  - ${guidance}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function buildPromptBoardFileBlock(attachments) {
+  const fileAttachments = Array.isArray(attachments)
+    ? attachments.filter((att) => normalizeText(att?.kind) === "file")
+    : [];
+  if (fileAttachments.length === 0) {
+    return "";
+  }
+  const lines = ["Attached files (read local_path on the host):"];
+  for (const att of fileAttachments) {
+    const fileName = normalizeText(att?.fileName) || "(unnamed)";
+    const mimeType = normalizeText(att?.mimeType) || "application/octet-stream";
+    const size = Number.isFinite(Number(att?.size)) ? Number(att.size) : 0;
+    const localPath = normalizeText(att?.localPath);
+    const id = normalizeText(att?.id);
+    lines.push(
+      `- ${fileName} | mime=${mimeType} | size=${size || "unknown"} | local_path=${localPath || "(missing)"}${id ? ` | id=${id}` : ""}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function compileCcWebclientPromptBoard(params = {}) {
+  const thread = params.thread || {};
+  const contact = params.contact || {};
+  const character = params.character || {};
+
+  const userPersona = normalizeText(
+    params?.thread?.workflowInput?.userPersona ||
+      params?.thread?.workflowInputs?.userPersona ||
+      params?.contact?.workflowInput?.userPersona ||
+      params?.character?.workflowInput?.userPersona,
+  );
+
+  const threadLabel =
+    typeof thread.title === "string" && thread.title
+      ? thread.title
+      : typeof thread.id === "string"
+        ? thread.id
+        : "";
+
+  const relationship = params.relationship;
+  const relationshipLine =
+    relationship && typeof relationship === "object"
+      ? `Relationship: trust=${Number(relationship.trust || 0).toFixed(2)}, intimacy=${Number(relationship.intimacy || 0).toFixed(2)}, tension=${Number(relationship.tension || 0).toFixed(2)}`
+      : "";
+
+  const timeContextBlock = normalizeText(params?.timeContext?.block);
+  const turnContextBlock = buildPromptBoardTurnContextBlock(params.turnContext);
+  const memoriesBlock = Array.isArray(params.memories)
+    ? params.memories
+        .map((item) => `- ${typeof item?.text === "string" ? item.text : String(item?.text ?? "")}`)
+        .filter((line) => line !== "- ")
+        .join("\n")
+    : "";
+  const fileBlock = buildPromptBoardFileBlock(params.attachments);
+
+  const triggerNote = normalizeText(params?.trigger?.note);
+  const runtimeUserText = typeof params.runtimeUserText === "string" ? params.runtimeUserText : "";
+  const primaryText =
+    params?.trigger?.mode === "decision_only"
+      ? triggerNote || runtimeUserText
+      : runtimeUserText || triggerNote;
+
+  return compilePromptBoard({
+    modules: params.modules,
+    context: {
+      character,
+      contact,
+      thread,
+      threadLabel,
+      userPersona,
+      relationshipLine,
+      timeContextBlock,
+      turnContextBlock,
+      memoriesBlock,
+      fileBlock,
+      primaryText,
+    },
+  });
 }
 
 function normalizeAvatarAttachmentId(value) {

@@ -83,6 +83,11 @@ test("workflows: service exposes required workflow definitions", () => {
     assert.ok(Array.isArray(contactWorkflows) && contactWorkflows.length >= 2);
     assert.ok(workflows.find((wf) => wf.id === "smallphone.default.contact" && wf.version === 1));
     assert.ok(workflows.find((wf) => wf.id === "smallphone.task.agent" && wf.version === 1));
+
+    const defaultWf = contactWorkflows.find((wf) => wf.id === "smallphone.default.contact" && wf.version === 1);
+    assert.ok(defaultWf);
+    assert.ok(Array.isArray(defaultWf.promptBoardDefaults?.modules));
+    assert.ok(defaultWf.promptBoardDefaults.modules.length > 0);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

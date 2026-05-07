@@ -347,6 +347,21 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, service.previewTurnContext(threadContextMatch[1], body));
   }
 
+  const threadPromptBoardMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/prompt-board$/);
+  if (threadPromptBoardMatch && method === "GET") {
+    return sendJson(res, 200, service.getThreadPromptBoard(threadPromptBoardMatch[1]));
+  }
+  if (threadPromptBoardMatch && method === "PATCH") {
+    const body = await readJson(req);
+    return sendJson(res, 200, service.saveThreadPromptBoard(threadPromptBoardMatch[1], body));
+  }
+
+  const threadPromptBoardCompileMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/prompt-board\/compile$/);
+  if (threadPromptBoardCompileMatch && method === "POST") {
+    const body = await readJson(req);
+    return sendJson(res, 200, service.previewThreadPromptBoard(threadPromptBoardCompileMatch[1], body));
+  }
+
   const threadTurnContextCacheMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/turn-context-cache$/);
   if (threadTurnContextCacheMatch && method === "GET") {
     return sendJson(res, 200, service.getTurnContextCache(threadTurnContextCacheMatch[1]));

@@ -10,7 +10,7 @@
     "start:openclaw-cli": "SMALLPHONE_RUNTIME_MODE=openclaw-cli node ./apps/core/server.js",
     "start:cc-connect": "SMALLPHONE_RUNTIME_MODE=cc-connect node ./apps/core/server.js",
     "start:cc-webclient": "SMALLPHONE_RUNTIME_MODE=cc-webclient node ./apps/core/server.js",
-    "check": "node --check ./apps/core/server.js && node --check ./packages/domain/service.js && node --check ./packages/storage/json-store.js && node --check ./packages/shared/paths.js && node --check ./packages/openclaw-adapter/index.js",
+    "check": "node --check ./apps/core/server.js && node --check ./packages/domain/service.js && node --check ./packages/storage/json-store.js && node --check ./packages/shared/paths.js && node --check ./packages/shared/prompt-board.js && node --check ./packages/openclaw-adapter/index.js",
     "test": "node --test packages/openclaw-adapter/cc-webclient.test.js test/*.test.js"
   },
   "engines": {

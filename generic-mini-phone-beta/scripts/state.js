@@ -1,4 +1,4 @@
-import { appDefaultState } from './app-registry.js?v=10';
+import { appDefaultState } from './app-registry.js?v=11';
 
 export const STORAGE_KEY = 'generic-mini-phone-state-v1';
 
