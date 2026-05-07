@@ -5,6 +5,7 @@ import * as files from '../apps/files/index.js';
 import * as vocabulary from '../apps/vocabulary/index.js';
 import * as likeGirl from '../apps/like-girl/index.js';
 import * as likeGirlClone from '../apps/like-girl-clone/index.js';
+import * as workflows from '../apps/workflows/index.js';
 
 export const appModules = [
   calendar,
@@ -14,6 +15,7 @@ export const appModules = [
   vocabulary,
   likeGirl,
   likeGirlClone,
+  workflows,
 ];
 
 export const registeredApps = appModules.map((app) => app.manifest);
@@ -34,6 +36,7 @@ const DYNAMIC_APP_ORB_CLASSES = [
   'orb-diary',
   'orb-files',
   'orb-vocabulary',
+  'orb-workflows',
   'orb-app-manager',
   'orb-character',
 ];

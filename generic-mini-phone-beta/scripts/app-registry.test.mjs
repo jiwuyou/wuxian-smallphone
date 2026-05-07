@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizeDynamicAppRegistry } from './app-registry.js';
+import { normalizeDynamicAppRegistry, registeredApps } from './app-registry.js';
 
 test('app-registry normalization preserves safe service metadata for dynamic apps', () => {
   const payload = {
@@ -82,4 +82,27 @@ test('app-registry normalization preserves safe service metadata for dynamic app
   assert.equal(entry.service.id, 'svc-example');
   assert.ok(Array.isArray(entry.services));
   assert.equal(entry.services[0]?.id, 'svc-fallback');
+});
+
+test('workflows is a static bundled app, not a broken dynamic iframe entry', () => {
+  assert.ok(registeredApps.find((app) => app.id === 'workflows' && app.views?.normal === 'workflows'));
+
+  const normalized = normalizeDynamicAppRegistry({
+    apps: [
+      {
+        id: 'workflows',
+        title: '工作流',
+        entry: '/apps/workflows',
+      },
+    ],
+    appInstances: [
+      {
+        id: 'instance-workflows',
+        appId: 'workflows',
+        title: '工作流',
+      },
+    ],
+  });
+
+  assert.equal(normalized.dynamicAppEntries.length, 0);
 });
