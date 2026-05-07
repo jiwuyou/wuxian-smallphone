@@ -14,6 +14,10 @@ const DEFAULT_OFFICIAL_SHELL_ID = "official";
 const DEFAULT_THEME_ID = "default";
 const DEFAULT_DESKTOP_LAYOUT_ID = "default";
 const DEFAULT_APP_INSTANCE_ID = "instance-chat";
+const DEFAULT_CONTACT_WORKFLOW_ID = "smallphone.default.contact";
+const DEFAULT_CONTACT_WORKFLOW_VERSION = 1;
+const DEFAULT_CONTACT_WORKFLOW_USER_PERSONA =
+  "The user prefers a SmallPhone-style AI product with persistent contacts, memory, and practical continuity.";
 
 class JsonStore {
   constructor(filePathOrOptions, options = {}) {
@@ -124,6 +128,18 @@ function normalizeState(state, paths = DEFAULT_PATHS) {
     mergeById(Array.isArray(state.messages) ? state.messages : [], defaultCompanionSeed.messages),
     createdAt,
   );
+  const mergedCharacters = mergeById(
+    Array.isArray(state.characters) ? state.characters : [],
+    defaultCompanionSeed.characters,
+  );
+  const mergedContacts = mergeById(
+    Array.isArray(state.contacts) ? state.contacts : [],
+    defaultCompanionSeed.contacts,
+  );
+  const mergedThreads = mergeById(
+    Array.isArray(state.threads) ? state.threads : [],
+    defaultCompanionSeed.threads,
+  );
   const apps = normalizeApps(
     mergeById(Array.isArray(state.apps) ? state.apps : [], defaultUserContent.apps),
     defaultUserContent.apps,
@@ -149,22 +165,22 @@ function normalizeState(state, paths = DEFAULT_PATHS) {
     defaultUserContent.shells,
     createdAt,
   );
+  let characters = normalizeCharacters(mergedCharacters, createdAt);
+  let contacts = normalizeContacts(mergedContacts, createdAt);
+  let threads = normalizeThreads(mergedThreads, messages, createdAt, paths);
+  ({ characters, contacts, threads } = normalizeCompanionWorkflows({
+    characters,
+    contacts,
+    threads,
+    defaultCompanionSeed,
+    createdAt,
+    paths,
+  }));
   return {
     ...state,
-    characters: mergeById(
-      Array.isArray(state.characters) ? state.characters : [],
-      defaultCompanionSeed.characters,
-    ),
-    contacts: normalizeContacts(
-      mergeById(Array.isArray(state.contacts) ? state.contacts : [], defaultCompanionSeed.contacts),
-      createdAt,
-    ),
-    threads: normalizeThreads(
-      mergeById(Array.isArray(state.threads) ? state.threads : [], defaultCompanionSeed.threads),
-      messages,
-      createdAt,
-      paths,
-    ),
+    characters,
+    contacts,
+    threads,
     messages,
     attachments: normalizeAttachments(Array.isArray(state.attachments) ? state.attachments : [], createdAt, paths),
     memories: mergeById(Array.isArray(state.memories) ? state.memories : [], defaultCompanionSeed.memories),
@@ -201,15 +217,51 @@ function normalizeState(state, paths = DEFAULT_PATHS) {
   };
 }
 
+function defaultContactWorkflowInput(input) {
+  const source = isPlainObject(input) ? input : {};
+  return {
+    ...source,
+    contactProjectDir: String(source.contactProjectDir || "").trim(),
+    contactPersona: String(source.contactPersona || "").trim(),
+    userPersona: String(source.userPersona || "").trim(),
+  };
+}
+
 function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
+  const akiPersona =
+    "You are Aki, a sharp but caring small-phone companion. Keep replies concise, concrete, and useful. You track commitments, follow up proactively, and avoid generic assistant phrasing.";
+  const miraPersona =
+    "You are Mira, a calm planning-oriented companion. You help the user structure scattered thoughts into next steps, timelines, and priorities without sounding robotic.";
+  const soraPersona =
+    "You are Sora, a lively field-note style companion. You notice little details, suggest moments worth capturing, and keep the conversation light but useful.";
+  const akiWorkspaceDir = path.join(paths.channelWorkspacesRoot, "channel-aki");
+  const miraWorkspaceDir = path.join(paths.channelWorkspacesRoot, "channel-mira");
+  const soraWorkspaceDir = path.join(paths.channelWorkspacesRoot, "channel-sora");
+  const akiWorkflowInput = defaultContactWorkflowInput({
+    contactProjectDir: akiWorkspaceDir,
+    contactPersona: akiPersona,
+    userPersona: "The user prefers a SmallPhone-style AI product with persistent contacts, memory, and practical continuity.",
+  });
+  const miraWorkflowInput = defaultContactWorkflowInput({
+    contactProjectDir: miraWorkspaceDir,
+    contactPersona: miraPersona,
+    userPersona: "The user prefers structured plans, clear priorities, and low-drama execution.",
+  });
+  const soraWorkflowInput = defaultContactWorkflowInput({
+    contactProjectDir: soraWorkspaceDir,
+    contactPersona: soraPersona,
+    userPersona: "The user values mobile-life atmosphere, concrete observations, and concise companionship.",
+  });
   return {
     characters: [
       {
         id: DEFAULT_CHARACTER_ID,
+        workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
+        workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
+        workflowInput: akiWorkflowInput,
         name: "Aki",
         avatar: "AK",
-        persona:
-          "You are Aki, a sharp but caring small-phone companion. Keep replies concise, concrete, and useful. You track commitments, follow up proactively, and avoid generic assistant phrasing.",
+        persona: akiPersona,
         style: "direct, warm, observant",
         toolPolicy: {
           allow: ["browser", "search", "file"],
@@ -219,10 +271,12 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
       },
       {
         id: "char-mira",
+        workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
+        workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
+        workflowInput: miraWorkflowInput,
         name: "Mira",
         avatar: "MI",
-        persona:
-          "You are Mira, a calm planning-oriented companion. You help the user structure scattered thoughts into next steps, timelines, and priorities without sounding robotic.",
+        persona: miraPersona,
         style: "steady, clear, low-drama",
         toolPolicy: {
           allow: ["search", "file"],
@@ -232,10 +286,12 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
       },
       {
         id: "char-sora",
+        workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
+        workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
+        workflowInput: soraWorkflowInput,
         name: "Sora",
         avatar: "SO",
-        persona:
-          "You are Sora, a lively field-note style companion. You notice little details, suggest moments worth capturing, and keep the conversation light but useful.",
+        persona: soraPersona,
         style: "playful, observant, mobile-native",
         toolPolicy: {
           allow: ["browser", "search"],
@@ -247,6 +303,9 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
     contacts: [
       {
         id: DEFAULT_CONTACT_ID,
+        workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
+        workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
+        workflowInput: akiWorkflowInput,
         characterId: DEFAULT_CHARACTER_ID,
         displayName: "Aki",
         kind: "agent",
@@ -264,6 +323,9 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
       },
       {
         id: "contact-mira",
+        workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
+        workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
+        workflowInput: miraWorkflowInput,
         characterId: "char-mira",
         displayName: "Mira",
         kind: "agent",
@@ -281,6 +343,9 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
       },
       {
         id: "contact-sora",
+        workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
+        workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
+        workflowInput: soraWorkflowInput,
         characterId: "char-sora",
         displayName: "Sora",
         kind: "agent",
@@ -300,6 +365,9 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
     threads: [
       {
         id: DEFAULT_THREAD_ID,
+        workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
+        workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
+        workflowInput: akiWorkflowInput,
         contactId: DEFAULT_CONTACT_ID,
         title: "Aki",
         windowId: "window-aki",
@@ -312,7 +380,7 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
           provider: "mock",
           model: "",
           agentId: "smallphone-channel-aki",
-          workspaceDir: path.join(paths.channelWorkspacesRoot, "channel-aki"),
+          workspaceDir: akiWorkspaceDir,
           sessionKey: `smallphone:thread:${DEFAULT_THREAD_ID}`,
         },
         unreadCount: 0,
@@ -321,6 +389,9 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
       },
       {
         id: "thread-mira",
+        workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
+        workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
+        workflowInput: miraWorkflowInput,
         contactId: "contact-mira",
         title: "Mira",
         windowId: "window-mira",
@@ -333,7 +404,7 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
           provider: "mock",
           model: "",
           agentId: "smallphone-channel-mira",
-          workspaceDir: path.join(paths.channelWorkspacesRoot, "channel-mira"),
+          workspaceDir: miraWorkspaceDir,
           sessionKey: "smallphone:thread:thread-mira",
         },
         unreadCount: 1,
@@ -342,6 +413,9 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
       },
       {
         id: "thread-sora",
+        workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
+        workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
+        workflowInput: soraWorkflowInput,
         contactId: "contact-sora",
         title: "Sora",
         windowId: "window-sora",
@@ -354,7 +428,7 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
           provider: "mock",
           model: "",
           agentId: "smallphone-channel-sora",
-          workspaceDir: path.join(paths.channelWorkspacesRoot, "channel-sora"),
+          workspaceDir: soraWorkspaceDir,
           sessionKey: "smallphone:thread:thread-sora",
         },
         unreadCount: 1,
@@ -439,6 +513,17 @@ function createDefaultUserContent(createdAt) {
         kind: "core",
         entry: "/apps/chat",
         icon: "message-circle",
+        createdAt,
+        updatedAt: createdAt,
+      },
+      {
+        id: "workflows",
+        name: "Workflows",
+        title: "工作流",
+        source: "official",
+        kind: "core",
+        entry: "/apps/workflows",
+        icon: "git-branch",
         createdAt,
         updatedAt: createdAt,
       },
@@ -673,6 +758,229 @@ function createDefaultRelationshipStates(createdAt) {
       updatedAt: createdAt,
     },
   ];
+}
+
+function normalizeCharacters(characters, createdAt) {
+  return (Array.isArray(characters) ? characters : []).map((character) => ({
+    ...character,
+    createdAt: character?.createdAt || createdAt,
+    updatedAt: character?.updatedAt || createdAt,
+  }));
+}
+
+function normalizeCompanionWorkflows({ characters, contacts, threads, defaultCompanionSeed, createdAt, paths }) {
+  const seedCharacters = new Map(
+    (Array.isArray(defaultCompanionSeed?.characters) ? defaultCompanionSeed.characters : []).map((item) => [
+      item?.id,
+      item,
+    ]),
+  );
+  const seedContacts = new Map(
+    (Array.isArray(defaultCompanionSeed?.contacts) ? defaultCompanionSeed.contacts : []).map((item) => [item?.id, item]),
+  );
+  const seedThreads = new Map(
+    (Array.isArray(defaultCompanionSeed?.threads) ? defaultCompanionSeed.threads : []).map((item) => [item?.id, item]),
+  );
+
+  const nextCharacters = (Array.isArray(characters) ? characters : []).map((item) => ({ ...item }));
+  const nextContacts = (Array.isArray(contacts) ? contacts : []).map((item) => ({ ...item }));
+  const nextThreads = (Array.isArray(threads) ? threads : []).map((item) => ({ ...item }));
+
+  const characterById = new Map(nextCharacters.map((item) => [item?.id, item]));
+  const contactById = new Map(nextContacts.map((item) => [item?.id, item]));
+  const threadByContactId = new Map(nextThreads.map((item) => [item?.contactId, item]));
+
+  for (const contact of nextContacts) {
+    if (!contact || typeof contact.id !== "string" || !contact.id.trim()) {
+      continue;
+    }
+    const thread = threadByContactId.get(contact.id) || null;
+    const character =
+      typeof contact.characterId === "string" ? characterById.get(contact.characterId) || null : null;
+    const normalized = normalizeCompanionWorkflowTriple({
+      contact,
+      thread,
+      character,
+      seedContact: seedContacts.get(contact.id) || null,
+      seedThread: thread ? seedThreads.get(thread.id) || null : null,
+      seedCharacter: character ? seedCharacters.get(character.id) || null : null,
+      createdAt,
+      paths,
+    });
+    applyCompanionWorkflowDefaults(contact, normalized);
+    if (thread) applyCompanionWorkflowDefaults(thread, normalized);
+    if (character) applyCompanionWorkflowDefaults(character, normalized);
+  }
+
+  for (const thread of nextThreads) {
+    if (hasValidWorkflowTriple(thread)) {
+      continue;
+    }
+    const contact = typeof thread?.contactId === "string" ? contactById.get(thread.contactId) || null : null;
+    const character =
+      contact && typeof contact.characterId === "string" ? characterById.get(contact.characterId) || null : null;
+    const normalized = normalizeCompanionWorkflowTriple({
+      contact,
+      thread,
+      character,
+      seedContact: contact ? seedContacts.get(contact.id) || null : null,
+      seedThread: seedThreads.get(thread?.id) || null,
+      seedCharacter: character ? seedCharacters.get(character.id) || null : null,
+      createdAt,
+      paths,
+    });
+    applyCompanionWorkflowDefaults(thread, normalized);
+    if (contact) applyCompanionWorkflowDefaults(contact, normalized);
+    if (character) applyCompanionWorkflowDefaults(character, normalized);
+  }
+
+  for (const character of nextCharacters) {
+    if (hasValidWorkflowTriple(character)) {
+      continue;
+    }
+    const seedCharacter = seedCharacters.get(character?.id) || null;
+    const normalized = normalizeCompanionWorkflowTriple({
+      contact: null,
+      thread: null,
+      character,
+      seedContact: null,
+      seedThread: null,
+      seedCharacter,
+      createdAt,
+      paths,
+    });
+    applyCompanionWorkflowDefaults(character, normalized);
+  }
+
+  return { characters: nextCharacters, contacts: nextContacts, threads: nextThreads };
+}
+
+function hasValidWorkflowTriple(record) {
+  if (!record || typeof record !== "object") {
+    return false;
+  }
+  const workflowId = typeof record.workflowId === "string" ? record.workflowId.trim() : "";
+  const workflowVersion = Number(record.workflowVersion);
+  const workflowInput = record.workflowInput;
+  if (!workflowId || !Number.isFinite(workflowVersion)) {
+    return false;
+  }
+  if (!workflowInput || typeof workflowInput !== "object" || Array.isArray(workflowInput)) {
+    return false;
+  }
+  const contactProjectDir = typeof workflowInput.contactProjectDir === "string" ? workflowInput.contactProjectDir.trim() : "";
+  const contactPersona = typeof workflowInput.contactPersona === "string" ? workflowInput.contactPersona.trim() : "";
+  const userPersona = typeof workflowInput.userPersona === "string" ? workflowInput.userPersona.trim() : "";
+  return Boolean(contactProjectDir && contactPersona && userPersona);
+}
+
+function normalizeCompanionWorkflowTriple({
+  contact,
+  thread,
+  character,
+  seedContact,
+  seedThread,
+  seedCharacter,
+  createdAt,
+  paths,
+}) {
+  const workflowId = coalesceNonEmptyString(
+    contact?.workflowId,
+    character?.workflowId,
+    thread?.workflowId,
+    seedContact?.workflowId,
+    seedCharacter?.workflowId,
+    seedThread?.workflowId,
+    DEFAULT_CONTACT_WORKFLOW_ID,
+  );
+  const workflowVersion = coalesceFiniteNumber(
+    contact?.workflowVersion,
+    character?.workflowVersion,
+    thread?.workflowVersion,
+    seedContact?.workflowVersion,
+    seedCharacter?.workflowVersion,
+    seedThread?.workflowVersion,
+    DEFAULT_CONTACT_WORKFLOW_VERSION,
+  );
+
+  const existingInput = coalescePlainObject(contact?.workflowInput, character?.workflowInput, thread?.workflowInput);
+  const seedInput = coalescePlainObject(seedContact?.workflowInput, seedCharacter?.workflowInput, seedThread?.workflowInput);
+
+  const workspaceDirCandidate =
+    typeof thread?.runtime?.workspaceDir === "string" ? thread.runtime.workspaceDir.trim() : "";
+  const derivedWorkspaceDir = thread ? defaultWorkspaceDir(thread, paths) : "";
+  const contactProjectDir =
+    coalesceNonEmptyString(existingInput?.contactProjectDir, workspaceDirCandidate, seedInput?.contactProjectDir, derivedWorkspaceDir) ||
+    path.join(paths.channelWorkspacesRoot, `channel-${slugLike(contact?.id || thread?.id || character?.id || "companion")}`);
+
+  const contactPersona =
+    coalesceNonEmptyString(existingInput?.contactPersona, character?.persona, seedInput?.contactPersona) ||
+    `You are ${coalesceNonEmptyString(character?.name, contact?.displayName, contact?.id, "a SmallPhone companion")}. Reply concisely and helpfully.`;
+
+  const userPersona =
+    coalesceNonEmptyString(existingInput?.userPersona, seedInput?.userPersona, DEFAULT_CONTACT_WORKFLOW_USER_PERSONA) ||
+    DEFAULT_CONTACT_WORKFLOW_USER_PERSONA;
+
+  const workflowInput = {
+    ...(existingInput || {}),
+    contactProjectDir,
+    contactPersona,
+    userPersona,
+  };
+
+  return {
+    workflowId,
+    workflowVersion,
+    workflowInput: defaultContactWorkflowInput(workflowInput),
+    createdAt,
+  };
+}
+
+function applyCompanionWorkflowDefaults(record, normalized) {
+  if (!record || typeof record !== "object") {
+    return;
+  }
+  const id = typeof record.workflowId === "string" ? record.workflowId.trim() : "";
+  const version = Number(record.workflowVersion);
+  const input = record.workflowInput;
+  record.workflowId = id || normalized.workflowId;
+  record.workflowVersion = Number.isFinite(version) ? version : normalized.workflowVersion;
+  const currentInput = coalescePlainObject(input);
+  record.workflowInput = defaultContactWorkflowInput({
+    ...(currentInput || {}),
+    ...(normalized.workflowInput || {}),
+  });
+}
+
+function coalesceNonEmptyString(...values) {
+  for (const value of values) {
+    const text = typeof value === "string" ? value.trim() : "";
+    if (text) return text;
+  }
+  return "";
+}
+
+function coalesceFiniteNumber(...values) {
+  for (const value of values) {
+    const num = Number(value);
+    if (Number.isFinite(num)) {
+      return num;
+    }
+  }
+  return NaN;
+}
+
+function coalescePlainObject(...values) {
+  for (const value of values) {
+    if (isPlainObject(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function slugLike(value) {
+  return String(value || "companion").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "companion";
 }
 
 function normalizeContacts(contacts, createdAt) {

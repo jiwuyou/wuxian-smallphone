@@ -103,7 +103,13 @@ async function handleRequest(req, res) {
     }
     serveStatic(req, res, url);
   } catch (error) {
-    sendJson(res, 500, {
+    const status =
+      Number.isFinite(Number(error?.statusCode)) && Number(error.statusCode) >= 400 && Number(error.statusCode) < 600
+        ? Number(error.statusCode)
+        : Number.isFinite(Number(error?.status)) && Number(error.status) >= 400 && Number(error.status) < 600
+          ? Number(error.status)
+          : 500;
+    sendJson(res, status, {
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -148,6 +154,12 @@ async function handleApi(req, res, url) {
   }
   if (method === "GET" && url.pathname === "/api/app-registry") {
     return sendJson(res, 200, await service.getAppRegistry({ includeServiceManager: true }));
+  }
+  if (method === "GET" && url.pathname === "/api/workflows") {
+    return sendJson(res, 200, service.listWorkflows());
+  }
+  if (method === "GET" && url.pathname === "/api/contact-workflows") {
+    return sendJson(res, 200, service.listContactWorkflows());
   }
 
   if (method === "GET" && url.pathname === "/api/service-manager/health") {

@@ -18,6 +18,7 @@
         </div>
         <nav class="nav">
           <button class="nav-item active" data-screen="chat">聊天</button>
+          <button class="nav-item" data-screen="workflows">工作流</button>
           <button class="nav-item" data-screen="permissions">权限</button>
           <button class="nav-item" data-screen="reminders">提醒</button>
         </nav>
@@ -85,6 +86,17 @@
           <div id="reminder-list" class="card-list"></div>
         </section>
 
+        <section id="screen-workflows" class="screen">
+          <div class="panel-head permission-head">
+            <div>
+              <h2>工作流</h2>
+              <div id="workflow-summary" class="card-meta">内置 workflows 与联系人表单 schema。</div>
+            </div>
+            <button id="reload-workflows-button" class="ghost-button" type="button">刷新</button>
+          </div>
+          <div id="workflow-list" class="workflow-list"></div>
+        </section>
+
         <section id="screen-permissions" class="screen">
           <div class="panel-head permission-head">
             <div>
@@ -114,9 +126,24 @@
           <input id="companion-avatar" placeholder="头像缩写，如 AK" />
           <input id="companion-style" placeholder="风格，如 steady, intimate, direct" />
           <textarea id="companion-persona" rows="5" placeholder="角色设定 / persona"></textarea>
-          <textarea id="companion-worldbook-content" rows="4" placeholder="默认世界书内容"></textarea>
+          <textarea id="companion-worldbook-content" rows="4" placeholder="默认世界书内容" readonly></textarea>
           <textarea id="companion-thread-summary" rows="3" placeholder="线程摘要"></textarea>
           <textarea id="companion-greeting" rows="3" placeholder="初始问候（仅创建时使用）"></textarea>
+          <section class="form-section workflow-section" aria-labelledby="companion-workflow-heading">
+            <div class="form-section-head">
+              <div>
+                <div class="form-section-title">工作流</div>
+                <div id="companion-workflow-heading" class="runtime-project-eyebrow">联系人配置</div>
+              </div>
+              <span id="companion-workflow-status" class="runtime-settings-status">未加载</span>
+            </div>
+            <label class="form-field">
+              <span>Workflow</span>
+              <select id="companion-workflow-select"></select>
+            </label>
+            <div id="companion-workflow-meta" class="workflow-meta"></div>
+            <div id="companion-workflow-fields" class="workflow-dynamic-fields"></div>
+          </section>
           <section class="form-section runtime-project-section" aria-labelledby="companion-runtime-heading">
             <div class="form-section-head">
               <div>

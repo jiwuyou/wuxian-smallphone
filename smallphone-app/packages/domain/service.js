@@ -25,6 +25,11 @@ const {
   sanitizeMimeType,
   sanitizePathSegment,
 } = require("./attachments");
+const {
+  listWorkflows,
+  listContactWorkflows,
+  getWorkflowDefinition,
+} = require("./contact-workflows");
 
 const DEFAULT_PATHS = resolveSmallPhonePaths();
 const MANAGED_BLOCK_START = "BEGIN_SMALLPHONE_MANAGED_BLOCK";
@@ -173,6 +178,7 @@ class SmallPhoneService {
       },
       contacts: this.listContacts(),
       threads: this.listThreads(),
+      workflows: this.listWorkflows(),
     };
   }
 
@@ -191,6 +197,14 @@ class SmallPhoneService {
       contacts,
       threads,
     };
+  }
+
+  listWorkflows() {
+    return listWorkflows();
+  }
+
+  listContactWorkflows() {
+    return listContactWorkflows();
   }
 
   getUserContent() {
@@ -1014,6 +1028,9 @@ class SmallPhoneService {
       const sessionKey = payload.sessionKey || `smallphone:thread:${ids.threadId}`;
       const character = {
         id: ids.characterId,
+        workflowId: payload.workflowId,
+        workflowVersion: payload.workflowVersion,
+        workflowInput: payload.workflowInput,
         name: payload.name,
         avatar: payload.avatar,
         avatarAttachmentId: payload.avatarAttachmentId,
@@ -1033,6 +1050,9 @@ class SmallPhoneService {
       };
       const contact = {
         id: ids.contactId,
+        workflowId: payload.workflowId,
+        workflowVersion: payload.workflowVersion,
+        workflowInput: payload.workflowInput,
         characterId: ids.characterId,
         displayName: payload.displayName || payload.name,
         kind: "agent",
@@ -1052,6 +1072,9 @@ class SmallPhoneService {
       };
       const thread = {
         id: ids.threadId,
+        workflowId: payload.workflowId,
+        workflowVersion: payload.workflowVersion,
+        workflowInput: payload.workflowInput,
         contactId: ids.contactId,
         title: payload.threadTitle || payload.displayName || payload.name,
         windowId,
@@ -1219,6 +1242,9 @@ class SmallPhoneService {
       if (!liveContact || !liveThread || !liveCharacter) {
         throw new Error(`Companion state became unavailable during update: ${id}`);
       }
+      liveCharacter.workflowId = payload.workflowId;
+      liveCharacter.workflowVersion = payload.workflowVersion;
+      liveCharacter.workflowInput = payload.workflowInput;
       liveCharacter.name = payload.name;
       liveCharacter.avatar = payload.avatar;
       liveCharacter.avatarAttachmentId = payload.avatarAttachmentId;
@@ -1238,6 +1264,9 @@ class SmallPhoneService {
 
       liveContact.displayName = payload.displayName;
       liveContact.roleLevel = payload.roleLevel;
+      liveContact.workflowId = payload.workflowId;
+      liveContact.workflowVersion = payload.workflowVersion;
+      liveContact.workflowInput = payload.workflowInput;
       liveContact.agentId = payload.agentId;
       liveContact.timeSettings = payload.timeSettings;
       liveContact.relationship = {
@@ -1254,6 +1283,9 @@ class SmallPhoneService {
       liveThread.timeSettings = payload.timeSettings;
       liveThread.windowId = payload.windowId;
       liveThread.channelId = payload.channelId;
+      liveThread.workflowId = payload.workflowId;
+      liveThread.workflowVersion = payload.workflowVersion;
+      liveThread.workflowInput = payload.workflowInput;
       liveThread.updatedAt = updatedAt;
       liveThread.runtime = {
         ...(liveThread.runtime || {}),
@@ -3188,6 +3220,16 @@ function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
 }
 
+function httpError(statusCode, message) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
+
+function badRequest(message) {
+  return httpError(400, message);
+}
+
 function normalizeRuntimeTextParts(input) {
   if (!Array.isArray(input)) {
     return [];
@@ -3203,6 +3245,69 @@ function buildRuntimeUserText(parts) {
     return normalizedParts[0] || "";
   }
   return normalizedParts.map((part, index) => `当前消息第${index + 1}条：${part}`).join("\n");
+}
+
+function assertNoLegacyCompanionFields(input) {
+  const legacyKeys = ["persona", "workspaceDir", "worldbookContent"];
+  const found = legacyKeys.filter((key) => hasOwn(input, key));
+  if (found.length) {
+    throw badRequest(
+      `Legacy companion fields are not supported. Use workflowId/workflowVersion/workflowInput instead. Legacy keys: ${found.join(", ")}.`,
+    );
+  }
+}
+
+function normalizeWorkflowReference(input) {
+  const workflowId = String(input?.workflowId || "").trim();
+  const workflowVersion = Number.isFinite(Number(input?.workflowVersion)) ? Number(input.workflowVersion) : NaN;
+  if (!workflowId || !Number.isFinite(workflowVersion)) {
+    throw badRequest("Companion requires workflowId and workflowVersion.");
+  }
+  const def = getWorkflowDefinition(workflowId, workflowVersion);
+  if (!def) {
+    throw badRequest(`Unknown workflow: ${workflowId}@${workflowVersion}.`);
+  }
+  return { workflowId, workflowVersion, workflow: def };
+}
+
+function normalizeWorkflowInput(input) {
+  const hasWorkflowInput = hasOwn(input, "workflowInput");
+  const hasWorkflowInputs = hasOwn(input, "workflowInputs");
+  if (hasWorkflowInput && hasWorkflowInputs) {
+    throw badRequest("Provide only one of workflowInput or workflowInputs.");
+  }
+  const raw = hasWorkflowInput ? input.workflowInput : hasWorkflowInputs ? input.workflowInputs : null;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw badRequest("Companion requires workflowInput (object).");
+  }
+  const contactProjectDir = String(raw.contactProjectDir || "").trim();
+  const contactPersona = String(raw.contactPersona || "").trim();
+  const userPersona = String(raw.userPersona || "").trim();
+  if (!contactProjectDir || !contactPersona || !userPersona) {
+    throw badRequest("workflowInput requires contactProjectDir, contactPersona, and userPersona.");
+  }
+  return {
+    ...raw,
+    contactProjectDir,
+    contactPersona,
+    userPersona,
+  };
+}
+
+function deriveCompanionWorldbookContent({ workflowId, workflowVersion, displayName, style, contactPersona }) {
+  const compactPersona = String(contactPersona || "")
+    .trim()
+    .split("\n")
+    .slice(0, 6)
+    .join("\n");
+  return [
+    `${displayName} 是一个独立联系人窗口。`,
+    `Workflow: ${workflowId}@${workflowVersion}`,
+    style ? `Voice/style: ${style}` : "",
+    compactPersona ? `Persona:\n${compactPersona}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function buildRuntimeMessages(messages, runtimeUserText) {
@@ -3725,14 +3830,16 @@ function normalizeRelationshipStateInput(input) {
 }
 
 function normalizeCompanionInput(input) {
+  const source = input && typeof input === "object" ? input : {};
+  assertNoLegacyCompanionFields(source);
+  const { workflowId, workflowVersion } = normalizeWorkflowReference(source);
+  const workflowInput = normalizeWorkflowInput(source);
   const name = String(input?.name || "").trim();
   if (!name) {
-    throw new Error("Companion requires name.");
+    throw badRequest("Companion requires name.");
   }
   const displayName = String(input?.displayName || "").trim() || name;
-  const persona =
-    String(input?.persona || "").trim() ||
-    `You are ${displayName}, a dedicated SmallPhone companion in a private 1:1 window.`;
+  const persona = workflowInput.contactPersona;
   const style = String(input?.style || "").trim() || "concise, private, mobile-native";
   const avatar = String(input?.avatar || "").trim() || displayName.slice(0, 2).toUpperCase();
   const avatarAttachmentId = normalizeAvatarAttachmentId(input?.avatarAttachmentId || input?.avatarId || input?.avatar_image_id);
@@ -3744,10 +3851,17 @@ function normalizeCompanionInput(input) {
   const toolAllow = Array.isArray(input?.toolPolicy?.allow)
     ? input.toolPolicy.allow.map((item) => String(item).trim()).filter(Boolean)
     : [];
-  const worldbookContent =
-    String(input?.worldbookContent || "").trim() ||
-    `${displayName} 是一个独立联系人窗口。回复时保持 ${style}，只服务这个私有线程，不共享其他联系人的状态。`;
+  const worldbookContent = deriveCompanionWorldbookContent({
+    workflowId,
+    workflowVersion,
+    displayName,
+    style,
+    contactPersona: workflowInput.contactPersona,
+  });
   return {
+    workflowId,
+    workflowVersion,
+    workflowInput,
     name,
     slug: String(input?.slug || "").trim(),
     displayName,
@@ -3774,7 +3888,8 @@ function normalizeCompanionInput(input) {
     agentMode: normalizeAgentPermissionMode(input?.agentMode || input?.mode, input?.agentType || input?.runtimeAgentType),
     runtimeProject: String(input?.runtimeProject || input?.project || "").trim(),
     agentId: String(input?.agentId || "").trim(),
-    workspaceDir: String(input?.workspaceDir || "").trim(),
+    // Materialized from workflow input.
+    workspaceDir: workflowInput.contactProjectDir,
     sessionKey: String(input?.sessionKey || "").trim(),
     channelId: String(input?.channelId || "").trim(),
     windowId: String(input?.windowId || "").trim(),
@@ -3791,9 +3906,48 @@ function normalizeCompanionPatchInput(params) {
   const relationshipState = params.relationshipState || {};
   const worldbookEntry = params.worldbookEntry || {};
   const runtimeInfo = params.runtimeInfo || {};
+  assertNoLegacyCompanionFields(input);
+  const patchTouchesWorkflowReference = hasOwn(input, "workflowId") || hasOwn(input, "workflowVersion");
+  const patchTouchesWorkflowInput = hasOwn(input, "workflowInput") || hasOwn(input, "workflowInputs");
+  const patchTouchesWorkflow = patchTouchesWorkflowReference || patchTouchesWorkflowInput;
+  let workflowId = "";
+  let workflowVersion = NaN;
+  let workflowInput = null;
+
+  if (patchTouchesWorkflow) {
+    const ref = normalizeWorkflowReference(input);
+    workflowId = ref.workflowId;
+    workflowVersion = ref.workflowVersion;
+    workflowInput = normalizeWorkflowInput(input);
+  } else {
+    workflowId = String(character.workflowId || contact.workflowId || thread.workflowId || "").trim();
+    const rawVersion = character.workflowVersion ?? contact.workflowVersion ?? thread.workflowVersion;
+    workflowVersion = Number.isFinite(Number(rawVersion)) ? Number(rawVersion) : NaN;
+    workflowInput = character.workflowInput || contact.workflowInput || thread.workflowInput || null;
+
+    if (!workflowId || !Number.isFinite(workflowVersion)) {
+      throw badRequest("Companion requires workflowId and workflowVersion.");
+    }
+    if (!workflowInput || typeof workflowInput !== "object" || Array.isArray(workflowInput)) {
+      throw badRequest("Companion requires workflowInput (object).");
+    }
+    // Keep behavior consistent with normalizeWorkflowInput() so downstream fields can be materialized.
+    const contactProjectDir = String(workflowInput.contactProjectDir || "").trim();
+    const contactPersona = String(workflowInput.contactPersona || "").trim();
+    const userPersona = String(workflowInput.userPersona || "").trim();
+    if (!contactProjectDir || !contactPersona || !userPersona) {
+      throw badRequest("workflowInput requires contactProjectDir, contactPersona, and userPersona.");
+    }
+    workflowInput = {
+      ...workflowInput,
+      contactProjectDir,
+      contactPersona,
+      userPersona,
+    };
+  }
   const name = String(input?.name || "").trim() || String(character.name || "").trim() || String(contact.displayName || "").trim();
   if (!name) {
-    throw new Error("Companion update requires resolvable name.");
+    throw badRequest("Companion update requires resolvable name.");
   }
   const displayName = String(input?.displayName || "").trim() || String(contact.displayName || "").trim() || name;
   const previousRoleLevel = normalizeRoleLevel(thread.roleLevel || contact.roleLevel || thread.runtime?.roleLevel);
@@ -3808,17 +3962,21 @@ function normalizeCompanionPatchInput(params) {
     String(thread.runtime?.agentId || "").trim() ||
     `smallphone-${channelId}`.replace(/[^a-zA-Z0-9:_-]+/g, "-");
   const workspaceDir =
-    String(input?.workspaceDir || "").trim() ||
+    workflowInput.contactProjectDir ||
     (roleLevelChanged ? "" : String(thread.runtime?.workspaceDir || "").trim()) ||
     defaultWorkspaceDirForRole(roleLevel, channelId, slugify(name) || thread.id || channelId, params.paths || DEFAULT_PATHS);
   const sessionKey =
     String(input?.sessionKey || "").trim() ||
     String(thread.runtime?.sessionKey || "").trim() ||
     `smallphone:thread:${thread.id}`;
-  const worldbookContent =
-    String(input?.worldbookContent || "").trim() ||
-      String(worldbookEntry.content || "").trim() ||
-    `${displayName} 是一个独立联系人窗口。回复时保持私有连续性，不共享其他联系人的状态。`;
+  const derivedStyle = String(input?.style || "").trim() || String(character.style || "").trim() || "concise, private, mobile-native";
+  const worldbookContent = deriveCompanionWorldbookContent({
+    workflowId,
+    workflowVersion,
+    displayName,
+    style: derivedStyle,
+    contactPersona: workflowInput.contactPersona,
+  });
   const avatarAttachmentId = hasOwn(input, "avatarAttachmentId") || hasOwn(input, "avatarId") || hasOwn(input, "avatar_image_id")
     ? normalizeAvatarAttachmentId(input?.avatarAttachmentId ?? input?.avatarId ?? input?.avatar_image_id)
     : normalizeAvatarAttachmentId(character.avatarAttachmentId || "");
@@ -3827,14 +3985,14 @@ function normalizeCompanionPatchInput(params) {
       ? input?.timeSettings ?? input?.time ?? input?.currentTime
       : thread.timeSettings || contact.timeSettings || {};
   return {
+    workflowId,
+    workflowVersion,
+    workflowInput,
     name,
     slug: slugify(name) || slugify(displayName) || "companion",
     displayName,
-    persona:
-      String(input?.persona || "").trim() ||
-      String(character.persona || "").trim() ||
-      `You are ${displayName}, a dedicated SmallPhone companion in a private 1:1 window.`,
-    style: String(input?.style || "").trim() || String(character.style || "").trim() || "concise, private, mobile-native",
+    persona: workflowInput.contactPersona,
+    style: derivedStyle,
     avatar: String(input?.avatar || "").trim() || String(character.avatar || "").trim() || displayName.slice(0, 2).toUpperCase(),
     avatarAttachmentId,
     roleLevel,

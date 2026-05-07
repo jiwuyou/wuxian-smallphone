@@ -205,11 +205,20 @@ test("cc-webclient runtime message includes numbered parts and time block", asyn
     throw new Error(`Unexpected fetch call: ${call.method} ${call.url}`);
   });
   service.runtime = runtime;
+  const existing = service.listContacts().find((item) => item.id === "contact-aki");
+  assert.ok(existing);
+  const testUserPersona = "The user prefers bullet-point plans and minimal small talk.";
   await service.updateCompanion("contact-aki", {
     name: "Aki",
     timeSettings: {
       enabled: true,
       timezone: "Asia/Tokyo",
+    },
+    workflowId: existing.workflowId,
+    workflowVersion: existing.workflowVersion,
+    workflowInput: {
+      ...(existing.workflowInput || {}),
+      userPersona: testUserPersona,
     },
   });
 
@@ -223,6 +232,7 @@ test("cc-webclient runtime message includes numbered parts and time block", asyn
   assert.match(sendCall.body.message, /Current backend time:/);
   assert.match(sendCall.body.message, /- timezone: Asia\/Tokyo/);
   assert.match(sendCall.body.message, /- utc: \d{4}-\d{2}-\d{2}T/);
+  assert.ok(sendCall.body.message.includes(`User persona: ${testUserPersona}`));
   assert.match(sendCall.body.message, /当前消息第1条：alpha/);
   assert.match(sendCall.body.message, /当前消息第2条：beta/);
   assert.equal(result.userMessage.content, "alpha\nbeta");

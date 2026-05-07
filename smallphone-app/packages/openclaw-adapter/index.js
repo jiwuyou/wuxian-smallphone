@@ -701,6 +701,12 @@ function createOpenAICompatibleAdapter(config) {
 }
 
 function buildRuntimePrompt(payload) {
+  const userPersona = normalizeText(
+    payload?.thread?.workflowInput?.userPersona ||
+      payload?.thread?.workflowInputs?.userPersona ||
+      payload?.contact?.workflowInput?.userPersona ||
+      payload?.character?.workflowInput?.userPersona,
+  );
   const memoryBlock = payload.memories.map((item) => `- ${item.text}`).join("\n");
   const recent = buildRecentConversationBlock(payload);
   const turnContextBlock = buildTurnContextBlock(payload.turnContext);
@@ -709,6 +715,7 @@ function buildRuntimePrompt(payload) {
     "SmallPhone turn",
     `Character: ${payload.character.name}`,
     `Persona: ${payload.character.persona}`,
+    userPersona ? `User persona: ${userPersona}` : "",
     `Contact: ${payload.contact.displayName}`,
     `Thread: ${payload.thread.title}`,
     `Relationship: trust=${payload.relationship.trust.toFixed(2)}, intimacy=${payload.relationship.intimacy.toFixed(2)}, tension=${payload.relationship.tension.toFixed(2)}`,
@@ -725,6 +732,12 @@ function buildRuntimePrompt(payload) {
 
 function buildOpenAICompatibleMessages(payload) {
   const timeContextBlock = buildTimeContextBlock(payload.timeContext);
+  const userPersona = normalizeText(
+    payload?.thread?.workflowInput?.userPersona ||
+      payload?.thread?.workflowInputs?.userPersona ||
+      payload?.contact?.workflowInput?.userPersona ||
+      payload?.character?.workflowInput?.userPersona,
+  );
   return [
     {
       role: "system",
@@ -732,6 +745,7 @@ function buildOpenAICompatibleMessages(payload) {
         [
           `You are ${payload.contact.displayName} in a small-phone chat.`,
           `Character persona: ${payload.character.persona}`,
+          userPersona ? `User persona: ${userPersona}` : "",
           `Reply briefly, concretely, and in-character.`,
           timeContextBlock,
           buildTurnContextBlock(payload.turnContext),
@@ -1252,6 +1266,13 @@ function buildWebclientTurnMessage(payload, fileAttachments) {
       ? triggerNote || latestUserText
       : latestUserText || triggerNote;
 
+  const userPersona = normalizeText(
+    payload?.thread?.workflowInput?.userPersona ||
+      payload?.thread?.workflowInputs?.userPersona ||
+      payload?.contact?.workflowInput?.userPersona ||
+      payload?.character?.workflowInput?.userPersona,
+  );
+
   const memoryBlock = Array.isArray(payload?.memories)
     ? payload.memories.map((item) => `- ${item.text}`).join("\n")
     : "";
@@ -1263,6 +1284,7 @@ function buildWebclientTurnMessage(payload, fileAttachments) {
     "SmallPhone turn",
     `Character: ${payload?.character?.name || ""}`,
     `Persona: ${payload?.character?.persona || ""}`,
+    userPersona ? `User persona: ${userPersona}` : "",
     `Contact: ${payload?.contact?.displayName || ""}`,
     `Thread: ${payload?.thread?.title || payload?.thread?.id || ""}`,
     payload?.relationship

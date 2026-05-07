@@ -5,6 +5,13 @@ const state = {
   worldbookEntries: [],
   permissionTemplates: {},
   threadPermissions: null,
+  workflows: [],
+  workflowsMeta: {
+    phase: "idle", // idle | loading | loaded | error
+    source: "",
+    loadedAt: "",
+    error: "",
+  },
   selectedThreadId: "",
   messages: [],
   reminders: [],
@@ -45,6 +52,9 @@ const els = {
   threadTitle: document.querySelector("#thread-title"),
   threadSummary: document.querySelector("#thread-summary"),
   runtimeBadge: document.querySelector("#runtime-badge"),
+  workflowSummary: document.querySelector("#workflow-summary"),
+  workflowList: document.querySelector("#workflow-list"),
+  reloadWorkflowsButton: document.querySelector("#reload-workflows-button"),
   permissionSummary: document.querySelector("#permission-summary"),
   permissionSourceBadge: document.querySelector("#permission-source-badge"),
   permissionAgentMeta: document.querySelector("#permission-agent-meta"),
@@ -100,6 +110,10 @@ const els = {
   companionRelationshipState: document.querySelector("#companion-relationship-state"),
   companionRelationshipIntensity: document.querySelector("#companion-relationship-intensity"),
   companionToolAllow: document.querySelector("#companion-tool-allow"),
+  companionWorkflowStatus: document.querySelector("#companion-workflow-status"),
+  companionWorkflowSelect: document.querySelector("#companion-workflow-select"),
+  companionWorkflowMeta: document.querySelector("#companion-workflow-meta"),
+  companionWorkflowFields: document.querySelector("#companion-workflow-fields"),
 };
 
 boot().catch((error) => {
@@ -114,6 +128,12 @@ document.querySelectorAll(".nav-item").forEach((button) => {
     renderNav();
     renderScreens();
   });
+});
+
+els.reloadWorkflowsButton?.addEventListener("click", async () => {
+  await loadWorkflows({ force: true });
+  renderWorkflows();
+  renderCompanionWorkflowSection();
 });
 
 els.newCompanionButton.addEventListener("click", () => openCompanionDrawer("create"));
@@ -138,6 +158,10 @@ els.companionWaifuDelay?.addEventListener("input", () => {
   if (els.companionWaifuDelayValue) {
     els.companionWaifuDelayValue.textContent = `${value} ms/字`;
   }
+});
+
+els.companionWorkflowSelect?.addEventListener("change", () => {
+  renderCompanionWorkflowSection({ preserveValues: true });
 });
 
 els.companionForm.addEventListener("submit", async (event) => {
@@ -199,6 +223,7 @@ async function boot() {
   state.bootstrap = await apiGet("/api/bootstrap");
   state.contacts = state.bootstrap.contacts || [];
   state.threads = state.bootstrap.threads || [];
+  await loadWorkflows();
   state.worldbookEntries = await apiGet("/api/worldbook");
   state.permissionTemplates = await apiGet("/api/permissions/templates");
   state.selectedThreadId = resolvePreferredThreadId(state.threads, "");
@@ -268,6 +293,7 @@ function render() {
   renderHeader();
   renderThreadDebug();
   renderPermissions();
+  renderWorkflows();
   renderMessages();
   renderReminders();
 }
@@ -282,6 +308,196 @@ function renderScreens() {
   document.querySelectorAll(".screen").forEach((screen) => {
     screen.classList.toggle("active", screen.id === `screen-${state.activeScreen}`);
   });
+}
+
+async function loadWorkflows({ force = false } = {}) {
+  if (!force && ["loading", "loaded"].includes(state.workflowsMeta.phase)) {
+    return state.workflows;
+  }
+  state.workflowsMeta = { phase: "loading", source: "", loadedAt: "", error: "" };
+  renderWorkflows();
+  renderCompanionWorkflowSection();
+
+  const endpoints = ["/api/contact-workflows", "/api/workflows"];
+  let lastError = "";
+  for (const endpoint of endpoints) {
+    try {
+      const result = await apiGet(endpoint);
+      const list = normalizeWorkflowListResult(result);
+      state.workflows = list;
+      state.workflowsMeta = {
+        phase: "loaded",
+        source: endpoint,
+        loadedAt: new Date().toISOString(),
+        error: "",
+      };
+      return state.workflows;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  state.workflows = [];
+  state.workflowsMeta = {
+    phase: "error",
+    source: "",
+    loadedAt: new Date().toISOString(),
+    error: lastError || "load workflows failed",
+  };
+  return state.workflows;
+}
+
+function normalizeWorkflowListResult(result) {
+  const source = result && typeof result === "object" ? result : null;
+  const candidate = Array.isArray(result)
+    ? result
+    : Array.isArray(source?.workflows)
+      ? source.workflows
+      : Array.isArray(source?.items)
+        ? source.items
+        : Array.isArray(source?.data)
+          ? source.data
+          : [];
+  return (Array.isArray(candidate) ? candidate : [])
+    .map((item) => normalizeWorkflow(item))
+    .filter((item) => item && item.id);
+}
+
+function normalizeWorkflow(workflow) {
+  const raw = workflow && typeof workflow === "object" ? workflow : {};
+  const id = String(raw.workflowId || raw.id || raw.key || raw.name || "").trim();
+  if (!id) return null;
+  const versionRaw = raw.workflowVersion ?? raw.version ?? raw.rev ?? raw.revision ?? raw.schemaVersion;
+  const version = String(versionRaw == null ? "" : versionRaw).trim();
+  const label = String(raw.displayName || raw.title || raw.name || raw.label || id).trim();
+  const description = String(raw.descriptionZh || raw.description || raw.summary || "").trim();
+  const contactConfigSchema = raw.contactConfigSchema || raw.contactSchema || raw.schema || raw.contactSchemaJson || null;
+  const inputSources = raw.inputSources || raw.inputSource || raw.sources || raw.source || null;
+  const rules = raw.rules || raw.inputRules || raw.validationRules || raw.policy || null;
+  return {
+    id,
+    version,
+    label,
+    description,
+    contactConfigSchema,
+    inputSources,
+    rules,
+    raw,
+  };
+}
+
+function renderWorkflows() {
+  if (!els.workflowList || !els.workflowSummary) return;
+
+  const meta = state.workflowsMeta || {};
+  const count = Array.isArray(state.workflows) ? state.workflows.length : 0;
+  const statusText =
+    meta.phase === "loading"
+      ? "加载中…"
+      : meta.phase === "error"
+        ? `加载失败：${meta.error || "unknown"}`
+        : meta.phase === "loaded"
+          ? `已加载 ${count} 个 · source=${meta.source}`
+          : "未加载";
+  els.workflowSummary.textContent = statusText;
+
+  if (!count) {
+    els.workflowList.innerHTML =
+      meta.phase === "error"
+        ? `<article class="card"><div>无法加载 workflows。</div><div class="card-meta">${escapeHtml(meta.error || "")}</div></article>`
+        : `<article class="card"><div>暂无 workflows。</div></article>`;
+    return;
+  }
+
+  els.workflowList.innerHTML = state.workflows
+    .map((workflow) => {
+      const schema = normalizeJsonSchema(workflow.contactConfigSchema);
+      const fields = schema?.properties && typeof schema.properties === "object" ? Object.entries(schema.properties) : [];
+      const required = new Set(Array.isArray(schema?.required) ? schema.required.map((k) => String(k)) : []);
+      const fieldRows = fields.length
+        ? fields
+            .map(([key, fieldSchema]) => {
+              const fs = normalizeJsonSchema(fieldSchema);
+              const type = inferSchemaTypeLabel(fs);
+              const src = resolveSchemaMeta(fs, ["source", "inputSource", "from", "origin", "x-source"]);
+              const rule = resolveSchemaMeta(fs, ["rule", "rules", "x-rule", "x-rules", "pattern"]);
+              const desc = String(fs?.description || fs?.descriptionZh || "").trim();
+              const metaBits = [
+                required.has(String(key)) ? "required" : "",
+                src ? `source:${src}` : "",
+                rule ? `rule:${rule}` : "",
+              ]
+                .filter(Boolean)
+                .join(" · ");
+              return `
+                <article class="card">
+                  <div class="workflow-card-head">
+                    <div>
+                      <div class="workflow-name">${escapeHtml(String(fs?.title || fs?.name || key))}</div>
+                      <div class="workflow-id">${escapeHtml(String(key))} · ${escapeHtml(type)}</div>
+                    </div>
+                  </div>
+                  ${metaBits ? `<div class="card-meta">${escapeHtml(metaBits)}</div>` : ""}
+                  ${desc ? `<div class="card-meta">${escapeHtml(desc)}</div>` : ""}
+                </article>
+              `;
+            })
+            .join("")
+        : `<article class="card"><div>该 workflow 未提供 contactConfigSchema.properties。</div></article>`;
+
+      const extras = compactObject({
+        inputSources: workflow.inputSources,
+        rules: workflow.rules,
+      });
+
+      return `
+        <article class="card">
+          <div class="workflow-card-head">
+            <div>
+              <div class="workflow-name">${escapeHtml(workflow.label || workflow.id)}</div>
+              <div class="workflow-id">${escapeHtml(workflow.id)}${workflow.version ? ` · v${escapeHtml(workflow.version)}` : ""}</div>
+              ${workflow.description ? `<div class="card-meta">${escapeHtml(workflow.description)}</div>` : ""}
+            </div>
+          </div>
+          <div class="workflow-kv">
+            <strong>Fields</strong>
+            <div class="card-meta">${escapeHtml(String(fields.length))}</div>
+            <strong>Required</strong>
+            <div class="card-meta">${escapeHtml(Array.from(required).join(", ") || "-")}</div>
+          </div>
+          ${Object.keys(extras).length ? `<pre class="workflow-pre">${escapeHtml(JSON.stringify(extras, null, 2))}</pre>` : ""}
+        </article>
+        ${fieldRows}
+      `;
+    })
+    .join("");
+}
+
+function normalizeJsonSchema(schema) {
+  if (!schema || typeof schema !== "object") return null;
+  // Allow wrapper like { schema: {...} } or { jsonSchema: {...} }
+  if (schema.schema && typeof schema.schema === "object") return schema.schema;
+  if (schema.jsonSchema && typeof schema.jsonSchema === "object") return schema.jsonSchema;
+  return schema;
+}
+
+function inferSchemaTypeLabel(schema) {
+  const s = schema && typeof schema === "object" ? schema : {};
+  if (Array.isArray(s.enum)) return "enum";
+  const type = String(s.type || "").trim();
+  if (type) return type;
+  if (s.properties) return "object";
+  return "unknown";
+}
+
+function resolveSchemaMeta(schema, keys) {
+  const s = schema && typeof schema === "object" ? schema : {};
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(s, key) && s[key] != null) {
+      return String(s[key]).trim();
+    }
+  }
+  return "";
 }
 
 function renderContacts() {
@@ -1047,7 +1263,12 @@ async function openCompanionDrawer(mode) {
     els.companionDisplayName.value = contact.displayName || "";
     els.companionAvatar.value = contact.character?.avatar || "";
     els.companionStyle.value = contact.character?.style || "";
-    els.companionPersona.value = contact.character?.persona || "";
+    const workflowConfig = extractContactWorkflowConfig(contact);
+    const workflowPersona = workflowConfig.workflowInput?.contactPersona;
+    els.companionPersona.value =
+      workflowPersona != null && String(workflowPersona).trim() !== ""
+        ? String(workflowPersona)
+        : contact.character?.persona || "";
     els.companionWorldbookContent.value = resolveWorldbookContent(contact, thread);
     els.companionThreadSummary.value = thread.summary || "";
     els.companionGreeting.value = "";
@@ -1075,6 +1296,8 @@ async function openCompanionDrawer(mode) {
       els.companionAgentType?.value || "codex",
       permissions?.agentCapabilities?.modes,
     );
+    hydrateCompanionWorkflowFromContact(contact);
+    renderCompanionWorkflowSection({ preserveValues: true });
     await loadCompanionRuntimeSettings(thread.id, { force: true });
   } else {
     state.editingContactId = "";
@@ -1089,6 +1312,8 @@ async function openCompanionDrawer(mode) {
     if (els.companionAgentType) els.companionAgentType.value = "codex";
     if (els.companionRoleLevel) els.companionRoleLevel.value = "contact";
     populateCompanionAgentModeOptions("suggest", "codex");
+    hydrateCompanionWorkflowFromContact(null);
+    renderCompanionWorkflowSection({ preserveValues: false });
     setCompanionRuntimeSettings({
       threadId: "",
       phase: "creating",
@@ -1102,6 +1327,7 @@ function closeCompanionDrawer() {
   els.companionDrawer.classList.add("hidden");
   els.companionDrawer.setAttribute("aria-hidden", "true");
   state.editingContactId = "";
+  if (els.companionWorkflowFields) els.companionWorkflowFields.innerHTML = "";
 }
 
 async function archiveSelectedCompanion() {
@@ -1134,23 +1360,24 @@ function buildCompanionPayload() {
     enabled: els.companionTimeInjectionEnabled?.checked,
     timezone: els.companionTimezone?.value,
   });
+  const selectedWorkflow = getSelectedWorkflowFromDrawer();
+  const workflowInput = buildWorkflowInputFromDrawer(selectedWorkflow);
   const toolAllow = els.companionToolAllow.value
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-  return compactObject({
+  const base = compactObject({
     name: els.companionName.value.trim(),
     displayName: els.companionDisplayName.value.trim(),
     avatar: els.companionAvatar.value.trim(),
     style: els.companionStyle.value.trim(),
-    persona: els.companionPersona.value.trim(),
-    worldbookContent: els.companionWorldbookContent.value.trim(),
     threadSummary: els.companionThreadSummary.value.trim(),
     greeting: els.companionGreeting.value.trim(),
     agentType: els.companionAgentType?.value || "codex",
     roleLevel: els.companionRoleLevel?.value || "contact",
     agentMode: els.companionAgentMode?.value || "",
     timeSettings,
+    // Keep workflow fields out of compactObject so empty strings don't get dropped silently.
     toolPolicy: toolAllow.length ? { allow: toolAllow } : undefined,
     relationship:
       trust != null || intimacy != null || tension != null || responsiveness != null
@@ -1164,6 +1391,306 @@ function buildCompanionPayload() {
           })
         : undefined,
   });
+  // Contract: create/update payload includes workflowId/workflowVersion/workflowInput.
+  base.workflowId = selectedWorkflow?.id || "";
+  base.workflowVersion = selectedWorkflow?.version || "";
+  base.workflowInput = workflowInput || {};
+  return base;
+}
+
+function hydrateCompanionWorkflowFromContact(contact) {
+  // Populate select based on contact's current workflow, falling back to first workflow.
+  populateCompanionWorkflowOptions();
+  const current = extractContactWorkflowConfig(contact);
+  const match = current.workflowId
+    ? findWorkflowByIdVersion(current.workflowId, current.workflowVersion)
+    : null;
+  const fallback = state.workflows?.[0] || null;
+  const pick = match || fallback;
+  if (els.companionWorkflowSelect) {
+    els.companionWorkflowSelect.value = pick ? buildWorkflowKey(pick) : "";
+  }
+  // Store existing workflowInput for later render
+  els.companionWorkflowFields?.setAttribute("data-seed", JSON.stringify(current.workflowInput || {}));
+}
+
+function renderCompanionWorkflowSection({ preserveValues = false } = {}) {
+  populateCompanionWorkflowOptions();
+  const meta = state.workflowsMeta || {};
+  const count = Array.isArray(state.workflows) ? state.workflows.length : 0;
+  if (els.companionWorkflowStatus) {
+    els.companionWorkflowStatus.textContent =
+      meta.phase === "loading"
+        ? "加载中…"
+        : meta.phase === "error"
+          ? "加载失败"
+          : meta.phase === "loaded"
+            ? `${count} 个`
+            : "未加载";
+  }
+
+  const selected = getSelectedWorkflowFromDrawer();
+  if (els.companionWorkflowMeta) {
+    els.companionWorkflowMeta.textContent = selected
+      ? `${selected.id}${selected.version ? ` · v${selected.version}` : ""}`
+      : meta.phase === "error"
+        ? `workflows error: ${meta.error || "-"}`
+        : "未选择 workflow";
+  }
+  if (!els.companionWorkflowFields) return;
+
+  const seed = readWorkflowSeedInput();
+  const schema = normalizeJsonSchema(selected?.contactConfigSchema) || null;
+  const next = renderWorkflowInputFieldsHtml(schema, seed, { preserveValues });
+  els.companionWorkflowFields.innerHTML = next.html;
+  if (next.initValues && typeof next.initValues === "object") {
+    Object.entries(next.initValues).forEach(([key, value]) => {
+      const node = els.companionWorkflowFields.querySelector(`[data-workflow-key="${cssEscape(key)}"]`);
+      if (!node) return;
+      if (node.type === "checkbox") {
+        node.checked = Boolean(value);
+      } else {
+        node.value = value == null ? "" : String(value);
+      }
+    });
+  }
+
+  // Avoid a visible-but-ignored editable persona textarea:
+  // - If the workflow exposes `contactPersona`, the workflow field is the source of truth; hide the legacy textarea.
+  // - If the workflow does not expose it, only show the legacy textarea when a workflow is selected (because payload
+  //   intentionally omits workflowInput when no workflow is selected).
+  if (els.companionPersona) {
+    const workflowPersonaControl = els.companionWorkflowFields.querySelector('[data-workflow-key="contactPersona"]');
+    const showLegacyPersona = Boolean(selected) && !workflowPersonaControl;
+    els.companionPersona.classList.toggle("hidden", !showLegacyPersona);
+    els.companionPersona.readOnly = !showLegacyPersona;
+    if (showLegacyPersona && String(els.companionPersona.value || "").trim() === "") {
+      const seeded = seed && typeof seed === "object" ? seed.contactPersona : "";
+      if (seeded != null && String(seeded).trim() !== "") {
+        els.companionPersona.value = String(seeded);
+      }
+    }
+  }
+}
+
+function populateCompanionWorkflowOptions() {
+  if (!els.companionWorkflowSelect) return;
+  const workflows = Array.isArray(state.workflows) ? state.workflows : [];
+  if (!workflows.length) {
+    els.companionWorkflowSelect.innerHTML = `<option value="">(无可用 workflow)</option>`;
+    return;
+  }
+  const currentValue = els.companionWorkflowSelect.value;
+  els.companionWorkflowSelect.innerHTML = workflows
+    .map((wf) => {
+      const key = buildWorkflowKey(wf);
+      const label = wf.version ? `${wf.label} · v${wf.version}` : wf.label;
+      return `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`;
+    })
+    .join("");
+  if (currentValue) {
+    const exists = workflows.some((wf) => buildWorkflowKey(wf) === currentValue);
+    if (exists) els.companionWorkflowSelect.value = currentValue;
+  }
+}
+
+function buildWorkflowKey(workflow) {
+  if (!workflow) return "";
+  const id = String(workflow.id || "").trim();
+  const version = String(workflow.version || "").trim();
+  return `${id}::${version}`;
+}
+
+function parseWorkflowKey(value) {
+  const raw = String(value || "");
+  const [id, version] = raw.split("::");
+  return { id: String(id || "").trim(), version: String(version || "").trim() };
+}
+
+function findWorkflowByIdVersion(id, version) {
+  const workflows = Array.isArray(state.workflows) ? state.workflows : [];
+  const idKey = String(id || "").trim();
+  const verKey = String(version || "").trim();
+  if (!idKey) return null;
+  const exact = workflows.find((wf) => wf.id === idKey && String(wf.version || "").trim() === verKey);
+  if (exact) return exact;
+  const loose = workflows.find((wf) => wf.id === idKey);
+  return loose || null;
+}
+
+function getSelectedWorkflowFromDrawer() {
+  if (!els.companionWorkflowSelect) return null;
+  const { id, version } = parseWorkflowKey(els.companionWorkflowSelect.value);
+  return findWorkflowByIdVersion(id, version) || null;
+}
+
+function extractContactWorkflowConfig(contact) {
+  const c = contact && typeof contact === "object" ? contact : null;
+  const workflowId =
+    String(c?.workflowId || c?.workflow?.id || c?.workflow?.workflowId || c?.character?.workflowId || "").trim() || "";
+  const workflowVersion =
+    String(c?.workflowVersion || c?.workflow?.version || c?.workflow?.workflowVersion || c?.character?.workflowVersion || "").trim() ||
+    "";
+  const workflowInputRaw =
+    c?.workflowInput ||
+    c?.workflow?.input ||
+    c?.workflow?.workflowInput ||
+    c?.character?.workflowInput ||
+    c?.character?.workflowInput ||
+    {};
+  const workflowInput = workflowInputRaw && typeof workflowInputRaw === "object" ? workflowInputRaw : {};
+  return { workflowId, workflowVersion, workflowInput };
+}
+
+function readWorkflowSeedInput() {
+  try {
+    const raw = els.companionWorkflowFields?.getAttribute("data-seed") || "";
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function renderWorkflowInputFieldsHtml(schema, seed, { preserveValues } = {}) {
+  const s = normalizeJsonSchema(schema);
+  const properties = s?.properties && typeof s.properties === "object" ? s.properties : {};
+  const required = new Set(Array.isArray(s?.required) ? s.required.map((k) => String(k)) : []);
+  const keys = Object.keys(properties);
+
+  if (!keys.length) {
+    return {
+      html: `<article class="card"><div>该 workflow 未暴露 contactConfigSchema 字段。</div></article>`,
+      initValues: {},
+    };
+  }
+
+  const preserved = preserveValues ? readWorkflowInputFromControls() : {};
+  const initValues = compactWorkflowInput({
+    ...(seed && typeof seed === "object" ? seed : {}),
+    ...(preserveValues ? preserved : {}),
+  });
+
+  const rows = keys
+    .map((key) => {
+      const fieldSchema = normalizeJsonSchema(properties[key]) || {};
+      const title = String(fieldSchema.title || fieldSchema.name || key).trim();
+      const desc = String(fieldSchema.descriptionZh || fieldSchema.description || "").trim();
+      const enumValues = Array.isArray(fieldSchema.enum) ? fieldSchema.enum : null;
+      const type = String(fieldSchema.type || "").trim();
+      const format = String(fieldSchema.format || "").trim();
+
+      const fieldId = `workflow-input-${key}`;
+      const req = required.has(String(key));
+      const helpBits = [];
+      const src = resolveSchemaMeta(fieldSchema, ["source", "inputSource", "from", "origin", "x-source"]);
+      const rule = resolveSchemaMeta(fieldSchema, ["rule", "rules", "x-rule", "x-rules", "pattern"]);
+      if (src) helpBits.push(`source:${src}`);
+      if (rule) helpBits.push(`rule:${rule}`);
+
+      let inputHtml = "";
+      if (enumValues && enumValues.length) {
+        inputHtml = `
+          <select id="${escapeHtml(fieldId)}" data-workflow-key="${escapeHtml(key)}" ${req ? "required" : ""}>
+            <option value=""></option>
+            ${enumValues.map((item) => `<option value="${escapeHtml(String(item))}">${escapeHtml(String(item))}</option>`).join("")}
+          </select>
+        `;
+      } else if (type === "boolean") {
+        inputHtml = `
+          <label class="runtime-toggle-row">
+            <input id="${escapeHtml(fieldId)}" type="checkbox" data-workflow-key="${escapeHtml(key)}" />
+            <span>${escapeHtml(title)}</span>
+          </label>
+        `;
+      } else if (type === "number" || type === "integer") {
+        const step = type === "integer" ? "1" : "any";
+        inputHtml = `<input id="${escapeHtml(fieldId)}" type="number" step="${step}" data-workflow-key="${escapeHtml(key)}" ${req ? "required" : ""} />`;
+      } else {
+        const shouldTextarea = format === "textarea" || format === "multiline" || (fieldSchema.maxLength != null && Number(fieldSchema.maxLength) > 180);
+        inputHtml = shouldTextarea
+          ? `<textarea id="${escapeHtml(fieldId)}" rows="3" data-workflow-key="${escapeHtml(key)}" ${req ? "required" : ""}></textarea>`
+          : `<input id="${escapeHtml(fieldId)}" data-workflow-key="${escapeHtml(key)}" ${req ? "required" : ""} />`;
+      }
+
+      const labelHtml =
+        type === "boolean"
+          ? ""
+          : `<div class="workflow-field-help">${escapeHtml([helpBits.join(" · "), desc].filter(Boolean).join(" · "))}</div>`;
+
+      return `
+        <div class="workflow-field">
+          ${type === "boolean"
+            ? `${inputHtml}${desc || helpBits.length ? `<div class="workflow-field-help">${escapeHtml([helpBits.join(" · "), desc].filter(Boolean).join(" · "))}</div>` : ""}`
+            : `<label class="form-field" for="${escapeHtml(fieldId)}"><span>${escapeHtml(title)}${req ? " *" : ""}</span>${inputHtml}</label>${labelHtml}`}
+        </div>
+      `;
+    })
+    .join("");
+
+  return { html: rows, initValues };
+}
+
+function readWorkflowInputFromControls() {
+  if (!els.companionWorkflowFields) return {};
+  const output = {};
+  els.companionWorkflowFields.querySelectorAll("[data-workflow-key]").forEach((node) => {
+    const key = String(node.dataset.workflowKey || "").trim();
+    if (!key) return;
+    if (node.type === "checkbox") {
+      output[key] = Boolean(node.checked);
+      return;
+    }
+    const value = String(node.value ?? "").trim();
+    if (value === "") return;
+    if (node.type === "number") {
+      const number = Number(value);
+      if (Number.isFinite(number)) output[key] = number;
+      return;
+    }
+    output[key] = value;
+  });
+  return output;
+}
+
+function compactWorkflowInput(input) {
+  const source = input && typeof input === "object" ? input : {};
+  return Object.fromEntries(
+    Object.entries(source).filter(([key, value]) => {
+      if (!key) return false;
+      if (value == null) return false;
+      if (typeof value === "string") return value.trim() !== "";
+      if (typeof value === "object") return Object.keys(value).length > 0;
+      return true;
+    }),
+  );
+}
+
+function buildWorkflowInputFromDrawer(selectedWorkflow) {
+  const input = { ...readWorkflowInputFromControls() };
+  // Contract requires at least these keys.
+  if (!Object.prototype.hasOwnProperty.call(input, "contactProjectDir")) {
+    const fallback = String(els.companionRuntimeWorkDir?.value || "").trim();
+    if (fallback) input.contactProjectDir = fallback;
+  }
+  if (!Object.prototype.hasOwnProperty.call(input, "contactPersona")) {
+    const fallback = String(els.companionPersona?.value || "").trim();
+    if (fallback) input.contactPersona = fallback;
+  }
+  if (!Object.prototype.hasOwnProperty.call(input, "userPersona")) {
+    const fallback = String(state.bootstrap?.userPersona || state.bootstrap?.user?.persona || "").trim();
+    if (fallback) input.userPersona = fallback;
+  }
+
+  // If workflow isn't selected, keep workflowInput empty to avoid surprising payloads.
+  if (!selectedWorkflow) return {};
+  return compactWorkflowInput(input);
+}
+
+function cssEscape(value) {
+  // Minimal escape for attribute selector usage in querySelector.
+  return String(value || "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 function populateCompanionAgentModeOptions(selectedMode, agentType, runtimeModes) {
