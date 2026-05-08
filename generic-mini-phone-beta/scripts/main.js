@@ -5,8 +5,8 @@ import {
   fetchDynamicAppRegistry,
   mergeStaticAndDynamicDesktopApps,
   registeredApps,
-} from './app-registry.js?v=13';
-import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=13';
+} from './app-registry.js?v=14';
+import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=14';
 import {
   buildServiceManagerDefinitions,
   createServiceFromDefinition,

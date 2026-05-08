@@ -5,7 +5,7 @@ import * as files from '../apps/files/index.js';
 import * as vocabulary from '../apps/vocabulary/index.js';
 import * as likeGirl from '../apps/like-girl/index.js';
 import * as likeGirlClone from '../apps/like-girl-clone/index.js';
-import * as workflows from '../apps/workflows/index.js?v=3';
+import * as workflows from '../apps/workflows/index.js?v=4';
 
 export const appModules = [
   calendar,
