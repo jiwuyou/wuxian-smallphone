@@ -373,7 +373,7 @@ function renderPromptBoardPreview(compiled) {
 function renderMergedPreview(enabledModules, compiled) {
   return `
     <div class="prompt-merged-preview" aria-label="纯文本合并预览">
-      ${enabledModules.map((module, index) => renderMergedSegment(module, compiled, index)).join('<span class="prompt-merged-gap" aria-hidden="true">\\n\\n</span>')}
+      ${enabledModules.map((module, index) => renderMergedSegment(module, compiled, index)).join('<span class="prompt-merged-gap" aria-hidden="true"></span>')}
     </div>
   `;
 }

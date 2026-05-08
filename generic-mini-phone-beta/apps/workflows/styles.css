@@ -299,6 +299,14 @@
   padding-right: 2px;
 }
 
+.promptboard-module-panel[aria-hidden="true"] {
+  display: none;
+}
+
+.promptboard-module-panel[aria-hidden="false"] {
+  display: block;
+}
+
 .promptboard-module-hint {
   display: flex;
   flex-wrap: wrap;
