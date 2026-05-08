@@ -49,7 +49,10 @@ export function sanitizeModulesForCompile(modules) {
       const overrideRaw = typeof m?.contentOverride === 'string' ? m.contentOverride : '';
       const normalizedOverride = overrideRaw.replaceAll('\r\n', '\n');
       const contentOverride = normalizedOverride.trim() ? normalizedOverride : null;
-      return { id, enabled, template, contentOverride, order };
+      const kind = normalizeModuleKind(m?.kind);
+      const fields = sanitizeModuleFieldsForCompile(m?.fields);
+      const workflow = sanitizeModuleWorkflow(m?.workflow);
+      return { id, enabled, template, contentOverride, order, kind, fields, workflow };
     })
     .filter(Boolean);
 }
@@ -68,9 +71,84 @@ function sanitizeModulesForPatch(modules) {
       const overrideRaw = typeof m?.contentOverride === 'string' ? m.contentOverride : '';
       const normalizedOverride = overrideRaw.replaceAll('\r\n', '\n');
       const contentOverride = normalizedOverride.trim() ? normalizedOverride : null;
-      return { id, title, description, enabled, template, contentOverride, order };
+      const kind = normalizeModuleKind(m?.kind);
+      const fields = sanitizeModuleFieldsForPatch(m?.fields);
+      const workflow = sanitizeModuleWorkflow(m?.workflow);
+      return { id, title, description, enabled, template, contentOverride, order, kind, fields, workflow };
     })
     .filter(Boolean);
+}
+
+function normalizeModuleKind(value) {
+  const raw = String(value || '').trim();
+  return raw || 'template';
+}
+
+function sanitizeModuleFieldsForPatch(fields) {
+  const list = Array.isArray(fields) ? fields : [];
+  return list
+    .map((field) => {
+      if (!field || typeof field !== 'object') return null;
+      const id = String(field.id || '').trim();
+      if (!id) return null;
+      const sourceType = normalizeFieldSourceType(field.sourceType || field.source_type);
+      return {
+        id,
+        label: String(field.label || id).trim(),
+        type: String(field.type || 'textarea').trim() === 'text' ? 'text' : 'textarea',
+        value: String(field.value || '').replaceAll('\r\n', '\n'),
+        placeholder: String(field.placeholder || '').trim(),
+        sourceType,
+        source: String(field.source || '').trim(),
+        attribute: String(field.attribute || '').trim(),
+        path: String(field.path || '').trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function sanitizeModuleFieldsForCompile(fields) {
+  const list = Array.isArray(fields) ? fields : [];
+  return list
+    .map((field) => {
+      if (!field || typeof field !== 'object') return null;
+      const id = String(field.id || '').trim();
+      if (!id) return null;
+      const sourceType = normalizeFieldSourceType(field.sourceType || field.source_type);
+      const resolvedValue = field.resolvedValue == null ? undefined : String(field.resolvedValue || '').replaceAll('\r\n', '\n');
+      return {
+        id,
+        label: String(field.label || id).trim(),
+        type: String(field.type || 'textarea').trim() === 'text' ? 'text' : 'textarea',
+        value: String(field.value || '').replaceAll('\r\n', '\n'),
+        placeholder: String(field.placeholder || '').trim(),
+        sourceType,
+        source: String(field.source || '').trim(),
+        attribute: String(field.attribute || '').trim(),
+        path: String(field.path || '').trim(),
+        // Important: query mappings are resolved by the backend; do not send resolvedValue.
+        resolvedValue: sourceType === 'query' ? undefined : resolvedValue,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeFieldSourceType(value) {
+  const raw = String(value || '').trim();
+  if (raw === 'dom' || raw === 'iframe' || raw === 'localStorage' || raw === 'window' || raw === 'query') return raw;
+  return 'manual';
+}
+
+function sanitizeModuleWorkflow(workflow) {
+  if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
+    return { mode: 'parallel', nodeType: 'context.block', inputs: [], outputs: ['context.block'] };
+  }
+  return {
+    mode: String(workflow.mode || 'parallel').trim() || 'parallel',
+    nodeType: String(workflow.nodeType || workflow.node_type || 'context.block').trim() || 'context.block',
+    inputs: Array.isArray(workflow.inputs) ? workflow.inputs.map((v) => String(v || '').trim()).filter(Boolean) : [],
+    outputs: Array.isArray(workflow.outputs) ? workflow.outputs.map((v) => String(v || '').trim()).filter(Boolean) : ['context.block'],
+  };
 }
 
 export function resolveBackendBase() {

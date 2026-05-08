@@ -95,10 +95,11 @@
 }
 
 .prompt-merged-preview {
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 12px 14px;
-  background: var(--surface);
+  /* Keep the canvas as pure plaintext with inline color blocks (no outer frame). */
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+  background: transparent;
   color: var(--text);
 }
 
@@ -369,6 +370,48 @@
   display: flex;
   justify-content: space-between;
   gap: 10px;
+}
+
+.promptboard-fields-list {
+  display: grid;
+  gap: 12px;
+}
+
+.promptboard-field-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.promptboard-field-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.promptboard-field-hint {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.promptboard-field-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.promptboard-add-field {
+  width: 100%;
+}
+
+@media (min-width: 520px) {
+  .promptboard-field-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .promptboard-trace-text {

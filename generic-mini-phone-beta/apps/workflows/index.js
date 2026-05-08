@@ -5,7 +5,7 @@ import {
   resolveBackendBase,
   sanitizeModulesForCompile,
   saveThreadPromptBoard,
-} from './api.js?v=1';
+} from './api.js?v=4';
 
 const PROMPTBOARD_STORAGE_KEY = 'smallphone.promptBoard.drafts.v1';
 const PROMPTBOARD_SELECTED_THREAD_KEY = 'smallphone.promptBoard.selectedThreadId';
@@ -80,6 +80,7 @@ export const template = `
     <div class="promptboard-actions">
       <button class="soft-button small-button" id="promptboard-refresh" type="button">同步</button>
       <select id="promptboard-thread" class="promptboard-select" aria-label="选择线程"></select>
+      <button class="secondary-button" id="promptboard-add-module" type="button">新增模块</button>
       <button class="secondary-button" id="promptboard-compile" type="button">编译</button>
     </div>
 
@@ -193,6 +194,10 @@ export function bind() {
 
   qs('#promptboard-compile')?.addEventListener('click', () => {
     scheduleCompile({ force: true });
+  });
+
+  qs('#promptboard-add-module')?.addEventListener('click', () => {
+    addCustomModule();
   });
 
   qs('#promptboard-copy-final')?.addEventListener('click', async () => {
@@ -777,8 +782,11 @@ async function persistPromptBoardDrafts({ threadId, modules, workflowKey }) {
         description: String(m?.description || '').trim(),
         enabled: m?.enabled !== false,
         order: Number.isFinite(Number(m?.order)) ? Number(m.order) : undefined,
+        kind: String(m?.kind || 'template').trim() || 'template',
         template: String(m?.template || '').replaceAll('\r\n', '\n'),
         contentOverride: String(m?.contentOverride || ''),
+        fields: normalizeModuleFields(m?.fields),
+        workflow: normalizeModuleWorkflow(m?.workflow),
       }))
       .filter((m) => m.id),
     updatedAt: new Date().toISOString(),
@@ -922,7 +930,7 @@ async function tryBackendCompile({ backendBase, threadId, modules, previewText }
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ text: previewText, modules: sanitizeModulesForCompile(modules) }),
+    body: JSON.stringify({ text: previewText, modules: sanitizeModulesForCompile(buildModulesForCompile(modules)) }),
   });
   if (!response.ok) return null;
   const payload = await response.json();
@@ -974,7 +982,10 @@ function compileLocally({ modules, thread, previewText, messages, turnContext })
     const id = String(module?.id || '').trim();
     if (!id) continue;
     const enabled = module?.enabled !== false;
-    const template = String(module?.template || '').replaceAll('\r\n', '\n');
+    const template = renderModuleFieldPlaceholders(
+      String(module?.template || '').replaceAll('\r\n', '\n'),
+      module,
+    );
     const override = typeof module?.contentOverride === 'string' ? module.contentOverride : '';
 
     let text = '';
@@ -987,7 +998,7 @@ function compileLocally({ modules, thread, previewText, messages, turnContext })
       mode = 'override';
       text = override.replaceAll('\r\n', '\n');
     } else if (template) {
-      const rendered = renderTemplate(template, context);
+      const rendered = renderTemplate(template, buildModuleCompileContext(context, module));
       text = rendered.text;
       usedVariables = rendered.usedVariables;
     }
@@ -1215,6 +1226,143 @@ function renderTemplate(template, context) {
   return { text, usedVariables: [...new Set(used)] };
 }
 
+function buildModulesForCompile(modules) {
+  const list = Array.isArray(modules) ? modules : [];
+  return list
+    .filter((m) => m && typeof m === 'object')
+    .map((m) => ({
+      ...m,
+      fields: buildModuleFieldsForCompile(m.fields),
+    }));
+}
+
+function buildModuleFieldsForCompile(fields) {
+  return normalizeModuleFields(fields).map((field) => {
+    const sourceType = String(field?.sourceType || 'manual').trim();
+    if (sourceType === 'query') return field;
+    return { ...field, resolvedValue: resolveMappedFieldValue(field) };
+  });
+}
+
+function renderModuleFieldPlaceholders(template, module) {
+  const values = moduleFieldValues(module?.fields);
+  return String(template || '').replace(/\{\{\s*(fields|vars|app)\.([a-zA-Z0-9_-]+)\s*\}\}/g, (_, _scope, key) => {
+    const id = normalizeFieldId(key);
+    return values[id] == null ? '' : String(values[id]);
+  });
+}
+
+function moduleFieldValues(fields) {
+  const values = {};
+  for (const field of normalizeModuleFields(fields)) {
+    values[field.id] = field.resolvedValue != null
+      ? String(field.resolvedValue).replaceAll('\r\n', '\n')
+      : resolveMappedFieldValue(field);
+  }
+  return values;
+}
+
+function resolveMappedFieldValue(field) {
+  const fallback = String(field?.value || '').replaceAll('\r\n', '\n');
+  const sourceType = String(field?.sourceType || 'manual').trim();
+  const source = String(field?.source || '').trim();
+  if (!source || sourceType === 'manual') return fallback;
+
+  if (sourceType === 'dom') {
+    return readDomSourceValue(source, field?.attribute) ?? fallback;
+  }
+  if (sourceType === 'iframe') {
+    return readIframeSourceValue(source, field?.attribute) ?? fallback;
+  }
+  if (sourceType === 'localStorage') {
+    return readLocalStorageSourceValue(source, field?.path) ?? fallback;
+  }
+  if (sourceType === 'window') {
+    return stringifyMappedValue(getByPath(window, source)) || fallback;
+  }
+  if (sourceType === 'query') {
+    return fallback;
+  }
+  return fallback;
+}
+
+function readIframeSourceValue(selector, attribute) {
+  const frame = document.querySelector('#dynamic-app-frame');
+  if (!(frame instanceof HTMLIFrameElement)) return null;
+  try {
+    const doc = frame.contentDocument;
+    if (!doc) return null;
+    const element = doc.querySelector(selector);
+    if (!element) return null;
+    const attr = String(attribute || '').trim();
+    if (attr) {
+      const value = element.getAttribute(attr);
+      return value == null ? null : value;
+    }
+    if ('value' in element) return String(element.value || '').replaceAll('\r\n', '\n');
+    return String(element.textContent || '').trim();
+  } catch {
+    return null;
+  }
+}
+
+function readDomSourceValue(selector, attribute) {
+  let element = null;
+  try {
+    element = document.querySelector(selector);
+  } catch {
+    element = null;
+  }
+  if (!element) return null;
+  const attr = String(attribute || '').trim();
+  if (attr) {
+    const value = element.getAttribute(attr);
+    return value == null ? null : value;
+  }
+  if ('value' in element) return String(element.value || '').replaceAll('\r\n', '\n');
+  return String(element.textContent || '').trim();
+}
+
+function readLocalStorageSourceValue(key, path) {
+  const raw = window.localStorage.getItem(String(key || '').trim());
+  if (raw == null) return null;
+  const propertyPath = String(path || '').trim();
+  if (!propertyPath) return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    return stringifyMappedValue(getByPath(parsed, propertyPath));
+  } catch {
+    return null;
+  }
+}
+
+function stringifyMappedValue(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.replaceAll('\r\n', '\n');
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function buildModuleCompileContext(context, module) {
+  return {
+    ...context,
+    fields: moduleFieldValues(module?.fields),
+    vars: moduleFieldValues(module?.fields),
+    app: moduleFieldValues(module?.fields),
+    module: {
+      id: String(module?.id || '').trim(),
+      title: String(module?.title || '').trim(),
+      description: String(module?.description || '').trim(),
+      kind: String(module?.kind || 'template').trim() || 'template',
+      workflow: normalizeModuleWorkflow(module?.workflow),
+    },
+  };
+}
+
 function getByPath(root, path) {
   const parts = String(path || '').split('.').map((p) => p.trim()).filter(Boolean);
   let cursor = root;
@@ -1223,6 +1371,18 @@ function getByPath(root, path) {
     cursor = cursor[part];
   }
   return cursor;
+}
+
+function createUniqueModuleId(existingIds) {
+  const used = existingIds instanceof Set ? existingIds : new Set();
+  const base = `custom-${Date.now().toString(36)}`;
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
 }
 
 function buildTemplateWarnings(usedVariables, context) {
@@ -1256,6 +1416,49 @@ function toggleModuleEnabled(moduleId) {
       if (String(m?.id || '') !== id) return m;
       return { ...m, enabled: m?.enabled === false };
     }),
+  };
+  schedulePersistDrafts();
+  scheduleCompile({ force: true });
+  renderPromptBoard();
+}
+
+function addCustomModule() {
+  const existingIds = new Set((promptBoardState.modules || []).map((m) => String(m?.id || '').trim()));
+  const id = createUniqueModuleId(existingIds);
+  const order = Math.max(0, ...promptBoardState.modules.map((m) => Number(m?.order || 0)).filter(Number.isFinite)) + 1;
+  const module = {
+    id,
+    title: '自定义模块',
+    description: '并行上下文块；变量可从任意 App 的字段、localStorage 或 window 状态映射过来。',
+    enabled: true,
+    order,
+    kind: 'custom',
+    template: '{{fields.content}}',
+    contentOverride: '',
+    fields: [
+      {
+        id: 'content',
+        label: '内容',
+        type: 'textarea',
+        value: '',
+        placeholder: '可手填，也可改成从 App 字段映射。',
+        sourceType: 'manual',
+        source: '',
+        attribute: '',
+        path: '',
+      },
+    ],
+    workflow: {
+      mode: 'parallel',
+      nodeType: 'context.block',
+      inputs: [],
+      outputs: ['context.block'],
+    },
+  };
+  promptBoardState = {
+    ...promptBoardState,
+    modules: normalizeModuleList([...promptBoardState.modules, module]),
+    editor: { open: true, moduleId: id },
   };
   schedulePersistDrafts();
   scheduleCompile({ force: true });
@@ -1304,6 +1507,8 @@ function renderModuleEditor() {
   const traceWarnings = Array.isArray(compiledTrace?.warnings) ? compiledTrace.warnings : [];
   const traceMode = String(compiledTrace?.mode || '').trim();
   const traceText = typeof compiledTrace?.text === 'string' ? compiledTrace.text : '';
+  const moduleKind = String(module.kind || 'template').trim() || 'template';
+  const moduleWorkflow = normalizeModuleWorkflow(module.workflow);
 
   title.textContent = module.title || module.id;
 
@@ -1311,6 +1516,8 @@ function renderModuleEditor() {
     <div class="promptboard-module-hint">
       <span class="promptboard-chip">标题/说明不会发送到 9840</span>
       <span class="promptboard-chip promptboard-chip-mono">${escapeHtml(module.id)}</span>
+      <span class="promptboard-chip">${escapeHtml(moduleKind)}</span>
+      <span class="promptboard-chip">${escapeHtml(moduleWorkflow.mode)}</span>
       ${traceMode ? `<span class="promptboard-chip">${escapeHtml(traceMode)}</span>` : ''}
     </div>
 
@@ -1331,6 +1538,31 @@ function renderModuleEditor() {
         <span>模板（会被编译成发送内容）</span>
         <textarea id="promptboard-edit-template" rows="6" spellcheck="false" placeholder="例如：Character: {{character.name}}">${escapeHtml(module.template || '')}</textarea>
       </label>
+      <details class="details-panel promptboard-fields-panel" open>
+        <summary>变量映射</summary>
+        <div class="details-panel-body">
+          <div class="promptboard-fields-list" id="promptboard-fields-list">
+            ${renderModuleFieldRows(module.fields)}
+          </div>
+          <button class="secondary-button promptboard-add-field" id="promptboard-add-field" type="button">添加变量</button>
+        </div>
+      </details>
+      <details class="details-panel promptboard-workflow-panel">
+        <summary>工作流兼容</summary>
+        <div class="details-panel-body">
+          <label>
+            <span>执行模式</span>
+            <select id="promptboard-edit-workflow-mode">
+              <option value="parallel"${moduleWorkflow.mode === 'parallel' ? ' selected' : ''}>并行模块</option>
+              <option value="serial"${moduleWorkflow.mode === 'serial' ? ' selected' : ''}>串行步骤（预留）</option>
+            </select>
+          </label>
+          <label>
+            <span>节点类型</span>
+            <input type="text" id="promptboard-edit-workflow-node" value="${escapeHtml(moduleWorkflow.nodeType)}" placeholder="context.block">
+          </label>
+        </div>
+      </details>
       <label>
         <span>最终内容覆盖（直接发送，优先级高于模板）</span>
         <textarea id="promptboard-edit-override" rows="5" spellcheck="false" placeholder="留空表示按模板编译。">${escapeHtml(module.contentOverride || '')}</textarea>
@@ -1360,6 +1592,17 @@ function renderModuleEditor() {
     event.preventDefault();
     applyModuleEditorChanges(module.id);
   });
+  qs('#promptboard-add-field')?.addEventListener('click', () => {
+    appendModuleFieldRow();
+  });
+  qs('#promptboard-fields-list')?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const remove = target.closest('[data-prompt-field-remove]');
+    if (!remove) return;
+    const row = remove.closest('[data-prompt-field-row]');
+    row?.remove();
+  });
   qs('#promptboard-module-reset-override')?.addEventListener('click', () => {
     const override = qs('#promptboard-edit-override');
     if (override) override.value = '';
@@ -1374,14 +1617,30 @@ function applyModuleEditorChanges(moduleId) {
   const enabled = qs('#promptboard-edit-enabled');
   const template = qs('#promptboard-edit-template');
   const override = qs('#promptboard-edit-override');
+  const workflowMode = qs('#promptboard-edit-workflow-mode');
+  const workflowNode = qs('#promptboard-edit-workflow-node');
   if (!id || !title || !description || !enabled || !template || !override) return;
+
+  const currentModule = promptBoardState.modules.find((m) => String(m?.id || '') === id) || null;
+  const previousWorkflow =
+    currentModule && currentModule.workflow && typeof currentModule.workflow === 'object' && !Array.isArray(currentModule.workflow)
+      ? currentModule.workflow
+      : null;
+  const nextWorkflow = normalizeModuleWorkflow({
+    ...(previousWorkflow || {}),
+    mode: String(workflowMode?.value || previousWorkflow?.mode || 'parallel'),
+    nodeType: String(workflowNode?.value || previousWorkflow?.nodeType || previousWorkflow?.node_type || 'context.block'),
+  });
 
   const next = {
     title: String(title.value || '').trim(),
     description: String(description.value || '').trim(),
     enabled: Boolean(enabled.checked),
+    kind: String(currentModule?.kind || 'custom').trim() || 'custom',
     template: String(template.value || '').replaceAll('\r\n', '\n'),
     contentOverride: String(override.value || '').replaceAll('\r\n', '\n'),
+    fields: readModuleFieldsFromEditor(),
+    workflow: nextWorkflow,
   };
 
   promptBoardState = {
@@ -1392,6 +1651,132 @@ function applyModuleEditorChanges(moduleId) {
   scheduleCompile({ force: true });
   renderModuleEditor();
   renderPromptBoard();
+}
+
+function renderModuleFieldRows(fields) {
+  const normalized = normalizeModuleFields(fields);
+  const rows = normalized.length
+    ? normalized
+    : [{ id: 'content', label: '内容', type: 'textarea', value: '', placeholder: '手填默认值，或改成从 App 字段映射。', sourceType: 'manual' }];
+  return rows.map((field, index) => renderModuleFieldRow(field, index)).join('');
+}
+
+function renderModuleFieldRow(field, index) {
+  const id = String(field?.id || `field${index + 1}`).trim();
+  const type = String(field?.type || 'textarea') === 'text' ? 'text' : 'textarea';
+  const label = String(field?.label || id).trim();
+  const value = String(field?.value || '').replaceAll('\r\n', '\n');
+  const placeholder = String(field?.placeholder || '').trim();
+  const sourceType = String(field?.sourceType || 'manual').trim() || 'manual';
+  const source = String(field?.source || '').trim();
+  const attribute = String(field?.attribute || '').trim();
+  const path = String(field?.path || '').trim();
+  return `
+    <article class="promptboard-field-row" data-prompt-field-row>
+      <div class="promptboard-field-grid">
+        <label>
+          <span>变量名</span>
+          <input type="text" data-field-id value="${escapeHtml(id)}" placeholder="content">
+        </label>
+        <label>
+          <span>标签</span>
+          <input type="text" data-field-label value="${escapeHtml(label)}" placeholder="内容">
+        </label>
+        <label>
+          <span>类型</span>
+          <select data-field-type>
+            <option value="textarea"${type === 'textarea' ? ' selected' : ''}>多行</option>
+            <option value="text"${type === 'text' ? ' selected' : ''}>单行</option>
+          </select>
+        </label>
+      </div>
+      <div class="promptboard-field-grid">
+        <label>
+          <span>来源</span>
+          <select data-field-source-type>
+            <option value="manual"${sourceType === 'manual' ? ' selected' : ''}>手填默认值</option>
+            <option value="dom"${sourceType === 'dom' ? ' selected' : ''}>页面字段 / DOM</option>
+            <option value="iframe"${sourceType === 'iframe' ? ' selected' : ''}>动态 App iframe</option>
+            <option value="localStorage"${sourceType === 'localStorage' ? ' selected' : ''}>localStorage</option>
+            <option value="window"${sourceType === 'window' ? ' selected' : ''}>window 路径</option>
+            <option value="query"${sourceType === 'query' ? ' selected' : ''}>查询 URL / API</option>
+          </select>
+        </label>
+        <label>
+          <span>选择器 / Key / 路径 / URL</span>
+          <input type="text" data-field-source value="${escapeHtml(source)}" placeholder="#app-input 或 /api/value">
+        </label>
+        <label>
+          <span>属性 / JSON 路径</span>
+          <input type="text" data-field-attribute value="${escapeHtml(attribute || path)}" placeholder="value / data-x / profile.name">
+        </label>
+      </div>
+      ${sourceType === 'query' ? `
+        <p class="promptboard-field-hint">query 类型不会在前端发起请求；这里只保存 URL/配置与默认值，编译时由后端解析并注入模板。</p>
+      ` : ''}
+      <label>
+        <span>默认值 · 模板变量 {{fields.${escapeHtml(id)}}} / {{app.${escapeHtml(id)}}}</span>
+        <textarea data-field-value rows="4" spellcheck="false" placeholder="${escapeHtml(placeholder || '映射失败时使用这里的默认值。')}">${escapeHtml(value)}</textarea>
+      </label>
+      <div class="promptboard-field-actions">
+        <button class="ghost-button" data-prompt-field-remove type="button">移除字段</button>
+      </div>
+    </article>
+  `;
+}
+
+function appendModuleFieldRow() {
+  const list = qs('#promptboard-fields-list');
+  if (!list) return;
+  const used = new Set(readModuleFieldsFromEditor().map((field) => field.id));
+  let index = used.size + 1;
+  let id = `field${index}`;
+  while (used.has(id)) {
+    index += 1;
+    id = `field${index}`;
+  }
+  list.insertAdjacentHTML('beforeend', renderModuleFieldRow({
+    id,
+    label: `字段 ${index}`,
+    type: 'textarea',
+    value: '',
+    placeholder: '',
+    sourceType: 'manual',
+    source: '',
+    attribute: '',
+    path: '',
+  }, index - 1));
+}
+
+function readModuleFieldsFromEditor() {
+  const rows = Array.from(document.querySelectorAll('[data-prompt-field-row]'));
+  const seen = new Set();
+  return rows
+    .map((row, index) => {
+      if (!(row instanceof HTMLElement)) return null;
+      const idInput = row.querySelector('[data-field-id]');
+      const labelInput = row.querySelector('[data-field-label]');
+      const typeInput = row.querySelector('[data-field-type]');
+      const valueInput = row.querySelector('[data-field-value]');
+      const sourceTypeInput = row.querySelector('[data-field-source-type]');
+      const sourceInput = row.querySelector('[data-field-source]');
+      const attributeInput = row.querySelector('[data-field-attribute]');
+      const id = normalizeFieldId(idInput?.value || `field${index + 1}`);
+      if (!id || seen.has(id)) return null;
+      seen.add(id);
+      return {
+        id,
+        label: String(labelInput?.value || id).trim(),
+        type: String(typeInput?.value || 'textarea') === 'text' ? 'text' : 'textarea',
+        value: String(valueInput?.value || '').replaceAll('\r\n', '\n'),
+        placeholder: String(valueInput?.getAttribute('placeholder') || '').trim(),
+        sourceType: String(sourceTypeInput?.value || 'manual').trim() || 'manual',
+        source: String(sourceInput?.value || '').trim(),
+        attribute: String(attributeInput?.value || '').trim(),
+        path: String(attributeInput?.value || '').trim(),
+      };
+    })
+    .filter(Boolean);
 }
 
 function cssEscape(value) {
@@ -1464,11 +1849,62 @@ function normalizeModuleList(modules) {
       description: String(item.description || '').trim(),
       enabled: item.enabled !== false,
       order: Number.isFinite(Number(item.order)) ? Number(item.order) : undefined,
+      kind: String(item.kind || 'template').trim() || 'template',
       template: String(item.template || '').replaceAll('\r\n', '\n'),
       contentOverride,
+      fields: normalizeModuleFields(item.fields),
+      workflow: normalizeModuleWorkflow(item.workflow),
     });
   }
   return out;
+}
+
+function normalizeModuleFields(fields) {
+  const list = Array.isArray(fields) ? fields : [];
+  const seen = new Set();
+  return list
+    .map((field, index) => {
+      if (!field || typeof field !== 'object') return null;
+      const id = normalizeFieldId(field.id || `field${index + 1}`);
+      if (!id || seen.has(id)) return null;
+      seen.add(id);
+      return {
+        id,
+        label: String(field.label || id).trim(),
+        type: String(field.type || 'textarea').trim() === 'text' ? 'text' : 'textarea',
+        value: String(field.value || '').replaceAll('\r\n', '\n'),
+        placeholder: String(field.placeholder || '').trim(),
+        sourceType: String(field.sourceType || field.source_type || 'manual').trim() || 'manual',
+        source: String(field.source || '').trim(),
+        attribute: String(field.attribute || '').trim(),
+        path: String(field.path || '').trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeFieldId(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+function normalizeModuleWorkflow(workflow) {
+  if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
+    return { mode: 'parallel', nodeType: 'context.block', inputs: [], outputs: ['context.block'] };
+  }
+  const mode = String(workflow.mode || 'parallel').trim();
+  const nodeType = String(workflow.nodeType || workflow.node_type || 'context.block').trim();
+  return {
+    mode: mode === 'serial' ? 'serial' : 'parallel',
+    nodeType: nodeType || 'context.block',
+    inputs: Array.isArray(workflow.inputs) ? workflow.inputs.map((v) => String(v || '').trim()).filter(Boolean) : [],
+    outputs: Array.isArray(workflow.outputs) && workflow.outputs.length
+      ? workflow.outputs.map((v) => String(v || '').trim()).filter(Boolean)
+      : ['context.block'],
+  };
 }
 
 function extractPromptBoardModules(workflow) {
