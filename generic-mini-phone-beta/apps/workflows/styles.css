@@ -85,10 +85,12 @@
 
 .prompt-merged-preview {
   border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 12px;
+  border-radius: 16px;
+  padding: 12px 14px;
   background: var(--surface);
   color: var(--text);
+  height: 258px;
+  overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.52;
