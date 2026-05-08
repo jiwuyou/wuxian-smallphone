@@ -237,6 +237,17 @@ export function bind() {
     if (!moduleId) return;
     openModuleEditor(moduleId);
   });
+  sections?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const moduleTrigger = target.closest('[data-prompt-module][role="button"]');
+    if (!moduleTrigger) return;
+    const moduleId = String(moduleTrigger.getAttribute('data-prompt-module') || '').trim();
+    if (!moduleId) return;
+    event.preventDefault();
+    openModuleEditor(moduleId);
+  });
 
   qs('#promptboard-preview-text')?.addEventListener('input', (event) => {
     const textarea = event.target;
@@ -371,11 +382,22 @@ function renderPromptBoardPreview(compiled) {
 }
 
 function renderMergedPreview(enabledModules, compiled) {
-  return `
-    <div class="prompt-merged-preview" aria-label="纯文本合并预览">
-      ${enabledModules.map((module, index) => renderMergedSegment(module, compiled, index)).join('<span class="prompt-merged-gap" aria-hidden="true"></span>')}
-    </div>
-  `;
+  const segments = enabledModules
+    .map((module, index) => renderMergedSegment(module, compiled, index))
+    .filter(Boolean);
+
+  if (!segments.length) {
+    return `
+      <article class="promptboard-empty">
+        <strong>没有可预览文本</strong>
+        <p>启用模块均为空文本，暂时不会生成发送内容。</p>
+      </article>
+    `;
+  }
+
+  // Important: do not indent inside the preview container; it uses `white-space: pre-wrap`.
+  // Separators must be real plain-text newlines (not spacer elements) to match final text.
+  return `<div class="prompt-merged-preview" aria-label="纯文本合并预览">${segments.join('\n\n')}</div>`;
 }
 
 function renderMergedSegment(module, compiled, index) {
@@ -383,15 +405,16 @@ function renderMergedSegment(module, compiled, index) {
   const title = String(module?.title || id).trim() || id;
   const displayText = getCompiledModuleText(module, compiled);
   const usingOverride = Boolean(String(module?.contentOverride || '').trim());
-  const empty = !String(displayText || '').trim();
   const colorClass = `prompt-preview-color-${Math.abs(index) % 8}`;
 
-  return `
-    <button class="prompt-merged-segment ${colorClass}${empty ? ' prompt-preview-empty' : ''}" data-prompt-module="${escapeHtml(id)}" type="button" title="${escapeHtml(title)} · ${escapeHtml(id)}">
-      <span class="prompt-merged-label">${escapeHtml(title)}${usingOverride ? ' · 已改写' : ''}</span>
-      <span class="prompt-merged-text">${escapeHtml(displayText || '空模块：点击补充模板或覆盖内容。')}</span>
-    </button>
-  `;
+  // Render as continuous pure text with inline color highlighting (no card frame / no title label).
+  const normalizedText = String(displayText || '').replaceAll('\r\n', '\n');
+  if (!normalizedText.trim()) return '';
+
+  const hint = usingOverride ? '已改写' : '';
+  const tooltip = [title, id, hint].filter(Boolean).join(' · ');
+
+  return `<span class="prompt-merged-segment ${colorClass}" data-prompt-module="${escapeHtml(id)}" tabindex="0" role="button" title="${escapeHtml(tooltip)}"><span class="prompt-merged-text">${escapeHtml(normalizedText)}</span></span>`;
 }
 
 function renderDisabledModuleDrawer(disabledModules, compiled) {
@@ -443,7 +466,7 @@ function getCompiledModuleText(module, compiled) {
   if (!id) return '';
 
   const override = String(module?.contentOverride || '').replaceAll('\r\n', '\n');
-  if (override.trim()) return override;
+  if (override.trim()) return override.trim();
 
   const section = findCompiledSection(compiled?.sections, id);
   const sectionText = getSectionText(section);
@@ -1006,7 +1029,21 @@ function compileLocally({ modules, thread, previewText, messages, turnContext })
 }
 
 function normalizeCompileResult(payload) {
-  const sections = Array.isArray(payload?.sections) ? payload.sections : [];
+  const rawSections = Array.isArray(payload?.sections) ? payload.sections : [];
+  const sections = rawSections.map((section) => {
+    if (!section || typeof section !== 'object') return section;
+    const text = typeof section.text === 'string'
+      ? section.text
+      : typeof section.content === 'string'
+        ? section.content
+        : typeof section.output === 'string'
+          ? section.output
+          : '';
+    return {
+      ...section,
+      text: String(text || '').replaceAll('\r\n', '\n').trim(),
+    };
+  });
   const trace = payload?.trace ?? [];
   const traceByModuleId = payload?.traceByModuleId && typeof payload.traceByModuleId === 'object'
     ? payload.traceByModuleId
@@ -1034,7 +1071,11 @@ function normalizeCompileResult(payload) {
     );
   return {
     sections,
-    finalText: String(payload?.finalText || '').replaceAll('\r\n', '\n'),
+    finalText: sections
+      .filter((section) => section?.enabled !== false && String(section?.text || '').trim())
+      .map((section) => String(section.text || '').replaceAll('\r\n', '\n').trim())
+      .join('\n\n')
+      .trim(),
     trace,
     traceByModuleId,
   };

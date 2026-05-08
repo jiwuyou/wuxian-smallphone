@@ -83,63 +83,90 @@
   gap: 12px;
 }
 
+.prompt-merged-preview,
+.promptboard-final-text {
+  height: 258px;
+  min-height: 258px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  resize: vertical;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
 .prompt-merged-preview {
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 12px 14px;
   background: var(--surface);
   color: var(--text);
-  height: 258px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  line-height: 1.52;
-  font-size: 13px;
 }
 
 .prompt-merged-segment {
-  width: 100%;
-  position: relative;
-  display: block;
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  border-radius: 12px;
-  padding: 22px 10px 10px;
-  color: var(--text);
+  margin: 0;
+  padding: 0;
+  width: auto;
+  max-width: 100%;
+  position: static;
+  display: inline;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
   text-align: left;
-  white-space: pre-wrap;
+  /* Keep segment wrapper from preserving template-literal indentation;
+     formatting is handled on the actual text span. */
+  white-space: normal;
   overflow-wrap: anywhere;
   font: inherit;
+  line-height: inherit;
   cursor: pointer;
   box-shadow: none;
-  transition: transform 160ms ease, border-color 160ms ease;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .prompt-merged-segment:hover {
-  transform: translateY(-1px);
-  border-color: rgba(36, 31, 54, 0.18);
+  transform: none;
 }
 
 .prompt-merged-segment:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
+  outline: none;
 }
 
 .prompt-merged-label {
-  position: absolute;
-  top: 7px;
-  left: 10px;
-  color: var(--muted-strong);
-  font-size: 11px;
-  line-height: 1;
+  display: none;
 }
 
 .prompt-merged-text {
-  display: block;
+  display: inline;
+  background: var(--prompt-preview-bg, transparent);
+  border-radius: 7px;
+  /* Preserve the real plaintext newlines/spaces coming from JS text. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  transition: box-shadow 140ms ease, filter 140ms ease;
+}
+
+.prompt-merged-segment:hover .prompt-merged-text {
+  filter: saturate(1.08);
+  box-shadow: 0 0 0 1px rgba(36, 31, 54, 0.22);
+}
+
+.prompt-merged-segment:focus-visible .prompt-merged-text {
+  box-shadow: 0 0 0 2px var(--primary), 0 0 0 1px rgba(36, 31, 54, 0.18);
 }
 
 .prompt-merged-gap {
-  display: block;
-  height: 10px;
+  display: inline;
+  height: auto;
+  white-space: normal;
+}
+
+.prompt-merged-gap::before {
+  content: "\A\A";
   white-space: pre;
 }
 
@@ -148,35 +175,48 @@
 }
 
 .prompt-preview-color-0 {
-  background: linear-gradient(135deg, rgba(255, 234, 242, 0.96), rgba(241, 247, 255, 0.96));
+  --prompt-preview-bg: linear-gradient(135deg, rgba(255, 234, 242, 0.96), rgba(241, 247, 255, 0.96));
+  background: var(--prompt-preview-bg);
 }
 
 .prompt-preview-color-1 {
-  background: linear-gradient(135deg, rgba(229, 250, 245, 0.96), rgba(244, 249, 255, 0.96));
+  --prompt-preview-bg: linear-gradient(135deg, rgba(229, 250, 245, 0.96), rgba(244, 249, 255, 0.96));
+  background: var(--prompt-preview-bg);
 }
 
 .prompt-preview-color-2 {
-  background: linear-gradient(135deg, rgba(246, 239, 255, 0.96), rgba(255, 248, 238, 0.94));
+  --prompt-preview-bg: linear-gradient(135deg, rgba(246, 239, 255, 0.96), rgba(255, 248, 238, 0.94));
+  background: var(--prompt-preview-bg);
 }
 
 .prompt-preview-color-3 {
-  background: linear-gradient(135deg, rgba(234, 245, 255, 0.96), rgba(247, 242, 255, 0.94));
+  --prompt-preview-bg: linear-gradient(135deg, rgba(234, 245, 255, 0.96), rgba(247, 242, 255, 0.94));
+  background: var(--prompt-preview-bg);
 }
 
 .prompt-preview-color-4 {
-  background: linear-gradient(135deg, rgba(255, 244, 222, 0.94), rgba(239, 250, 241, 0.94));
+  --prompt-preview-bg: linear-gradient(135deg, rgba(255, 244, 222, 0.94), rgba(239, 250, 241, 0.94));
+  background: var(--prompt-preview-bg);
 }
 
 .prompt-preview-color-5 {
-  background: linear-gradient(135deg, rgba(234, 241, 255, 0.96), rgba(255, 238, 246, 0.94));
+  --prompt-preview-bg: linear-gradient(135deg, rgba(234, 241, 255, 0.96), rgba(255, 238, 246, 0.94));
+  background: var(--prompt-preview-bg);
 }
 
 .prompt-preview-color-6 {
-  background: linear-gradient(135deg, rgba(238, 250, 255, 0.96), rgba(255, 242, 229, 0.94));
+  --prompt-preview-bg: linear-gradient(135deg, rgba(238, 250, 255, 0.96), rgba(255, 242, 229, 0.94));
+  background: var(--prompt-preview-bg);
 }
 
 .prompt-preview-color-7 {
-  background: linear-gradient(135deg, rgba(242, 250, 235, 0.96), rgba(244, 240, 255, 0.94));
+  --prompt-preview-bg: linear-gradient(135deg, rgba(242, 250, 235, 0.96), rgba(244, 240, 255, 0.94));
+  background: var(--prompt-preview-bg);
+}
+
+/* In merged preview we want "colored text", not full-width cards. */
+.prompt-merged-preview .prompt-merged-segment {
+  background: transparent;
 }
 
 .prompt-segment-toggle {
@@ -281,9 +321,6 @@
   padding: 12px 14px;
   background: var(--surface);
   outline: none;
-  resize: vertical;
-  min-height: 220px;
-  line-height: 1.45;
 }
 
 .promptboard-final-actions {
