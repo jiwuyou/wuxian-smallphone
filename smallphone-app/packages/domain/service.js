@@ -2099,7 +2099,7 @@ class SmallPhoneService {
     });
     const promptBoardCompiled =
       this.runtimeInfo.id === "cc-webclient"
-        ? compileCcWebclientPromptBoard({
+        ? await compileCcWebclientPromptBoard({
             modules: this.resolveThreadPromptBoardModules(thread),
             thread: routedThread,
             contact,
@@ -2417,7 +2417,7 @@ class SmallPhoneService {
 
     const promptBoardCompiled =
       this.runtimeInfo.id === "cc-webclient"
-        ? compileCcWebclientPromptBoard({
+        ? await compileCcWebclientPromptBoard({
             modules: this.resolveThreadPromptBoardModules(thread),
             thread: routedThread,
             contact,
@@ -2752,7 +2752,7 @@ class SmallPhoneService {
     return this.getThreadPromptBoard(threadId);
   }
 
-  previewThreadPromptBoard(threadId, input = {}) {
+  async previewThreadPromptBoard(threadId, input = {}) {
     const state = this.store.read();
     const thread = state.threads.find((item) => item.id === threadId);
     if (!thread) {
@@ -2804,8 +2804,10 @@ class SmallPhoneService {
         url: attachment.url || "",
       }));
 
-    const modulesOverride = hasOwn(input, "modules") ? normalizePromptBoardModules(input.modules) : null;
-    const compiled = compileCcWebclientPromptBoard({
+    const modulesOverride = hasOwn(input, "modules")
+      ? normalizePromptBoardModules(input.modules, { preserveResolvedValue: true })
+      : null;
+    const compiled = await compileCcWebclientPromptBoard({
       modules: modulesOverride || this.resolveThreadPromptBoardModules(thread),
       thread: routedThread,
       contact,
@@ -3637,7 +3639,164 @@ function buildPromptBoardFileBlock(attachments) {
   return lines.join("\n");
 }
 
-function compileCcWebclientPromptBoard(params = {}) {
+function normalizePromptBoardQueryTimeoutMs() {
+  const raw = String(process.env.SMALLPHONE_PROMPTBOARD_QUERY_TIMEOUT_MS || "").trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 4000;
+  return Math.min(parsed, 60000);
+}
+
+function normalizePromptBoardQueryMaxBytes() {
+  const raw = String(process.env.SMALLPHONE_PROMPTBOARD_QUERY_MAX_BYTES || "").trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 262144;
+  // Hard cap to avoid accidental OOM via env config.
+  return Math.min(parsed, 1024 * 1024);
+}
+
+function readPromptBoardQueryPath(context, path) {
+  const raw = String(path || "").trim();
+  if (!raw) return undefined;
+  const parts = raw.split(".").map((part) => part.trim()).filter(Boolean);
+  let cursor = context;
+  for (const part of parts) {
+    if (!cursor || (typeof cursor !== "object" && typeof cursor !== "function")) return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function stringifyPromptBoardQueryValue(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+async function readPromptBoardQueryBodyTextLimited(response, maxBytes, controller) {
+  if (!response?.body) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        controller?.abort?.();
+        throw new Error(`response exceeded maxBytes=${maxBytes}`);
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // ignore
+    }
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function queryFetchText({ url, path }) {
+  const rawUrl = String(url || "").trim();
+  if (!rawUrl) {
+    return { ok: false, text: "", error: "missing url" };
+  }
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { ok: false, text: "", error: "invalid url" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { ok: false, text: "", error: "unsupported protocol" };
+  }
+
+  const timeoutMs = normalizePromptBoardQueryTimeoutMs();
+  const maxBytes = normalizePromptBoardQueryMaxBytes();
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(parsed.toString(), {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { accept: "application/json, text/plain, */*" },
+    });
+
+    // Ensure redirects cannot jump protocols.
+    const finalUrlString = String(response?.url || parsed.toString()).trim() || parsed.toString();
+    try {
+      const finalUrl = new URL(finalUrlString);
+      if (finalUrl.protocol !== "http:" && finalUrl.protocol !== "https:") {
+        return { ok: false, text: "", error: "redirected to unsupported protocol" };
+      }
+    } catch {
+      return { ok: false, text: "", error: "invalid response url" };
+    }
+
+    const bodyText = await readPromptBoardQueryBodyTextLimited(response, maxBytes, controller);
+    if (!response.ok) {
+      return { ok: false, text: "", error: `http ${response.status}` };
+    }
+    const rawPath = String(path || "").trim();
+    if (!rawPath) {
+      // If no JSON path was configured, allow text fallback.
+      return { ok: true, text: String(bodyText || ""), error: "" };
+    }
+
+    // If a JSON path was configured, only succeed when JSON parsing works and the path exists.
+    try {
+      const parsed = JSON.parse(String(bodyText || "") || "null");
+      const extracted = readPromptBoardQueryPath(parsed, rawPath);
+      if (extracted === undefined || extracted === null) {
+        return { ok: false, text: "", error: "path not found" };
+      }
+      return { ok: true, text: stringifyPromptBoardQueryValue(extracted), error: "" };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, text: "", error: message || "invalid json" };
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, text: "", error: message || "query fetch failed" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function resolvePromptBoardModulesForCompile(modules) {
+  const normalized = normalizePromptBoardModules(modules, { preserveResolvedValue: true });
+  for (const module of normalized) {
+    const fields = Array.isArray(module?.fields) ? module.fields : [];
+    for (const field of fields) {
+      const sourceType = normalizeText(field?.sourceType || field?.source_type);
+      if (sourceType !== "query") continue;
+
+      // Never trust stale query `resolvedValue` from clients. Either resolve now or fall back.
+      delete field.resolvedValue;
+
+      const source = normalizeText(field?.source);
+      if (!source) continue;
+
+      const result = await queryFetchText({ url: source, path: normalizeText(field?.path) });
+      if (result.ok) {
+        field.resolvedValue = String(result.text || "").replaceAll("\r\n", "\n");
+      }
+    }
+  }
+  return normalized;
+}
+
+async function compileCcWebclientPromptBoard(params = {}) {
   const thread = params.thread || {};
   const contact = params.contact || {};
   const character = params.character || {};
@@ -3680,7 +3839,7 @@ function compileCcWebclientPromptBoard(params = {}) {
       : runtimeUserText || triggerNote;
 
   return compilePromptBoard({
-    modules: params.modules,
+    modules: await resolvePromptBoardModulesForCompile(params.modules),
     context: {
       character,
       contact,

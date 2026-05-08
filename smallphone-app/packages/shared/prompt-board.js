@@ -2,6 +2,10 @@ const { nowIso } = require("./types");
 
 const PROMPT_BOARD_VERSION = 1;
 const DEFAULT_JOINER = "\n\n";
+const DEFAULT_MODULE_KIND = "template";
+const DEFAULT_WORKFLOW_MODE = "parallel";
+const DEFAULT_WORKFLOW_NODE_TYPE = "context.block";
+const DEFAULT_WORKFLOW_OUTPUTS = [DEFAULT_WORKFLOW_NODE_TYPE];
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -14,6 +18,10 @@ function normalizeText(value) {
 function coerceString(value) {
   if (value == null) return "";
   return typeof value === "string" ? value : String(value);
+}
+
+function normalizeLineEndings(value) {
+  return coerceString(value).replaceAll("\r\n", "\n");
 }
 
 function isPlainObject(value) {
@@ -82,33 +90,128 @@ function renderTemplate(template, context) {
   });
 }
 
-function normalizePromptBoardModule(input, fallbackIndex = 0) {
+function normalizePromptBoardModuleKind(value) {
+  const raw = normalizeText(value);
+  return raw || DEFAULT_MODULE_KIND;
+}
+
+function normalizePromptBoardModuleWorkflow(input) {
+  const raw = isPlainObject(input) ? input : {};
+  const mode = normalizeText(raw.mode) || DEFAULT_WORKFLOW_MODE;
+  const nodeType = normalizeText(raw.nodeType || raw.node_type) || DEFAULT_WORKFLOW_NODE_TYPE;
+  const inputs = Array.isArray(raw.inputs) ? raw.inputs.map((v) => normalizeText(v)).filter(Boolean) : [];
+  const outputsRaw = Array.isArray(raw.outputs) ? raw.outputs.map((v) => normalizeText(v)).filter(Boolean) : [];
+  const outputs = outputsRaw.length ? outputsRaw : DEFAULT_WORKFLOW_OUTPUTS.slice();
+  return {
+    mode,
+    nodeType,
+    inputs,
+    outputs,
+  };
+}
+
+function normalizePromptBoardModuleFieldType(value) {
+  const raw = normalizeText(value).toLowerCase();
+  return raw === "text" ? "text" : "textarea";
+}
+
+function normalizePromptBoardModuleField(input, options = {}) {
+  const raw = isPlainObject(input) ? input : {};
+  const id = normalizeText(raw.id);
+  if (!id) return null;
+  const label = normalizeText(raw.label) || id;
+  const type = normalizePromptBoardModuleFieldType(raw.type);
+  const placeholder = normalizeText(raw.placeholder);
+  const sourceType = normalizeText(raw.sourceType || raw.source_type) || "manual";
+  const source = normalizeText(raw.source);
+  const attribute = normalizeText(raw.attribute);
+  const path = normalizeText(raw.path);
+  const fallback = normalizeLineEndings(raw.value || raw.fallback || "");
+
+  const field = {
+    id,
+    label,
+    type,
+    value: fallback,
+    placeholder,
+    sourceType,
+    source,
+    attribute,
+    path,
+  };
+
+  if (options.preserveResolvedValue && raw.resolvedValue != null) {
+    field.resolvedValue = normalizeLineEndings(raw.resolvedValue);
+  }
+
+  return field;
+}
+
+function normalizePromptBoardModuleFields(fields, options = {}) {
+  const list = Array.isArray(fields) ? fields : [];
+  return list.map((field) => normalizePromptBoardModuleField(field, options)).filter(Boolean);
+}
+
+function moduleFieldValues(fields, options = {}) {
+  const values = {};
+  for (const field of normalizePromptBoardModuleFields(fields, options)) {
+    if (field.resolvedValue != null) {
+      values[field.id] = normalizeLineEndings(field.resolvedValue);
+    } else {
+      values[field.id] = normalizeLineEndings(field.value || field.fallback || "");
+    }
+  }
+  return values;
+}
+
+function buildModuleCompileContext(context, module, options = {}) {
+  const base = isPlainObject(context) ? context : {};
+  const values = moduleFieldValues(module?.fields, options);
+  return {
+    ...base,
+    fields: values,
+    vars: values,
+    app: values,
+    module: {
+      id: normalizeText(module?.id),
+      title: coerceString(module?.title),
+      description: coerceString(module?.description),
+      kind: normalizePromptBoardModuleKind(module?.kind),
+      workflow: normalizePromptBoardModuleWorkflow(module?.workflow),
+    },
+  };
+}
+
+function normalizePromptBoardModule(input, fallbackIndex = 0, options = {}) {
   const raw = isPlainObject(input) ? input : {};
   const id = normalizeText(raw.id) || `module-${fallbackIndex + 1}`;
   const order = Number.isFinite(Number(raw.order)) ? Number(raw.order) : fallbackIndex + 1;
   const enabled = hasOwn(raw, "enabled") ? Boolean(raw.enabled) : true;
-  const template = coerceString(raw.template);
+  const template = normalizeLineEndings(raw.template);
   const title = coerceString(raw.title);
   const description = coerceString(raw.description);
   const contentOverride = hasOwn(raw, "contentOverride")
     ? raw.contentOverride == null
       ? null
-      : coerceString(raw.contentOverride)
+      : normalizeLineEndings(raw.contentOverride)
     : null;
   return {
     id,
     title,
     description,
+    kind: normalizePromptBoardModuleKind(raw.kind),
     enabled,
     template,
     contentOverride,
     order,
+    fields: normalizePromptBoardModuleFields(raw.fields, options),
+    workflow: normalizePromptBoardModuleWorkflow(raw.workflow),
   };
 }
 
-function normalizePromptBoardModules(modules) {
+function normalizePromptBoardModules(modules, options = {}) {
   const list = Array.isArray(modules) ? modules : [];
-  const normalized = list.map((item, index) => normalizePromptBoardModule(item, index));
+  const normalized = list.map((item, index) => normalizePromptBoardModule(item, index, options));
 
   // Ensure unique ids (stable, deterministic).
   const seen = new Map();
@@ -130,7 +233,8 @@ function normalizePromptBoardModules(modules) {
 
 function compilePromptBoard(input = {}) {
   const joiner = typeof input.joiner === "string" ? input.joiner : DEFAULT_JOINER;
-  const modules = normalizePromptBoardModules(input.modules);
+  // During compilation, `resolvedValue` is a compile-time input (never persisted).
+  const modules = normalizePromptBoardModules(input.modules, { preserveResolvedValue: true });
   const context = isPlainObject(input.context) ? input.context : {};
   const compiledAt = nowIso();
 
@@ -160,7 +264,9 @@ function compilePromptBoard(input = {}) {
     }
 
     const content =
-      module.contentOverride !== null ? ((section.source = "override"), coerceString(module.contentOverride)) : renderTemplate(module.template, context);
+      module.contentOverride !== null
+        ? ((section.source = "override"), coerceString(module.contentOverride))
+        : renderTemplate(module.template, buildModuleCompileContext(context, module, { preserveResolvedValue: true }));
 
     section.content = content;
     if (normalizeText(content)) {
@@ -335,4 +441,3 @@ module.exports = {
   compilePromptBoard,
   createDefaultPromptBoardModulesV1,
 };
-

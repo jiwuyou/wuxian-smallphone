@@ -7,6 +7,7 @@ const { SmallPhoneService } = require("../packages/domain/service");
 const {
   compilePromptBoard,
   createDefaultPromptBoardModulesV1,
+  normalizePromptBoardModules,
 } = require("../packages/shared/prompt-board");
 const { _test: runtimeTest } = require("../packages/openclaw-adapter");
 
@@ -47,7 +48,7 @@ test("prompt-board compiler never includes module title/description in finalText
   assert.equal(compiled.finalText.includes("DESC MUST NOT SHIP"), false);
 });
 
-test("service: prompt-board defaults resolve from workflow and can be overridden per-thread", () => {
+test("service: prompt-board defaults resolve from workflow and can be overridden per-thread", async () => {
   const service = new SmallPhoneService({
     dataFile: tmpDataFile(),
     runtime: { mode: "mock" },
@@ -67,7 +68,7 @@ test("service: prompt-board defaults resolve from workflow and can be overridden
   const saved = service.saveThreadPromptBoard("thread-aki", { modules });
   assert.equal(saved.source, "thread");
 
-  const preview = service.previewThreadPromptBoard("thread-aki", { text: "ping" });
+  const preview = await service.previewThreadPromptBoard("thread-aki", { text: "ping" });
   assert.equal(preview.threadId, "thread-aki");
   assert.ok(typeof preview.finalText === "string");
   assert.ok(Array.isArray(preview.sections));
@@ -116,7 +117,7 @@ test("cc-webclient runtime builder preserves promptBoardCompiled.finalText byte-
   assert.equal(message, finalText);
 });
 
-test("service: prompt-board contentOverride is persisted and takes precedence over template", () => {
+test("service: prompt-board contentOverride is persisted and takes precedence over template", async () => {
   const service = new SmallPhoneService({
     dataFile: tmpDataFile(),
     runtime: { mode: "mock" },
@@ -130,13 +131,13 @@ test("service: prompt-board contentOverride is persisted and takes precedence ov
   instruction.contentOverride = "OVERRIDDEN INSTRUCTION";
   service.saveThreadPromptBoard("thread-aki", { modules });
 
-  const preview = service.previewThreadPromptBoard("thread-aki", { text: "ping" });
+  const preview = await service.previewThreadPromptBoard("thread-aki", { text: "ping" });
   assert.ok(preview.finalText.includes("User message:\nping"));
   assert.ok(preview.finalText.includes("OVERRIDDEN INSTRUCTION"));
   assert.equal(preview.finalText.includes("TEMPLATE SHOULD NOT SHOW"), false);
 });
 
-test("service: prompt-board preview uses routed thread context (runtime provider parity)", () => {
+test("service: prompt-board preview uses routed thread context (runtime provider parity)", async () => {
   const service = new SmallPhoneService({
     dataFile: tmpDataFile(),
     runtime: {
@@ -161,6 +162,224 @@ test("service: prompt-board preview uses routed thread context (runtime provider
   });
   service.saveThreadPromptBoard("thread-aki", { modules });
 
-  const preview = service.previewThreadPromptBoard("thread-aki", { text: "ping" });
+  const preview = await service.previewThreadPromptBoard("thread-aki", { text: "ping" });
   assert.ok(preview.finalText.includes("Provider: cc-webclient"));
+});
+
+test("prompt-board compiler supports fields/vars/app and prefers resolvedValue over fallback", () => {
+  const compiled = compilePromptBoard({
+    modules: [
+      {
+        id: "m1",
+        title: "Fields",
+        description: "",
+        enabled: true,
+        order: 1,
+        template: "F={{fields.foo}} V={{vars.foo}} A={{app.foo}}",
+        contentOverride: null,
+        fields: [{ id: "foo", value: "FALLBACK", resolvedValue: "RESOLVED", sourceType: "manual" }],
+      },
+    ],
+    context: {},
+  });
+
+  assert.equal(compiled.finalText, "F=RESOLVED V=RESOLVED A=RESOLVED");
+});
+
+test("module normalizer preserves kind/fields/workflow and strips resolvedValue by default (persistence-safe)", () => {
+  const normalized = normalizePromptBoardModules([
+    {
+      id: "m1",
+      enabled: true,
+      order: 1,
+      template: "x",
+      kind: "template",
+      fields: [{ id: "foo", value: "fallback", resolvedValue: "should-not-persist", sourceType: "manual" }],
+      workflow: {},
+    },
+  ]);
+
+  assert.equal(normalized[0].kind, "template");
+  assert.ok(Array.isArray(normalized[0].fields));
+  assert.equal(normalized[0].fields[0].id, "foo");
+  assert.equal(normalized[0].fields[0].value, "fallback");
+  assert.equal(Object.prototype.hasOwnProperty.call(normalized[0].fields[0], "resolvedValue"), false);
+  assert.ok(normalized[0].workflow && typeof normalized[0].workflow === "object");
+  assert.equal(normalized[0].workflow.mode, "parallel");
+  assert.equal(normalized[0].workflow.nodeType, "context.block");
+  assert.ok(Array.isArray(normalized[0].workflow.inputs));
+  assert.ok(Array.isArray(normalized[0].workflow.outputs));
+  assert.ok(normalized[0].workflow.outputs.length >= 1);
+});
+
+test("service: prompt-board query field is resolved on backend (json path)", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    assert.equal(String(init.method || "GET").toUpperCase(), "GET");
+    assert.ok(init.signal);
+    return new Response(JSON.stringify({ data: { value: "hello" } }), {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const service = new SmallPhoneService({
+    dataFile: tmpDataFile(),
+    runtime: { mode: "mock" },
+    artifactSync: { enabled: false },
+  });
+
+  const preview = await service.previewThreadPromptBoard("thread-aki", {
+    text: "ping",
+    modules: [
+      {
+        id: "pb.query",
+        title: "Query",
+        description: "",
+        enabled: true,
+        order: 1,
+        template: "Q={{fields.q}}",
+        contentOverride: null,
+        kind: "template",
+        fields: [
+          {
+            id: "q",
+            sourceType: "query",
+            source: "http://example.invalid/value",
+            path: "data.value",
+            value: "FALLBACK",
+          },
+        ],
+        workflow: { mode: "parallel", nodeType: "context.block", inputs: [], outputs: ["context.block"] },
+      },
+    ],
+  });
+
+  assert.equal(preview.finalText, "Q=hello");
+});
+
+test("service: prompt-board query field falls back to value when json path is missing", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    return new Response(JSON.stringify({ data: { other: "nope" } }), {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const service = new SmallPhoneService({
+    dataFile: tmpDataFile(),
+    runtime: { mode: "mock" },
+    artifactSync: { enabled: false },
+  });
+
+  const preview = await service.previewThreadPromptBoard("thread-aki", {
+    text: "ping",
+    modules: [
+      {
+        id: "pb.query",
+        enabled: true,
+        order: 1,
+        template: "Q={{fields.q}}",
+        contentOverride: null,
+        fields: [
+          {
+            id: "q",
+            sourceType: "query",
+            source: "http://example.invalid/missing",
+            path: "data.value",
+            value: "FALLBACK",
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(preview.finalText, "Q=FALLBACK");
+});
+
+test("service: prompt-board query field falls back to value when body is not json but path is configured", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    return new Response("not-json", {
+      status: 200,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const service = new SmallPhoneService({
+    dataFile: tmpDataFile(),
+    runtime: { mode: "mock" },
+    artifactSync: { enabled: false },
+  });
+
+  const preview = await service.previewThreadPromptBoard("thread-aki", {
+    text: "ping",
+    modules: [
+      {
+        id: "pb.query",
+        enabled: true,
+        order: 1,
+        template: "Q={{fields.q}}",
+        contentOverride: null,
+        fields: [
+          {
+            id: "q",
+            sourceType: "query",
+            source: "http://example.invalid/not-json",
+            path: "data.value",
+            value: "FALLBACK",
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(preview.finalText, "Q=FALLBACK");
+});
+
+test("service: prompt-board query field falls back to value when backend fetch fails", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    return new Response(JSON.stringify({ error: "nope" }), {
+      status: 500,
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const service = new SmallPhoneService({
+    dataFile: tmpDataFile(),
+    runtime: { mode: "mock" },
+    artifactSync: { enabled: false },
+  });
+
+  const preview = await service.previewThreadPromptBoard("thread-aki", {
+    text: "ping",
+    modules: [
+      {
+        id: "pb.query",
+        enabled: true,
+        order: 1,
+        template: "Q={{fields.q}}",
+        contentOverride: null,
+        fields: [
+          { id: "q", sourceType: "query", source: "http://example.invalid/fail", path: "data.value", value: "FALLBACK" },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(preview.finalText, "Q=FALLBACK");
 });

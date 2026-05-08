@@ -359,7 +359,7 @@ async function handleApi(req, res, url) {
   const threadPromptBoardCompileMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/prompt-board\/compile$/);
   if (threadPromptBoardCompileMatch && method === "POST") {
     const body = await readJson(req);
-    return sendJson(res, 200, service.previewThreadPromptBoard(threadPromptBoardCompileMatch[1], body));
+    return sendJson(res, 200, await service.previewThreadPromptBoard(threadPromptBoardCompileMatch[1], body));
   }
 
   const threadTurnContextCacheMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/turn-context-cache$/);
