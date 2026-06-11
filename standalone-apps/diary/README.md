@@ -17,7 +17,7 @@ pnpm test
 pnpm check
 ```
 
-The server listens on `http://127.0.0.1:4101` by default. Override with `PORT`:
+The server listens on `http://127.0.0.1:23001` by default. Override with `PORT`:
 
 ```bash
 PORT=4201 pnpm start
@@ -32,16 +32,16 @@ DIARY_DB_FILE=/tmp/smallphone-diary.sqlite pnpm start
 ## API
 
 ```bash
-curl http://127.0.0.1:4101/health
-curl http://127.0.0.1:4101/manifest
-curl http://127.0.0.1:4101/api/entries
-curl -X POST http://127.0.0.1:4101/api/entries \
+curl http://127.0.0.1:23001/health
+curl http://127.0.0.1:23001/manifest
+curl http://127.0.0.1:23001/api/entries
+curl -X POST http://127.0.0.1:23001/api/entries \
   -H 'content-type: application/json' \
   -d '{"title":"今天的二维地图","text":"写下今天的想法、地图布局或应用入口设计。"}'
-curl -X PATCH http://127.0.0.1:4101/api/entries/<id> \
+curl -X PATCH http://127.0.0.1:23001/api/entries/<id> \
   -H 'content-type: application/json' \
   -d '{"title":"更新后的标题","text":"更新后的正文"}'
-curl -X DELETE http://127.0.0.1:4101/api/entries/<id>
+curl -X DELETE http://127.0.0.1:23001/api/entries/<id>
 ```
 
 ## CLI

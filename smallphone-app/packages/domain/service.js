@@ -187,6 +187,16 @@ class SmallPhoneService {
     };
   }
 
+  getHealth() {
+    return {
+      ok: true,
+      app: "smallphone",
+      name: "SmallPhone",
+      runtime: sanitizeRuntimeInfoPublic(this.runtimeInfo),
+      serviceManager: this.serviceManager.describePublic({ available: false }),
+    };
+  }
+
   async bootstrapHydrated() {
     const payload = this.bootstrap();
     const threads = await this.listThreadsHydrated();
@@ -5591,7 +5601,7 @@ function createServiceManagerClient(options = {}) {
   const resolvedBaseUrl = normalizeServiceManagerBaseUrl(
     options.baseUrl ||
       process.env.SMALLPHONE_SERVICE_MANAGER_URL ||
-      "http://127.0.0.1:8787",
+      "http://127.0.0.1:20087",
   );
   const baseUrl = resolvedBaseUrl;
   const token = String(options.token || process.env.SMALLPHONE_SERVICE_MANAGER_TOKEN || "").trim();

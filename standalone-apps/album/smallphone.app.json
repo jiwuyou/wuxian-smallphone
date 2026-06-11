@@ -9,7 +9,7 @@
     "type": "node-http",
     "node": ">=22",
     "entry": "src/server.js",
-    "defaultPort": 4104,
+    "defaultPort": 23004,
     "portEnv": "PORT"
   },
   "ui": {

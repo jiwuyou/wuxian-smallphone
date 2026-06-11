@@ -20,19 +20,28 @@ PRIMARY_IP="$(hostname -I | tr ' ' '\n' | grep -Ev '^(127\.|172\.17\.)' | head -
 LOCAL_HOST="${LOCAL_HOST:-127.0.0.1}"
 START_LOCAL_LISTENERS="${START_LOCAL_LISTENERS:-1}"
 BACKEND_HOST="${BACKEND_HOST:-${TAILSCALE_IP:-${PRIMARY_IP:-127.0.0.1}}}"
-BACKEND_PORT="${BACKEND_PORT:-18096}"
+BACKEND_PORT="${BACKEND_PORT:-22096}"
 APP_BACKEND_HOST="${APP_BACKEND_HOST:-$BACKEND_HOST}"
 APP_BACKEND_HOSTS="${APP_BACKEND_HOSTS:-$APP_BACKEND_HOST}"
-APP_BACKEND_PORT="${APP_BACKEND_PORT:-3100}"
+APP_BACKEND_PORT="${APP_BACKEND_PORT:-22000}"
 FRONTEND_HOST="${FRONTEND_HOST:-$BACKEND_HOST}"
-FRONTEND_PORT="${FRONTEND_PORT:-18080}"
+FRONTEND_PORT="${FRONTEND_PORT:-22080}"
 BETA_FRONTEND_HOST="${BETA_FRONTEND_HOST:-$FRONTEND_HOST}"
-BETA_FRONTEND_PORT="${BETA_FRONTEND_PORT:-18082}"
+BETA_FRONTEND_PORT="${BETA_FRONTEND_PORT:-22082}"
 CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-/root/.codex/config.toml}"
 CC_CONNECT_CONFIG_FILE="${CC_CONNECT_CONFIG_FILE:-/root/.cc-connect/config.toml}"
 SMALLPHONE_PROVIDER_ID="${SMALLPHONE_PROVIDER_ID:-smallphone}"
 SMALLPHONE_RUNTIME_MODE="${SMALLPHONE_RUNTIME_MODE:-cc-webclient}"
 SMALLPHONE_CCCONNECT_PLATFORM="${SMALLPHONE_CCCONNECT_PLATFORM:-smallphone}"
+SMALLPHONE_SERVICE_MANAGER_URL="${SMALLPHONE_SERVICE_MANAGER_URL:-${SERVICE_MANAGER_URL:-http://127.0.0.1:20087}}"
+if [[ -z "${SMALLPHONE_SERVICE_MANAGER_TOKEN:-}" ]]; then
+  if [[ -n "${SERVICE_MANAGER_TOKEN:-}" ]]; then
+    SMALLPHONE_SERVICE_MANAGER_TOKEN="$SERVICE_MANAGER_TOKEN"
+  elif command -v service-manager >/dev/null 2>&1; then
+    SMALLPHONE_SERVICE_MANAGER_TOKEN="$(service-manager token show 2>/dev/null | tr -d '\r\n' || true)"
+  fi
+fi
+SMALLPHONE_SERVICE_MANAGER_TIMEOUT_MS="${SMALLPHONE_SERVICE_MANAGER_TIMEOUT_MS:-8000}"
 
 if [[ "$START_LOCAL_LISTENERS" != "0" && "$APP_BACKEND_HOST" != "$LOCAL_HOST" ]]; then
   APP_BACKEND_HOSTS="${APP_BACKEND_HOSTS},${LOCAL_HOST}"
@@ -98,11 +107,11 @@ if not project_name:
             project_name = name
             break
 
-port = str(bridge.get("port", "") or "9810")
+port = str(bridge.get("port", "") or "21010")
 path_value = str(bridge.get("path", "") or "/bridge/ws")
 token = str(bridge.get("token", "") or "")
 ws_url = os.environ.get("SMALLPHONE_CCCONNECT_WS_URL", "") or f"ws://127.0.0.1:{port}{path_value}"
-management_port = str(management.get("port", "") or "9820")
+management_port = str(management.get("port", "") or "21020")
 management_token = str(management.get("token", "") or "")
 management_url = os.environ.get("SMALLPHONE_CCCONNECT_MANAGEMENT_URL", "") or f"http://127.0.0.1:{management_port}"
 
@@ -145,7 +154,7 @@ if not project_name:
             project_name = name
             break
 
-port = str(webclient.get("port", "") or "9840")
+port = str(webclient.get("port", "") or "21040")
 token = str(webclient.get("token", "") or "")
 app_id = (os.environ.get("SMALLPHONE_WEBCLIENT_APP_ID", "") or "").strip()
 if not app_id:
@@ -154,7 +163,7 @@ if not app_id:
 base_url_env = (os.environ.get("SMALLPHONE_WEBCLIENT_BASE_URL", "") or "").strip()
 base_url = base_url_env or f"http://127.0.0.1:{port}"
 
-management_port = str(management.get("port", "") or "9820")
+management_port = str(management.get("port", "") or "21020")
 management_token = str(management.get("token", "") or "")
 management_url = os.environ.get("SMALLPHONE_CCCONNECT_MANAGEMENT_URL", "") or f"http://127.0.0.1:{management_port}"
 
@@ -290,6 +299,9 @@ echo "Starting smallphone app API on ${APP_BACKEND_HOSTS}:${APP_BACKEND_PORT}"
   SMALLPHONE_CCCONNECT_PLATFORM="$SMALLPHONE_CCCONNECT_PLATFORM" \
   SMALLPHONE_CCCONNECT_MANAGEMENT_URL="${SMALLPHONE_CCCONNECT_MANAGEMENT_URL:-}" \
   SMALLPHONE_CCCONNECT_MANAGEMENT_TOKEN="${SMALLPHONE_CCCONNECT_MANAGEMENT_TOKEN:-}" \
+  SMALLPHONE_SERVICE_MANAGER_URL="$SMALLPHONE_SERVICE_MANAGER_URL" \
+  SMALLPHONE_SERVICE_MANAGER_TOKEN="${SMALLPHONE_SERVICE_MANAGER_TOKEN:-}" \
+  SMALLPHONE_SERVICE_MANAGER_TIMEOUT_MS="$SMALLPHONE_SERVICE_MANAGER_TIMEOUT_MS" \
   SMALLPHONE_WEBCLIENT_BASE_URL="${SMALLPHONE_WEBCLIENT_BASE_URL:-}" \
   SMALLPHONE_WEBCLIENT_TOKEN="${SMALLPHONE_WEBCLIENT_TOKEN:-}" \
   SMALLPHONE_WEBCLIENT_APP_ID="${SMALLPHONE_WEBCLIENT_APP_ID:-}" \

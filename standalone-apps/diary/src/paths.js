@@ -3,7 +3,7 @@
 const path = require('node:path');
 
 const appRoot = path.resolve(__dirname, '..');
-const defaultPort = 4101;
+const defaultPort = 23001;
 const defaultHost = '127.0.0.1';
 const defaultDbFile = path.join(appRoot, 'data', 'diary.sqlite');
 const manifestPath = path.join(appRoot, 'smallphone.app.json');

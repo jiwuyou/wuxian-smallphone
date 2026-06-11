@@ -1,5 +1,5 @@
 const BACKEND_STORAGE_KEY = 'smallphone.backendBase';
-const DEFAULT_BACKEND_BASE = 'http://127.0.0.1:3100/api';
+const DEFAULT_BACKEND_BASE = 'http://127.0.0.1:22000/api';
 
 export async function requestBackend(url, init = {}) {
   const response = await fetch(url, {
@@ -157,7 +157,7 @@ export function resolveBackendBase() {
 
   const { protocol, hostname } = window.location;
   if ((protocol === 'http:' || protocol === 'https:') && hostname && hostname !== '127.0.0.1' && hostname !== 'localhost') {
-    return `http://${hostname}:3100/api`;
+    return `http://${hostname}:22000/api`;
   }
   return DEFAULT_BACKEND_BASE;
 }

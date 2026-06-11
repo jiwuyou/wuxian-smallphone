@@ -12,7 +12,7 @@ const packageJson = JSON.parse(await readFile(path.join(appRoot, 'package.json')
 assert.equal(manifest.type, 'source-app');
 assert.equal(manifest.id, 'like-girl');
 assert.equal(manifest.source.cloneUrl, 'https://gitee.com/kiCode111/like-girl-v5.2.0.git');
-assert.equal(manifest.runtime.defaultPort, 4102);
+assert.equal(manifest.runtime.defaultPort, 23002);
 assert.equal(packageJson.scripts.start, 'node scripts/start.mjs');
 assert.equal(packageJson.scripts['link-source'], 'node scripts/link-source.mjs');
 

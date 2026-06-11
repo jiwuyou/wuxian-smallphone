@@ -4,13 +4,14 @@ const http = require("http");
 const { Readable } = require("stream");
 const { URL } = require("url");
 const { applyCcConnectEnvDefaults } = require("./cc-connect-env");
+const packageJson = require("../../package.json");
 
 applyCcConnectEnvDefaults();
 
 const { SmallPhoneService } = require("../../packages/domain/service");
 const { isPathInside, resolveSmallPhonePaths } = require("../../packages/shared/paths");
 
-const PORT = Number.parseInt(process.env.SMALLPHONE_PORT || "3100", 10);
+const PORT = Number.parseInt(process.env.SMALLPHONE_PORT || "22000", 10);
 const HOST = process.env.SMALLPHONE_HOST || "127.0.0.1";
 const HOSTS = parseHostList(process.env.SMALLPHONE_HOSTS || HOST);
 const WEB_ROOT = path.join(__dirname, "..", "web");
@@ -20,7 +21,7 @@ const TASK_POLL_MS = Number.parseInt(process.env.SMALLPHONE_TASK_POLL_MS || "500
 const WEBCLIENT_POLL_INTERVAL_MS = process.env.SMALLPHONE_WEBCLIENT_POLL_INTERVAL_MS;
 const WEBCLIENT_HISTORY_LIMIT = process.env.SMALLPHONE_WEBCLIENT_HISTORY_LIMIT;
 const DATA_FILE = SMALLPHONE_PATHS.dataFile;
-const SERVICE_MANAGER_URL = process.env.SMALLPHONE_SERVICE_MANAGER_URL || "http://127.0.0.1:8787";
+const SERVICE_MANAGER_URL = process.env.SMALLPHONE_SERVICE_MANAGER_URL || "http://127.0.0.1:20087";
 const SERVICE_MANAGER_TIMEOUT_MS = process.env.SMALLPHONE_SERVICE_MANAGER_TIMEOUT_MS;
 const SERVICE_MANAGER_TOKEN = process.env.SMALLPHONE_SERVICE_MANAGER_TOKEN || "";
 
@@ -87,6 +88,9 @@ function createAppServer() {
 async function handleRequest(req, res) {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || `${HOST}:${PORT}`}`);
+    if ((req.method || "GET") === "GET" && url.pathname === "/health") {
+      return sendHealth(res);
+    }
     if (url.pathname.startsWith("/api/")) {
       setCorsHeaders(req, res);
       if ((req.method || "GET") === "OPTIONS") {
@@ -142,6 +146,9 @@ if (TASK_WORKER_ENABLED) {
 async function handleApi(req, res, url) {
   const method = req.method || "GET";
 
+  if (method === "GET" && url.pathname === "/api/health") {
+    return sendHealth(res);
+  }
   if (method === "GET" && url.pathname === "/api/bootstrap") {
     return sendJson(res, 200, await service.bootstrapHydrated());
   }
@@ -586,6 +593,13 @@ function serveResolvedStaticFile(res, filePath, root) {
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload, null, 2));
+}
+
+function sendHealth(res) {
+  return sendJson(res, 200, {
+    ...service.getHealth(),
+    version: packageJson.version,
+  });
 }
 
 function sendText(res, statusCode, text) {

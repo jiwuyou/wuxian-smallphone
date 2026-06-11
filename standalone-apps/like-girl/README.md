@@ -23,14 +23,14 @@ pnpm cli -- add-message --name 晚风 --text "今晚也很好。"
 
 运行时变量：
 
-- `PORT`：HTTP 端口，默认 `4103`
+- `PORT`：HTTP 端口，默认 `23003`
 - `HOST`：HTTP 监听地址，默认 `127.0.0.1`
 - `LIKE_GIRL_DB_FILE`：SQLite 文件路径，默认 `data/like-girl.sqlite`
 
 示例：
 
 ```bash
-LIKE_GIRL_DB_FILE=/tmp/like-girl.sqlite PORT=4103 \
+LIKE_GIRL_DB_FILE=/tmp/like-girl.sqlite PORT=23003 \
 pnpm start
 ```
 
@@ -41,10 +41,10 @@ pnpm start
 ## API
 
 ```bash
-curl http://127.0.0.1:4103/health
-curl http://127.0.0.1:4103/api/bootstrap
-curl http://127.0.0.1:4103/api/photos
-curl -X POST http://127.0.0.1:4103/api/messages \
+curl http://127.0.0.1:23003/health
+curl http://127.0.0.1:23003/api/bootstrap
+curl http://127.0.0.1:23003/api/photos
+curl -X POST http://127.0.0.1:23003/api/messages \
   -H 'content-type: application/json' \
   -d '{"name":"晚风","text":"祝你今天也有被记住的小事。"}'
 ```

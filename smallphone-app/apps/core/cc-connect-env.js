@@ -36,9 +36,9 @@ function applyCcWebclientDefaults(env, config) {
   const webclient = config.webclient || {};
   const management = config.management || {};
   const projectName = env.SMALLPHONE_CCCONNECT_PROJECT || findSmallphoneProject(config.projects);
-  const webclientPort = normalizeText(webclient.port) || "9840";
+  const webclientPort = normalizeText(webclient.port) || "21040";
   const webclientToken = normalizeText(webclient.token);
-  const managementPort = normalizeText(management.port) || "9820";
+  const managementPort = normalizeText(management.port) || "21020";
   const managementToken = normalizeText(management.token);
 
   setDefault(env, "SMALLPHONE_WEBCLIENT_BASE_URL", `http://127.0.0.1:${webclientPort}`);
@@ -54,10 +54,10 @@ function applyCcBridgeDefaults(env, config) {
   const bridge = config.bridge || {};
   const management = config.management || {};
   const projectName = env.SMALLPHONE_CCCONNECT_PROJECT || findSmallphoneProject(config.projects);
-  const bridgePort = normalizeText(bridge.port) || "9810";
+  const bridgePort = normalizeText(bridge.port) || "21010";
   const bridgePath = normalizeText(bridge.path) || "/bridge/ws";
   const bridgeToken = normalizeText(bridge.token);
-  const managementPort = normalizeText(management.port) || "9820";
+  const managementPort = normalizeText(management.port) || "21020";
   const managementToken = normalizeText(management.token);
 
   setDefault(env, "SMALLPHONE_CCCONNECT_WS_URL", `ws://127.0.0.1:${bridgePort}${bridgePath}`);

@@ -18,7 +18,7 @@
   "runtime": {
     "packageManager": "pnpm",
     "node": ">=20",
-    "defaultPort": 4102,
+    "defaultPort": 23002,
     "portEnvironmentVariable": "PORT",
     "hostEnvironmentVariable": "HOST",
     "startCommand": "pnpm start",

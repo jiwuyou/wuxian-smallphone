@@ -1134,7 +1134,7 @@ async function loadCompanionRuntimeSettings(threadId, { force = false } = {}) {
       threadId: targetThreadId,
       phase: "unavailable",
       project: String(result?.project || thread?.runtime?.project || "").trim(),
-      reason: String(result?.reason || "9840 Runtime 项目不可用。").trim(),
+      reason: String(result?.reason || "21040 Runtime 项目不可用。").trim(),
       settings: null,
     });
     renderCompanionRuntimeSettings();
@@ -1197,7 +1197,7 @@ async function saveCompanionRuntimeSettingsIfAvailable(threadId, payload) {
       threadId: targetThreadId,
       phase: "unavailable",
       project: String(result?.project || state.companionRuntimeSettings.project || "").trim(),
-      reason: String(result?.reason || "9840 Runtime 项目不可用。").trim(),
+      reason: String(result?.reason || "21040 Runtime 项目不可用。").trim(),
       settings: null,
     });
     return false;
@@ -1317,7 +1317,7 @@ async function openCompanionDrawer(mode) {
     setCompanionRuntimeSettings({
       threadId: "",
       phase: "creating",
-      reason: "创建联系人后可编辑 9840 Runtime。",
+      reason: "创建联系人后可编辑 21040 Runtime。",
     });
     renderCompanionRuntimeSettings();
   }

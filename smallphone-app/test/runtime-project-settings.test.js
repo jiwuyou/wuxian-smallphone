@@ -7,7 +7,7 @@ const path = require("node:path");
 const { SmallPhoneService } = require("../packages/domain/service");
 
 const PROJECT_NAME = "smallphone-contact-aki";
-const MANAGEMENT_URL = "http://127.0.0.1:9840";
+const MANAGEMENT_URL = "http://127.0.0.1:21040";
 const MANAGEMENT_TOKEN = "management-token";
 
 function tmpDataFile() {
@@ -81,7 +81,7 @@ function projectResponse(overrides = {}) {
       disabled_commands: ["rm", "shutdown"],
     token: "secret-token",
     authorization: "Bearer secret-token",
-    management_url: "http://127.0.0.1:9840?token=secret-token",
+    management_url: "http://127.0.0.1:21040?token=secret-token",
     ...overrides,
   };
 }

@@ -311,7 +311,7 @@ test("cc-webclient hydration updates thread preview without replacing profile su
       dataFile: tmpDataFile(),
       runtime: {
         mode: "cc-webclient",
-        webclientBaseUrl: "http://127.0.0.1:9840",
+        webclientBaseUrl: "http://127.0.0.1:21040",
         webclientToken: "test-token",
         webclientAppId: "smallphone",
       },

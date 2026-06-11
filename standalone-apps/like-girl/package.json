@@ -10,7 +10,7 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "start": "node ./src/server.js",
-    "start:clone": "PORT=4108 LIKE_GIRL_DB_FILE=./data/instances/like-girl-clone/like-girl.sqlite LIKE_GIRL_PHOTO_UPLOADS_DIR=./data/instances/like-girl-clone/uploads/photos node ./src/server.js",
+    "start:clone": "PORT=23008 LIKE_GIRL_DB_FILE=./data/instances/like-girl-clone/like-girl.sqlite LIKE_GIRL_PHOTO_UPLOADS_DIR=./data/instances/like-girl-clone/uploads/photos node ./src/server.js",
     "dev": "node --watch ./src/server.js",
     "cli": "node ./src/cli.js",
     "test": "node --test test/*.test.js",

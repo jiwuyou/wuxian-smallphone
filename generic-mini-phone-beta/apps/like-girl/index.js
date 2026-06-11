@@ -1,6 +1,6 @@
 import { qs } from '../shared.js';
 
-const defaultUrl = 'http://127.0.0.1:4103/';
+const defaultUrl = 'http://127.0.0.1:23003/';
 
 export const manifest = {
   id: 'like-girl',

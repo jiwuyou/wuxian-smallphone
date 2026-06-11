@@ -25,7 +25,7 @@ function createRuntimeAdapter(config = {}) {
 }
 
 function createCcConnectAdapter(config) {
-  const wsUrl = normalizeText(config.ccConnectWsUrl) || "ws://127.0.0.1:9810/bridge/ws";
+  const wsUrl = normalizeText(config.ccConnectWsUrl) || "ws://127.0.0.1:21010/bridge/ws";
   const token = normalizeText(config.ccConnectToken);
   const project = normalizeText(config.ccConnectProject) || "smallphone";
   const platform = normalizeText(config.ccConnectPlatform) || "smallphone";

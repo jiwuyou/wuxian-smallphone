@@ -9,7 +9,7 @@ This repository contains three main areas. `smallphone-app/` is the Node.js prod
 Run backend commands from `smallphone-app/`:
 
 ```bash
-npm start                    # start the app on http://127.0.0.1:3100
+npm start                    # start the app on http://127.0.0.1:22000
 npm run start:cc-webclient   # start with cc-webclient runtime mode
 npm run start:openclaw-http  # start with OpenClaw HTTP runtime mode
 npm run check                # syntax-check key CommonJS files

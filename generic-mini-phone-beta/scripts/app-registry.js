@@ -27,7 +27,7 @@ export const appDefaultState = appModules.reduce((merged, app) => ({
   ...(app.defaultState || {}),
 }), {});
 
-export const DEFAULT_DYNAMIC_APP_BACKEND_ORIGIN = 'http://127.0.0.1:3100';
+export const DEFAULT_DYNAMIC_APP_BACKEND_ORIGIN = 'http://127.0.0.1:22000';
 export const APP_REGISTRY_API_PATH = '/api/app-registry';
 
 const DYNAMIC_APP_ORB_CLASSES = [

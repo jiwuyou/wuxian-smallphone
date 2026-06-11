@@ -305,7 +305,7 @@ test("service-manager: app registry degrades gracefully when service-manager is 
   const token = randomId("sm-token");
 
   installFetchStub(t, () => {
-    throw new Error("connect ECONNREFUSED 127.0.0.1:8787");
+    throw new Error("connect ECONNREFUSED 127.0.0.1:20087");
   });
 
   const service = new SmallPhoneService({
@@ -313,7 +313,7 @@ test("service-manager: app registry degrades gracefully when service-manager is 
     smallphoneHome: homeDir,
     runtime: { mode: "mock" },
     serviceManager: {
-      baseUrl: "http://127.0.0.1:8787",
+      baseUrl: "http://127.0.0.1:20087",
       token,
       timeoutMs: 50,
     },

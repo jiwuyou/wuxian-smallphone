@@ -19,7 +19,7 @@ pnpm test
 pnpm check
 ```
 
-The server listens on `http://127.0.0.1:4104` by default. Override with `PORT`:
+The server listens on `http://127.0.0.1:23004` by default. Override with `PORT`:
 
 ```bash
 PORT=4204 pnpm start
@@ -34,26 +34,26 @@ ALBUM_DB_FILE=/tmp/smallphone-album.sqlite pnpm start
 ## API
 
 ```bash
-curl http://127.0.0.1:4104/health
-curl http://127.0.0.1:4104/manifest
-curl http://127.0.0.1:4104/api/albums
-curl -X POST http://127.0.0.1:4104/api/albums \
+curl http://127.0.0.1:23004/health
+curl http://127.0.0.1:23004/manifest
+curl http://127.0.0.1:23004/api/albums
+curl -X POST http://127.0.0.1:23004/api/albums \
   -H 'content-type: application/json' \
   -d '{"title":"Weekend Walks","description":"Reference images collected outside."}'
-curl -X PATCH http://127.0.0.1:4104/api/albums/<id> \
+curl -X PATCH http://127.0.0.1:23004/api/albums/<id> \
   -H 'content-type: application/json' \
   -d '{"title":"Updated album","description":"Updated notes."}'
-curl -X DELETE http://127.0.0.1:4104/api/albums/<id>
+curl -X DELETE http://127.0.0.1:23004/api/albums/<id>
 
-curl http://127.0.0.1:4104/api/photos
-curl http://127.0.0.1:4104/api/photos?albumId=<album-id>
-curl -X POST http://127.0.0.1:4104/api/photos \
+curl http://127.0.0.1:23004/api/photos
+curl http://127.0.0.1:23004/api/photos?albumId=<album-id>
+curl -X POST http://127.0.0.1:23004/api/photos \
   -H 'content-type: application/json' \
   -d '{"title":"Corner light","albumId":"<album-id>","imageUrl":"https://example.com/photo.jpg","caption":"Late light.","takenAt":"2026-05-04T17:30:00.000Z"}'
-curl -X PATCH http://127.0.0.1:4104/api/photos/<id> \
+curl -X PATCH http://127.0.0.1:23004/api/photos/<id> \
   -H 'content-type: application/json' \
   -d '{"caption":"Updated caption."}'
-curl -X DELETE http://127.0.0.1:4104/api/photos/<id>
+curl -X DELETE http://127.0.0.1:23004/api/photos/<id>
 ```
 
 Deleting an album also deletes photo metadata assigned to that album.

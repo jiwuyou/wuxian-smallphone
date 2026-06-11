@@ -51,15 +51,15 @@ Do not commit database credentials or generated upstream files into this adapter
 ```bash
 cd /root/projects/smallphone/smallphone-active/standalone-apps/vocabulary
 corepack enable
-PORT=4102 pnpm start
+PORT=23002 pnpm start
 ```
 
-`PORT` defaults to `4102`. `HOST` defaults to `127.0.0.1`. `PHP_BIN` can point to a non-default PHP binary.
+`PORT` defaults to `23002`. `HOST` defaults to `127.0.0.1`. `PHP_BIN` can point to a non-default PHP binary.
 
 The launcher serves the linked upstream source with:
 
 ```bash
-php -S 127.0.0.1:4102 -t source
+php -S 127.0.0.1:23002 -t source
 ```
 
 ## SmallPhone Manifest

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const host = process.env.HOST || '127.0.0.1';
-const port = process.env.PORT || '4102';
+const port = process.env.PORT || '23002';
 const phpBin = process.env.PHP_BIN || 'php';
 
 const sourceDir = await resolveSourceDir();

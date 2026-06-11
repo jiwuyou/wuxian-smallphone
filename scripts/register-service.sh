@@ -26,7 +26,7 @@ resolve_sm_url() {
     printf '%s' "$raw"
     return 0
   fi
-  printf '%s' "http://127.0.0.1:8787"
+  printf '%s' "http://127.0.0.1:20087"
 }
 
 resolve_sm_token() {
@@ -48,19 +48,38 @@ resolve_sm_token() {
   printf '%s' ""
 }
 
+resolve_smallphone_sm_token() {
+  raw="${SMALLPHONE_SERVICE_MANAGER_TOKEN:-}"
+  if [ -n "$raw" ]; then
+    printf '%s' "$raw"
+    return 0
+  fi
+  raw="${SERVICE_MANAGER_TOKEN:-}"
+  if [ -n "$raw" ]; then
+    printf '%s' "$raw"
+    return 0
+  fi
+  if have service-manager; then
+    # Capture token without printing it.
+    service-manager token show 2>/dev/null | tr -d '\r\n' || true
+    return 0
+  fi
+  printf '%s' ""
+}
+
 print_intended_services() {
   group_tag="group:local-stack"
 
-  core_port="${APP_BACKEND_PORT:-${SMALLPHONE_PORT:-3100}}"
+  core_port="${APP_BACKEND_PORT:-${SMALLPHONE_PORT:-22000}}"
   core_host="${APP_BACKEND_HOST:-${SMALLPHONE_HOST:-127.0.0.1}}"
 
-  frontend_port="${FRONTEND_PORT:-18080}"
+  frontend_port="${FRONTEND_PORT:-22080}"
   frontend_host="${FRONTEND_HOST:-127.0.0.1}"
 
-  beta_port="${BETA_FRONTEND_PORT:-18082}"
+  beta_port="${BETA_FRONTEND_PORT:-22082}"
   beta_host="${BETA_FRONTEND_HOST:-$frontend_host}"
 
-  backend_port="${BACKEND_PORT:-18096}"
+  backend_port="${BACKEND_PORT:-22096}"
   backend_host="${BACKEND_HOST:-127.0.0.1}"
 
   log "Intended services (name | bind | tags):"
@@ -68,13 +87,14 @@ print_intended_services() {
   log "  smallphone-frontend | ${frontend_host}:${frontend_port} | ${group_tag}, openhouse-component:smallphone-frontend"
   log "  smallphone-frontend-beta | ${beta_host}:${beta_port} | ${group_tag}, openhouse-component:smallphone-frontend-beta"
   log "  smallphone-backend | ${backend_host}:${backend_port} | ${group_tag}, openhouse-component:smallphone-backend"
-  log "  smallphone-standalone-diary | 127.0.0.1:4101 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:diary"
-  log "  smallphone-standalone-like-girl | 127.0.0.1:4103 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:like-girl"
-  log "  smallphone-standalone-album | 127.0.0.1:4104 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:album"
-  log "  smallphone-like-girl-source | 127.0.0.1:4102 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-kind:source-app"
+  log "  smallphone-standalone-diary | 127.0.0.1:23001 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:diary"
+  log "  smallphone-standalone-like-girl | 127.0.0.1:23003 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:like-girl"
+  log "  smallphone-standalone-like-girl-clone | 127.0.0.1:23008 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:like-girl-clone"
+  log "  smallphone-standalone-album | 127.0.0.1:23004 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:album"
+  log "  smallphone-like-girl-source | 127.0.0.1:23002 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-kind:source-app"
   log ""
   log "Notes:"
-  log "  - smallphone-core port is SMALLPHONE_PORT (default 3100) or APP_BACKEND_PORT."
+  log "  - smallphone-core port is SMALLPHONE_PORT (default 22000) or APP_BACKEND_PORT."
   log "  - frontends are served via python3 -m http.server; ports match start_smallphone.sh defaults."
   log "  - smallphone-backend is the OpenCode bun backend (optional; only registered if present)."
   log "  - standalone apps use PORT/HOST env vars; defaults are from each smallphone.app.json."
@@ -148,11 +168,15 @@ emit_spec() {
   beta_port="$8"
   backend_host="$9"
   backend_port="${10}"
+  service_manager_url="${11}"
+  service_manager_token="${12}"
   "${py}" - "$key" "$ROOT_DIR" "$PARENT_DIR" \
     "$core_host" "$core_port" \
     "$frontend_host" "$frontend_port" \
     "$beta_host" "$beta_port" \
-    "$backend_host" "$backend_port" <<'PY'
+    "$backend_host" "$backend_port" \
+    "$service_manager_url" \
+    "$service_manager_token" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -169,6 +193,8 @@ from pathlib import Path
     beta_port,
     backend_host,
     backend_port,
+    service_manager_url,
+    service_manager_token,
 ) = sys.argv[1:]
 
 root = Path(root_dir)
@@ -220,8 +246,10 @@ if key == "smallphone-core":
             "SMALLPHONE_HOST": core_host,
             "SMALLPHONE_HOSTS": core_host,
             "SMALLPHONE_PORT": str(core_port),
+            "SMALLPHONE_SERVICE_MANAGER_URL": service_manager_url,
+            "SMALLPHONE_SERVICE_MANAGER_TOKEN": service_manager_token,
         },
-        [tcp_check(core_host, core_port)],
+        [http_check(f"http://{core_host}:{core_port}/health")],
         [group_tag, "openhouse-component:smallphone-core", "smallphone"],
     )
 elif key == "smallphone-frontend":
@@ -260,7 +288,7 @@ elif key == "smallphone-backend":
     )
 elif key == "smallphone-standalone-diary":
     app_dir = root / "standalone-apps" / "diary"
-    port = "4101"
+    port = "23001"
     spec = spec_process(
         "smallphone-standalone-diary",
         "SmallPhone standalone Diary app (Node/SQLite)",
@@ -272,7 +300,7 @@ elif key == "smallphone-standalone-diary":
     )
 elif key == "smallphone-standalone-album":
     app_dir = root / "standalone-apps" / "album"
-    port = "4104"
+    port = "23004"
     spec = spec_process(
         "smallphone-standalone-album",
         "SmallPhone standalone Album app (Node/SQLite)",
@@ -284,7 +312,7 @@ elif key == "smallphone-standalone-album":
     )
 elif key == "smallphone-standalone-like-girl":
     app_dir = root / "standalone-apps" / "like-girl"
-    port = "4103"
+    port = "23003"
     spec = spec_process(
         "smallphone-standalone-like-girl",
         "SmallPhone standalone LikeGirl app (Node/SQLite)",
@@ -292,11 +320,28 @@ elif key == "smallphone-standalone-like-girl":
         app_dir,
         {"HOST": "127.0.0.1", "PORT": port},
         [http_check(f"http://127.0.0.1:{port}/health")],
-        [group_tag, "openhouse-component:smallphone-standalone", "smallphone", "smallphone-app:like-girl"],
+        [group_tag, "openhouse-component:smallphone-standalone", "smallphone", "smallphone-app:like-girl", "control-test:smallphone-likegirl"],
+    )
+elif key == "smallphone-standalone-like-girl-clone":
+    app_dir = root / "standalone-apps" / "like-girl"
+    port = "23008"
+    spec = spec_process(
+        "smallphone-standalone-like-girl-clone",
+        "SmallPhone standalone LikeGirl clone control app (Node/SQLite)",
+        ["node", "./src/server.js"],
+        app_dir,
+        {
+            "HOST": "127.0.0.1",
+            "PORT": port,
+            "LIKE_GIRL_DB_FILE": "./data/instances/like-girl-clone/like-girl.sqlite",
+            "LIKE_GIRL_PHOTO_UPLOADS_DIR": "./data/instances/like-girl-clone/uploads/photos",
+        },
+        [http_check(f"http://127.0.0.1:{port}/health")],
+        [group_tag, "openhouse-component:smallphone-standalone", "smallphone", "smallphone-app:like-girl-clone", "control-test:smallphone-likegirl"],
     )
 elif key == "smallphone-like-girl-source":
     app_dir = root / "standalone-apps" / "vocabulary"
-    port = "4102"
+    port = "23002"
     # This adapter spawns PHP; health is best-effort TCP only.
     spec = spec_process(
         "smallphone-like-girl-source",
@@ -386,7 +431,8 @@ main() {
   log "SmallPhone service registration (best-effort)"
   sm_url="$(resolve_sm_url)"
   log "service-manager url: ${sm_url}"
-  log "token sources: SERVICE_MANAGER_TOKEN, SMALLPHONE_SERVICE_MANAGER_TOKEN, or \`service-manager token show\`"
+  log "registration token sources: SERVICE_MANAGER_TOKEN, SMALLPHONE_SERVICE_MANAGER_TOKEN, or \`service-manager token show\`"
+  log "smallphone-core token sources: SMALLPHONE_SERVICE_MANAGER_TOKEN, SERVICE_MANAGER_TOKEN, or \`service-manager token show\`"
   log ""
   print_intended_services
 
@@ -398,7 +444,7 @@ main() {
 
   if ! curl -fsS --max-time 2 "${sm_url%/}/api/v1/health" >/dev/null 2>&1; then
     warn "service-manager is not reachable at: ${sm_url}"
-    warn "start it with: service-manager serve --bind 127.0.0.1:8787"
+    warn "start it with: service-manager serve --bind 127.0.0.1:20087"
     print_manual_commands "$sm_url"
     exit 0
   fi
@@ -411,6 +457,11 @@ main() {
     fi
     print_manual_commands "$sm_url"
     exit 0
+  fi
+  core_sm_token="$(resolve_smallphone_sm_token)"
+  if [ -z "$core_sm_token" ]; then
+    warn "smallphone-core service-manager token not available; using registration token"
+    core_sm_token="$sm_token"
   fi
 
   py=""
@@ -443,16 +494,16 @@ main() {
 
   write_curl_cfg "$curl_cfg" "$sm_token"
 
-  core_port="${APP_BACKEND_PORT:-${SMALLPHONE_PORT:-3100}}"
+  core_port="${APP_BACKEND_PORT:-${SMALLPHONE_PORT:-22000}}"
   core_host="${APP_BACKEND_HOST:-${SMALLPHONE_HOST:-127.0.0.1}}"
-  frontend_port="${FRONTEND_PORT:-18080}"
+  frontend_port="${FRONTEND_PORT:-22080}"
   frontend_host="${FRONTEND_HOST:-127.0.0.1}"
-  beta_port="${BETA_FRONTEND_PORT:-18082}"
+  beta_port="${BETA_FRONTEND_PORT:-22082}"
   beta_host="${BETA_FRONTEND_HOST:-$frontend_host}"
-  backend_port="${BACKEND_PORT:-18096}"
+  backend_port="${BACKEND_PORT:-22096}"
   backend_host="${BACKEND_HOST:-127.0.0.1}"
 
-  upsert_keys="smallphone-core smallphone-frontend smallphone-frontend-beta smallphone-standalone-diary smallphone-standalone-like-girl smallphone-standalone-album smallphone-like-girl-source"
+  upsert_keys="smallphone-core smallphone-frontend smallphone-frontend-beta smallphone-standalone-diary smallphone-standalone-like-girl smallphone-standalone-like-girl-clone smallphone-standalone-album smallphone-like-girl-source"
 
   # Register the OpenCode backend only when the checkout exists.
   if [ -d "$PARENT_DIR/opencode" ]; then
@@ -469,6 +520,7 @@ main() {
       smallphone-backend) name="smallphone-backend" ;;
       smallphone-standalone-diary) name="smallphone-standalone-diary" ;;
       smallphone-standalone-like-girl) name="smallphone-standalone-like-girl" ;;
+      smallphone-standalone-like-girl-clone) name="smallphone-standalone-like-girl-clone" ;;
       smallphone-standalone-album) name="smallphone-standalone-album" ;;
       smallphone-like-girl-source) name="smallphone-like-girl-source" ;;
       *) die "unknown key: $key" ;;
@@ -478,7 +530,9 @@ main() {
       "$core_host" "$core_port" \
       "$frontend_host" "$frontend_port" \
       "$beta_host" "$beta_port" \
-      "$backend_host" "$backend_port" >"$spec_file"
+      "$backend_host" "$backend_port" \
+      "$sm_url" \
+      "$core_sm_token" >"$spec_file"
 
     upsert_one "$sm_url" "$curl_cfg" "$py" "$key" "$name" "$spec_file" || true
   done

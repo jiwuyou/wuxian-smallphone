@@ -16,8 +16,8 @@ test('service-manager status merge preserves definition metadata when status pay
         name: 'smallphone-like-girl',
         description: 'LikeGirl standalone app',
         provider: 'process',
-        tags: ['smallphone-app:like-girl', 'ports:4103'],
-        url: 'http://127.0.0.1:4103/',
+        tags: ['smallphone-app:like-girl', 'ports:23003'],
+        url: 'http://127.0.0.1:23003/',
       },
     ],
   });
@@ -36,8 +36,8 @@ test('service-manager status merge preserves definition metadata when status pay
   assert.equal(merged.description, 'LikeGirl standalone app');
   assert.equal(merged.provider, 'process');
   assert.equal(merged.state, 'running');
-  assert.deepEqual(merged.tags, ['smallphone-app:like-girl', 'ports:4103']);
-  assert.equal(merged.url, 'http://127.0.0.1:4103/');
+  assert.deepEqual(merged.tags, ['smallphone-app:like-girl', 'ports:23003']);
+  assert.equal(merged.url, 'http://127.0.0.1:23003/');
 });
 
 test('managed targets map LikeGirl apps to real service-manager IDs and dedupe raw service cards', () => {
@@ -48,14 +48,14 @@ test('managed targets map LikeGirl apps to real service-manager IDs and dedupe r
         name: 'smallphone-like-girl',
         provider: 'process',
         state: 'running',
-        tags: ['smallphone-app:like-girl', 'ports:4103'],
+        tags: ['smallphone-app:like-girl', 'ports:23003'],
       },
       {
         id: 'svc-like-girl-clone',
         name: 'smallphone-like-girl-clone',
         provider: 'process',
         state: 'running',
-        tags: ['smallphone-app:like-girl-clone', 'ports:4108'],
+        tags: ['smallphone-app:like-girl-clone', 'ports:23008'],
       },
     ],
     byId: new Map(),
@@ -82,13 +82,13 @@ test('managed targets preserve real LikeGirl IDs when status fetch falls back to
         id: 'svc-like-girl',
         name: 'smallphone-like-girl',
         provider: 'process',
-        tags: ['smallphone-app:like-girl', 'ports:4103'],
+        tags: ['smallphone-app:like-girl', 'ports:23003'],
       },
       {
         id: 'svc-like-girl-clone',
         name: 'smallphone-like-girl-clone',
         provider: 'process',
-        tags: ['smallphone-app:like-girl-clone', 'ports:4108'],
+        tags: ['smallphone-app:like-girl-clone', 'ports:23008'],
       },
     ],
   });

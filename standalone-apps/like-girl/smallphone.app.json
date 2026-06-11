@@ -21,7 +21,7 @@
     "packageManager": "pnpm",
     "node": ">=22",
     "entry": "src/server.js",
-    "defaultPort": 4103,
+    "defaultPort": 23003,
     "portEnv": "PORT",
     "startCommand": "pnpm start",
     "devCommand": "pnpm dev",

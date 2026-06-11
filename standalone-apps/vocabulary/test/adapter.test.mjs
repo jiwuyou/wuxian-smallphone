@@ -15,7 +15,7 @@ test('manifest describes the LikeGirl source app', async () => {
   assert.equal(manifest.source.repository, 'https://gitee.com/kiCode111/like-girl-v5.2.0');
   assert.equal(manifest.source.cloneUrl, 'https://gitee.com/kiCode111/like-girl-v5.2.0.git');
   assert.equal(manifest.source.vendored, false);
-  assert.equal(manifest.runtime.defaultPort, 4102);
+  assert.equal(manifest.runtime.defaultPort, 23002);
   assert.equal(manifest.runtime.packageManager, 'pnpm');
 });
 

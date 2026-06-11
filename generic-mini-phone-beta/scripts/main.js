@@ -15,7 +15,7 @@ import {
 } from './service-manager-logic.js?v=1';
 import { applyDesktopMode, bindWorld, renderWorld, renderWorldToolbar } from './world.js?v=3';
 
-const DEFAULT_BACKEND_PORT = '3100';
+const DEFAULT_BACKEND_PORT = '22000';
 const DEFAULT_BACKEND_BASE = `http://127.0.0.1:${DEFAULT_BACKEND_PORT}/api`;
 const BACKEND_STORAGE_KEY = 'smallphone.backendBase';
 const AVATAR_CLASSES = ['avatar-pink', 'avatar-blue', 'avatar-gold', 'avatar-green'];
@@ -161,7 +161,7 @@ function rememberBackendBase(url) {
   window.localStorage.setItem(BACKEND_STORAGE_KEY, url);
 }
 
-function normalizeStandaloneUrl(value, fallback = 'http://127.0.0.1:4103/') {
+function normalizeStandaloneUrl(value, fallback = 'http://127.0.0.1:23003/') {
   const raw = String(value || '').trim() || fallback;
   return raw.endsWith('/') ? raw : `${raw}/`;
 }
@@ -179,11 +179,11 @@ function setStandaloneLaunch(configKey, path = '', fallback) {
 }
 
 function setLikeGirlLaunch(path = '') {
-  setStandaloneLaunch('likeGirl', path, 'http://127.0.0.1:4103/');
+  setStandaloneLaunch('likeGirl', path, 'http://127.0.0.1:23003/');
 }
 
 function setLikeGirlCloneLaunch(path = '') {
-  setStandaloneLaunch('likeGirlClone', path, 'http://127.0.0.1:4108/');
+  setStandaloneLaunch('likeGirlClone', path, 'http://127.0.0.1:23008/');
 }
 
 async function apiRequest(path, init = {}) {
@@ -3588,8 +3588,8 @@ function renderProfile() {
   if (dom.temperatureInput) dom.temperatureInput.value = state.apiSettings.temperature;
   if (dom.maxTokensInput) dom.maxTokensInput.value = state.apiSettings.maxTokens;
   if (dom.systemPromptInput) dom.systemPromptInput.value = state.apiSettings.systemPrompt;
-  if (dom.likeGirlServiceUrlInput) dom.likeGirlServiceUrlInput.value = state.standaloneApps?.likeGirl?.url || 'http://127.0.0.1:4103/';
-  if (dom.likeGirlCloneServiceUrlInput) dom.likeGirlCloneServiceUrlInput.value = state.standaloneApps?.likeGirlClone?.url || 'http://127.0.0.1:4108/';
+  if (dom.likeGirlServiceUrlInput) dom.likeGirlServiceUrlInput.value = state.standaloneApps?.likeGirl?.url || 'http://127.0.0.1:23003/';
+  if (dom.likeGirlCloneServiceUrlInput) dom.likeGirlCloneServiceUrlInput.value = state.standaloneApps?.likeGirlClone?.url || 'http://127.0.0.1:23008/';
 
   if (dom.personaNameInput) dom.personaNameInput.value = state.persona.name;
   if (dom.personaSignatureInput) dom.personaSignatureInput.value = state.persona.signature;
@@ -4431,7 +4431,7 @@ dom.serviceManagerRefreshButton?.addEventListener('click', () => {
 dom.appManagerForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   const url = normalizeStandaloneUrl(dom.likeGirlServiceUrlInput?.value);
-  const cloneUrl = normalizeStandaloneUrl(dom.likeGirlCloneServiceUrlInput?.value, 'http://127.0.0.1:4108/');
+  const cloneUrl = normalizeStandaloneUrl(dom.likeGirlCloneServiceUrlInput?.value, 'http://127.0.0.1:23008/');
   state.standaloneApps = {
     ...(state.standaloneApps || {}),
     likeGirl: {

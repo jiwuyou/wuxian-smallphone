@@ -188,7 +188,7 @@ docs/user-shell-deployment.md
 ```bash
 cd smallphone-user-shell-template
 SMALLPHONE_HOME=/path/to/smallphone-home \
-SMALLPHONE_API=http://127.0.0.1:3100 \
+SMALLPHONE_API=http://127.0.0.1:22000 \
 SHELL_ID=my-desktop \
 SHELL_NAME="我的桌面" \
 npm run install:shell
@@ -197,7 +197,7 @@ npm run install:shell
 访问：
 
 ```text
-http://127.0.0.1:3100/shells/my-desktop/
+http://127.0.0.1:22000/shells/my-desktop/
 ```
 
 ## 已有 Standalone Apps
@@ -229,7 +229,7 @@ pnpm run start:clone
 分身默认：
 
 ```text
-http://127.0.0.1:4108/
+http://127.0.0.1:23008/
 data/instances/like-girl-clone/like-girl.sqlite
 data/instances/like-girl-clone/uploads/photos/
 ```

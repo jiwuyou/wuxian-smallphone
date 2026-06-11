@@ -56,8 +56,8 @@
 
 默认地址：
 
-- 前端：`http://<tailscale-or-local-ip>:18080`
-- 后端：`http://<tailscale-or-local-ip>:18096`
+- 前端：`http://<tailscale-or-local-ip>:22080`
+- 后端：`http://<tailscale-or-local-ip>:22096`
 
 运行前提：
 
@@ -69,7 +69,7 @@
 ## 注意事项
 
 - 如果前端是通过 `file://` 直接打开，后端已经允许 `Origin: null` 的 CORS 开发场景
-- 如果通过 `http://<tailscale-or-local-ip>:18080` 打开前端，前端会优先探测：
-  `?backend=...` 指定地址、已记住的后端地址、同机 `:18096` 后端
+- 如果通过 `http://<tailscale-or-local-ip>:22080` 打开前端，前端会优先探测：
+  `?backend=...` 指定地址、已记住的后端地址、同机 `:22096` 后端
 - 后端已允许 `localhost`、`127.0.0.1`、RFC1918 局域网网段和 `100.x.x.x` Tailscale 来源跨端口访问
 - 当前版本仍未接通 tool / MCP / subagent，只完成了内容后端与真实聊天闭环

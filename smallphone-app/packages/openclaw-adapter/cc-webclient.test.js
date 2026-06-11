@@ -107,7 +107,7 @@ async function sendWebclientTestTurn(payload = {}) {
 
   const runtime = createRuntimeAdapter({
     mode: "cc-webclient",
-    webclientBaseUrl: "http://127.0.0.1:9840",
+    webclientBaseUrl: "http://127.0.0.1:21040",
     webclientToken: "test-token",
     webclientAppId: "smallphone",
     ccConnectProject: "proj",
@@ -341,7 +341,7 @@ test("cc-webclient adapter sends images and polls for assistant reply + attachme
 
   const runtime = createRuntimeAdapter({
     mode: "cc-webclient",
-    webclientBaseUrl: "http://127.0.0.1:9840",
+    webclientBaseUrl: "http://127.0.0.1:21040",
     webclientToken: "test-token",
     webclientAppId: "smallphone",
     ccConnectProject: "proj",
@@ -411,7 +411,7 @@ test("cc-webclient adapter fetchAttachment proxies allowed URLs and rejects cros
 
   const runtime = createRuntimeAdapter({
     mode: "cc-webclient",
-    webclientBaseUrl: "http://127.0.0.1:9840",
+    webclientBaseUrl: "http://127.0.0.1:21040",
     webclientToken: "test-token",
     webclientAppId: "smallphone",
     ccConnectProject: "proj",
@@ -456,7 +456,7 @@ test("cc-webclient adapter fetchAttachment rewrites public_url origin to interna
 
   const runtime = createRuntimeAdapter({
     mode: "cc-webclient",
-    webclientBaseUrl: "http://127.0.0.1:9840",
+    webclientBaseUrl: "http://127.0.0.1:21040",
     webclientToken: "test-token",
     webclientAppId: "smallphone",
     ccConnectProject: "proj",
@@ -470,7 +470,7 @@ test("cc-webclient adapter fetchAttachment rewrites public_url origin to interna
   });
 
   const call = calls.at(-1);
-  assert.equal(call.origin, "http://127.0.0.1:9840");
+  assert.equal(call.origin, "http://127.0.0.1:21040");
   assert.equal(call.pathname, "/apps/smallphone/attachments/img1");
   assert.equal(call.search, "");
 });
