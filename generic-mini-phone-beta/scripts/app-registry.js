@@ -3,6 +3,7 @@ import * as weather from '../apps/weather/index.js';
 import * as diary from '../apps/diary/index.js';
 import * as files from '../apps/files/index.js';
 import * as vocabulary from '../apps/vocabulary/index.js';
+import * as airplane from '../apps/airplane/index.js';
 import * as likeGirl from '../apps/like-girl/index.js';
 import * as likeGirlClone from '../apps/like-girl-clone/index.js';
 import * as workflows from '../apps/workflows/index.js?v=6';
@@ -13,6 +14,7 @@ export const appModules = [
   diary,
   files,
   vocabulary,
+  airplane,
   likeGirl,
   likeGirlClone,
   workflows,
@@ -36,6 +38,7 @@ const DYNAMIC_APP_ORB_CLASSES = [
   'orb-diary',
   'orb-files',
   'orb-vocabulary',
+  'orb-airplane',
   'orb-workflows',
   'orb-app-manager',
   'orb-character',

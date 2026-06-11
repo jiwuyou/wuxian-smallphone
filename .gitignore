@@ -17,6 +17,7 @@ smallphone-app/*.log
 # Local environment and generated output
 .env
 .env.*
+.claude/settings.local.json
 tmp/
 dist/
 build/

@@ -23,6 +23,7 @@ const objectColors = {
   diary: '#4f8f6a',
   files: '#d6992f',
   vocabulary: '#5c6bc0',
+  airplane: '#2378ff',
 };
 
 const paintSession = {
@@ -339,6 +340,26 @@ function drawVocabularyObject(ctx, x, y, size, color) {
   ctx.fillText('Aa', x + size * 0.5, y + size * 0.56);
 }
 
+function drawAirplaneObject(ctx, x, y, size, color) {
+  ctx.fillStyle = '#36465f';
+  drawRoundedRect(ctx, x + size * 0.28, y + size * 0.58, size * 0.44, size * 0.18, size * 0.05);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.5, y + size * 0.22);
+  ctx.lineTo(x + size * 0.68, y + size * 0.62);
+  ctx.lineTo(x + size * 0.55, y + size * 0.56);
+  ctx.lineTo(x + size * 0.5, y + size * 0.74);
+  ctx.lineTo(x + size * 0.45, y + size * 0.56);
+  ctx.lineTo(x + size * 0.32, y + size * 0.62);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.86)';
+  ctx.beginPath();
+  ctx.ellipse(x + size * 0.5, y + size * 0.42, size * 0.06, size * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawAppObject(ctx, app, x, y, size) {
   const color = objectColors[app.id] || '#5c6bc0';
   ctx.fillStyle = 'rgba(20, 28, 36, 0.22)';
@@ -352,6 +373,7 @@ function drawAppObject(ctx, app, x, y, size) {
   else if (type === 'writing-desk') drawDiaryObject(ctx, x, y, size, color);
   else if (type === 'archive-crate') drawFilesObject(ctx, x, y, size, color);
   else if (type === 'word-gate') drawVocabularyObject(ctx, x, y, size, color);
+  else if (type === 'airplane-hangar') drawAirplaneObject(ctx, x, y, size, color);
   else {
     ctx.fillStyle = color;
     drawRoundedRect(ctx, x + size * 0.29, y + size * 0.24, size * 0.42, size * 0.42, 10);
