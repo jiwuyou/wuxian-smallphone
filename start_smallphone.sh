@@ -29,9 +29,9 @@ FRONTEND_PORT="${FRONTEND_PORT:-22080}"
 BETA_FRONTEND_HOST="${BETA_FRONTEND_HOST:-$FRONTEND_HOST}"
 BETA_FRONTEND_PORT="${BETA_FRONTEND_PORT:-22082}"
 CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-/root/.codex/config.toml}"
-CC_CONNECT_CONFIG_FILE="${CC_CONNECT_CONFIG_FILE:-/root/.cc-connect/config.toml}"
+CC_CONNECT_CONFIG_FILE="${CC_CONNECT_CONFIG_FILE:-/root/.smallphoneai/cc-connect.toml}"
 SMALLPHONE_PROVIDER_ID="${SMALLPHONE_PROVIDER_ID:-smallphone}"
-SMALLPHONE_RUNTIME_MODE="${SMALLPHONE_RUNTIME_MODE:-cc-webclient}"
+SMALLPHONE_RUNTIME_MODE="${SMALLPHONE_RUNTIME_MODE:-cc-connect}"
 SMALLPHONE_CCCONNECT_PLATFORM="${SMALLPHONE_CCCONNECT_PLATFORM:-smallphone}"
 SMALLPHONE_SERVICE_MANAGER_URL="${SMALLPHONE_SERVICE_MANAGER_URL:-${SERVICE_MANAGER_URL:-http://127.0.0.1:20087}}"
 if [[ -z "${SMALLPHONE_SERVICE_MANAGER_TOKEN:-}" ]]; then
@@ -92,7 +92,7 @@ import os
 import shlex
 import tomllib
 
-path = os.environ.get("CC_CONNECT_CONFIG_FILE", "/root/.cc-connect/config.toml")
+path = os.environ.get("CC_CONNECT_CONFIG_FILE", "/root/.smallphoneai/cc-connect.toml")
 with open(path, "rb") as f:
     conf = tomllib.load(f)
 
@@ -138,7 +138,7 @@ import os
 import shlex
 import tomllib
 
-path = os.environ.get("CC_CONNECT_CONFIG_FILE", "/root/.cc-connect/config.toml")
+path = os.environ.get("CC_CONNECT_CONFIG_FILE", "/root/.smallphoneai/cc-connect.toml")
 with open(path, "rb") as f:
     conf = tomllib.load(f)
 

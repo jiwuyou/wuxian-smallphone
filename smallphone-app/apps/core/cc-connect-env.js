@@ -2,11 +2,12 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const DEFAULT_CC_CONNECT_CONFIG_FILE = "/root/.cc-connect/config.toml";
+const DEFAULT_CC_CONNECT_CONFIG_FILE = "/root/.smallphoneai/cc-connect.toml";
+const LEGACY_CC_CONNECT_CONFIG_FILE = "/root/.cc-connect/config.toml";
 
 function applyCcConnectEnvDefaults(env = process.env) {
   if (!env.SMALLPHONE_RUNTIME_MODE) {
-    env.SMALLPHONE_RUNTIME_MODE = "cc-webclient";
+    env.SMALLPHONE_RUNTIME_MODE = "cc-connect";
   }
   if (!env.SMALLPHONE_HOME) {
     env.SMALLPHONE_HOME = path.join(resolveSmallphoneRoot(), "smallphone-home");
@@ -70,8 +71,14 @@ function applyCcBridgeDefaults(env, config) {
 
 function readCcConnectConfig(configFile) {
   const resolved = path.resolve(configFile || DEFAULT_CC_CONNECT_CONFIG_FILE);
-  if (!fs.existsSync(resolved)) return null;
-  return parseMinimalToml(fs.readFileSync(resolved, "utf8"));
+  if (fs.existsSync(resolved)) {
+    return parseMinimalToml(fs.readFileSync(resolved, "utf8"));
+  }
+  const legacy = path.resolve(LEGACY_CC_CONNECT_CONFIG_FILE);
+  if (resolved !== legacy && fs.existsSync(legacy)) {
+    return parseMinimalToml(fs.readFileSync(legacy, "utf8"));
+  }
+  return null;
 }
 
 function parseMinimalToml(source) {

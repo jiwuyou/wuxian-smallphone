@@ -53,6 +53,7 @@ class JsonStore {
     if (fs.existsSync(this.filePath)) {
       return;
     }
+    this.ensureParent();
     if (this.legacySeedFile && path.resolve(this.legacySeedFile) !== this.filePath && fs.existsSync(this.legacySeedFile)) {
       fs.copyFileSync(this.legacySeedFile, this.filePath);
       return;

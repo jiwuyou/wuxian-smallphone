@@ -110,6 +110,23 @@ test("paths: SMALLPHONE_HOME controls runtime and attachment persistence", () =>
   fs.rmSync(home, { recursive: true, force: true });
 });
 
+test("paths: runtime store recreates SMALLPHONE_HOME if it is removed while server is running", async () => {
+  const home = tmpHome();
+  const service = new SmallPhoneService({
+    smallphoneHome: home,
+    runtime: { mode: "mock" },
+  });
+
+  fs.rmSync(home, { recursive: true, force: true });
+
+  const bootstrap = await service.bootstrapHydrated();
+
+  assert.equal(bootstrap.app.name, "SmallPhone");
+  assert.ok(fs.existsSync(path.join(home, "runtime.json")));
+
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
 test("paths: default SMALLPHONE_HOME is outside smallphone-active", () => {
   const paths = resolveSmallPhonePaths({ env: {} });
   assert.equal(paths.smallphoneHome, DEFAULT_SMALLPHONE_HOME);
