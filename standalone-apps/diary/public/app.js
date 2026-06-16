@@ -3,6 +3,7 @@
 const state = {
   entries: [],
   editingId: null,
+  query: '',
 };
 
 const elements = {};
@@ -42,8 +43,8 @@ async function requestJson(path, options = {}) {
 function resetForm() {
   state.editingId = null;
   elements.form.reset();
-  elements.editorHeading.textContent = 'New entry';
-  elements.saveButton.textContent = 'Save entry';
+  elements.editorHeading.textContent = 'New memo';
+  elements.saveButton.textContent = 'Save note';
   elements.cancelEditButton.hidden = true;
 }
 
@@ -51,25 +52,35 @@ function startEdit(entry) {
   state.editingId = entry.id;
   elements.titleInput.value = entry.title;
   elements.textInput.value = entry.text;
-  elements.editorHeading.textContent = 'Edit entry';
-  elements.saveButton.textContent = 'Update entry';
+  elements.editorHeading.textContent = 'Edit memo';
+  elements.saveButton.textContent = 'Update note';
   elements.cancelEditButton.hidden = false;
   elements.titleInput.focus();
 }
 
 function renderEntries() {
-  elements.entryCount.textContent = `${state.entries.length} ${state.entries.length === 1 ? 'entry' : 'entries'}`;
+  const normalizedQuery = state.query.trim().toLocaleLowerCase();
+  const visibleEntries = normalizedQuery
+    ? state.entries.filter((entry) => (
+      entry.title.toLocaleLowerCase().includes(normalizedQuery) ||
+      entry.text.toLocaleLowerCase().includes(normalizedQuery)
+    ))
+    : state.entries;
+  const noteLabel = state.entries.length === 1 ? 'note' : 'notes';
+  elements.entryCount.textContent = normalizedQuery
+    ? `${visibleEntries.length}/${state.entries.length} ${noteLabel}`
+    : `${state.entries.length} ${noteLabel}`;
   elements.entryList.replaceChildren();
 
-  if (!state.entries.length) {
+  if (!visibleEntries.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.textContent = 'No diary entries yet.';
+    empty.textContent = normalizedQuery ? 'No matching notes.' : 'No notes yet.';
     elements.entryList.append(empty);
     return;
   }
 
-  state.entries.forEach((entry) => {
+  visibleEntries.forEach((entry) => {
     const fragment = elements.entryTemplate.content.cloneNode(true);
     const row = fragment.querySelector('.entry-row');
     const meta = fragment.querySelector('.entry-meta');
@@ -147,6 +158,10 @@ async function deleteEntry(id) {
 function bindEvents() {
   elements.form.addEventListener('submit', saveEntry);
   elements.cancelEditButton.addEventListener('click', resetForm);
+  elements.searchInput.addEventListener('input', () => {
+    state.query = elements.searchInput.value;
+    renderEntries();
+  });
   elements.refreshButton.addEventListener('click', () => {
     loadEntries().catch((error) => setStatus(error.message, true));
   });
@@ -168,6 +183,7 @@ function collectElements() {
   elements.form = document.querySelector('#entry-form');
   elements.titleInput = document.querySelector('#entry-title');
   elements.textInput = document.querySelector('#entry-text');
+  elements.searchInput = document.querySelector('#entry-search');
   elements.editorHeading = document.querySelector('#editor-heading');
   elements.saveButton = document.querySelector('#save-button');
   elements.cancelEditButton = document.querySelector('#cancel-edit-button');

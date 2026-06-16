@@ -11,14 +11,6 @@ export const manifest = {
   orbClass: 'orb-airplane',
   views: {
     normal: 'airplane',
-    space2d: 'airplane-hangar',
-    space3d: 'airplane-skydeck',
-  },
-  worldObject: {
-    type: 'airplane-hangar',
-    label: '小机库',
-    defaultPlacement: { mapId: 'home', x: 3, y: 10 },
-    action: { type: 'openApp', appId: 'airplane', view: 'normal' },
   },
 };
 
@@ -52,51 +44,6 @@ export const template = `
     <div class="airplane-control-row" aria-label="打飞机操作">
       <button class="secondary-button small-button" type="button" id="airplane-restart-button">重新开始</button>
       <p>躲开红色敌机，击中越多分越高。</p>
-    </div>
-  </section>
-`;
-
-export const spaceTemplates = `
-  <section class="view app-space-view product-space airplane-space-2d" data-view="airplane-hangar" data-space-app="airplane">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Airplane Hangar</p>
-        <h2>小机库</h2>
-      </div>
-      <button class="secondary-button" data-app-normal="airplane" type="button">打开游戏</button>
-    </div>
-    <div class="airplane-hangar-board">
-      <div class="hangar-runway"></div>
-      <div class="hangar-plane">机</div>
-      <div class="hangar-cloud cloud-left"></div>
-      <div class="hangar-cloud cloud-right"></div>
-      <p>一架小飞机停在晨光跑道上，等你点火起飞。</p>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-space3d="airplane" type="button">进入云台</button>
-    </div>
-  </section>
-
-  <section class="view app-space-view product-space airplane-space-3d" data-view="airplane-skydeck" data-space-app="airplane">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Sky Deck</p>
-        <h2>云层甲板</h2>
-      </div>
-      <button class="secondary-button" data-app-space2d="airplane" type="button">回机库</button>
-    </div>
-    <div class="airplane-skydeck-scene">
-      <div class="skydeck-ring ring-a"></div>
-      <div class="skydeck-ring ring-b"></div>
-      <div class="skydeck-plane">机</div>
-      <span class="skydeck-star star-a"></span>
-      <span class="skydeck-star star-b"></span>
-      <span class="skydeck-star star-c"></span>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-normal="airplane" type="button">开始巡航</button>
     </div>
   </section>
 `;

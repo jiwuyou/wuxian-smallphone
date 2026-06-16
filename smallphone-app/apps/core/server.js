@@ -10,6 +10,13 @@ applyCcConnectEnvDefaults();
 
 const { SmallPhoneService } = require("../../packages/domain/service");
 const { isPathInside, resolveSmallPhonePaths } = require("../../packages/shared/paths");
+const {
+  checkSillyTavernGithubConnectivity,
+  getSillyTavernConfig,
+  getSillyTavernLocalStatus,
+  installSillyTavern,
+  resolveSillyTavernServiceRecord,
+} = require("../../packages/domain/sillytavern");
 
 const PORT = Number.parseInt(process.env.SMALLPHONE_PORT || "22000", 10);
 const HOST = process.env.SMALLPHONE_HOST || "127.0.0.1";
@@ -187,6 +194,45 @@ async function handleApi(req, res, url) {
   const serviceActionMatch = url.pathname.match(/^\/api\/service-manager\/services\/([^/]+)\/(start|stop|restart)$/);
   if (method === "POST" && serviceActionMatch) {
     return sendJson(res, 200, await service.runServiceManagerServiceAction(serviceActionMatch[1], serviceActionMatch[2]));
+  }
+
+  if (url.pathname === "/api/sillytavern/status" && method === "GET") {
+    return sendJson(res, 200, await getSillyTavernStatusPayload());
+  }
+  if (url.pathname === "/api/sillytavern/github-status" && method === "GET") {
+    return sendJson(res, 200, await checkSillyTavernGithubConnectivity());
+  }
+  if (url.pathname === "/api/sillytavern/install" && method === "POST") {
+    await readJson(req);
+    return sendJson(res, 200, await installSillyTavern());
+  }
+  if (url.pathname === "/api/sillytavern/logs" && method === "GET") {
+    const limit = url.searchParams.get("limit") || "300";
+    const target = await getSillyTavernServiceTarget();
+    if (!target.serviceRecord?.id) {
+      return sendJson(res, 200, {
+        ok: false,
+        serviceManager: target.serviceManager,
+        service: null,
+        logs: null,
+        error: target.error || "SillyTavern service is not registered.",
+      });
+    }
+    return sendJson(res, 200, await service.getServiceManagerServiceLogs(target.serviceRecord.id, { limit }));
+  }
+  const sillyTavernActionMatch = url.pathname.match(/^\/api\/sillytavern\/(start|stop|restart)$/);
+  if (sillyTavernActionMatch && method === "POST") {
+    const target = await getSillyTavernServiceTarget();
+    if (!target.serviceRecord?.id) {
+      return sendJson(res, 200, {
+        ok: false,
+        serviceManager: target.serviceManager,
+        service: null,
+        action: sillyTavernActionMatch[1],
+        error: target.error || "SillyTavern service is not registered.",
+      });
+    }
+    return sendJson(res, 200, await service.runServiceManagerServiceAction(target.serviceRecord.id, sillyTavernActionMatch[1]));
   }
   if (method === "POST" && url.pathname === "/api/attachments") {
     const body = await readJsonWithLimit(req, ATTACHMENT_UPLOAD_MAX_JSON_BYTES);
@@ -413,6 +459,35 @@ async function handleApi(req, res, url) {
   }
 
   sendJson(res, 404, { error: `Route not found: ${method} ${url.pathname}` });
+}
+
+async function getSillyTavernStatusPayload() {
+  const local = getSillyTavernLocalStatus();
+  const target = await getSillyTavernServiceTarget();
+  let status = null;
+  if (target.serviceRecord?.id) {
+    status = await service.getServiceManagerServiceStatus(target.serviceRecord.id);
+  }
+  return {
+    ...local,
+    serviceManager: target.serviceManager,
+    service: status?.service || target.serviceRecord || null,
+    registered: Boolean(target.serviceRecord?.id),
+    error: target.error || status?.error || "",
+  };
+}
+
+async function getSillyTavernServiceTarget() {
+  const config = getSillyTavernConfig();
+  const lookup = await service.listServiceManagerServices();
+  const serviceManager = lookup?.serviceManager || { available: false, configured: false };
+  const services = Array.isArray(lookup?.services) ? lookup.services : [];
+  const serviceRecord = resolveSillyTavernServiceRecord(services, config);
+  return {
+    serviceManager,
+    serviceRecord,
+    error: lookup?.error || "",
+  };
 }
 
 function serveLocalAttachment(res, download) {

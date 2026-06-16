@@ -1391,10 +1391,11 @@ function buildCompanionPayload() {
           })
         : undefined,
   });
-  // Contract: create/update payload includes workflowId/workflowVersion/workflowInput.
-  base.workflowId = selectedWorkflow?.id || "";
-  base.workflowVersion = selectedWorkflow?.version || "";
-  base.workflowInput = workflowInput || {};
+  if (selectedWorkflow && workflowInput && Object.keys(workflowInput).length) {
+    base.workflowId = selectedWorkflow.id || "";
+    base.workflowVersion = selectedWorkflow.version || "";
+    base.workflowInput = workflowInput;
+  }
   return base;
 }
 
@@ -1440,6 +1441,14 @@ function renderCompanionWorkflowSection({ preserveValues = false } = {}) {
   if (!els.companionWorkflowFields) return;
 
   const seed = readWorkflowSeedInput();
+  if (!seed || !Object.keys(seed).length) {
+    els.companionWorkflowFields.innerHTML = "";
+    if (els.companionPersona) {
+      els.companionPersona.classList.add("hidden");
+      els.companionPersona.readOnly = true;
+    }
+    return;
+  }
   const schema = normalizeJsonSchema(selected?.contactConfigSchema) || null;
   const next = renderWorkflowInputFieldsHtml(schema, seed, { preserveValues });
   els.companionWorkflowFields.innerHTML = next.html;

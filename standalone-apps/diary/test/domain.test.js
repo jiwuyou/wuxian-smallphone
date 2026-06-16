@@ -45,7 +45,7 @@ test('normalizes persisted state and drops incomplete entries', () => {
   });
 });
 
-test('creates, lists, updates, and deletes diary entries', () => {
+test('creates, lists, updates, and deletes memo notes through the entry model', () => {
   const state = normalizeState({ entries: [] });
   const created = createEntry(state, {
     title: ' First note ',

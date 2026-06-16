@@ -49,7 +49,7 @@ function parseArgs(argv) {
 }
 
 function helpText() {
-  return `SmallPhone Diary CLI
+  return `SmallPhone Memo CLI
 
 Usage:
   smallphone-diary list [--json] [--db-file <path>]
@@ -69,7 +69,7 @@ function formatDate(value) {
 }
 
 function formatEntries(entries) {
-  if (!entries.length) return 'No diary entries.\n';
+  if (!entries.length) return 'No memo notes.\n';
   return entries.map((entry) => {
     const text = entry.text.replace(/\s+/g, ' ').trim();
     return [
@@ -115,7 +115,7 @@ async function main(argv = process.argv.slice(2), output = process.stdout, error
       if (parsed.flags.json) {
         writeJson(output, { entry });
       } else {
-        output.write(`Created diary entry ${entry.id}\n`);
+        output.write(`Created memo note ${entry.id}\n`);
       }
       return 0;
     }
@@ -130,7 +130,7 @@ async function main(argv = process.argv.slice(2), output = process.stdout, error
       if (parsed.flags.json) {
         writeJson(output, { entry });
       } else {
-        output.write(`Updated diary entry ${entry.id}\n`);
+        output.write(`Updated memo note ${entry.id}\n`);
       }
       return 0;
     }
@@ -141,7 +141,7 @@ async function main(argv = process.argv.slice(2), output = process.stdout, error
       if (parsed.flags.json) {
         writeJson(output, { deleted: entry });
       } else {
-        output.write(`Deleted diary entry ${entry.id}\n`);
+        output.write(`Deleted memo note ${entry.id}\n`);
       }
       return 0;
     }

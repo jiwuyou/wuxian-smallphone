@@ -55,6 +55,35 @@ function waitForServer(child) {
   });
 }
 
+function assertNoPromptConfigFields(value) {
+  const forbidden = new Set([
+    "persona",
+    "workflowId",
+    "workflowVersion",
+    "workflowInput",
+    "workflowInputs",
+    "promptBoard",
+    "systemPrompt",
+    "system_prompt",
+    "roleCard",
+    "role_card",
+  ]);
+  const seen = new Set();
+  const walk = (node, pathParts = []) => {
+    if (!node || typeof node !== "object" || seen.has(node)) {
+      return;
+    }
+    seen.add(node);
+    for (const [key, child] of Object.entries(node)) {
+      const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+      assert.equal(forbidden.has(key), false, `unexpected public prompt config field: ${[...pathParts, key].join(".")}`);
+      assert.equal(normalized.startsWith("worldbook"), false, `unexpected public worldbook field: ${[...pathParts, key].join(".")}`);
+      walk(child, [...pathParts, key]);
+    }
+  };
+  walk(value);
+}
+
 async function stopServer(child) {
   if (!child || child.exitCode !== null) {
     return;
@@ -180,14 +209,24 @@ test("companions: create/update materializes workflow inputs and rejects legacy 
     });
 
     assert.equal(created.thread.runtime.workspaceDir, "/tmp/smallphone-contact-workflow");
-    assert.equal(created.character.persona, "You are WorkflowContact. Reply concisely.");
-    assert.equal(created.contact.workflowId, "smallphone.default.contact");
-    assert.equal(created.contact.workflowVersion, 1);
-    assert.equal(created.character.workflowId, "smallphone.default.contact");
-    assert.equal(created.character.workflowVersion, 1);
-    assert.equal(created.thread.workflowId, "smallphone.default.contact");
-    assert.equal(created.thread.workflowVersion, 1);
-    assert.equal(created.thread.workflowInput.userPersona, "The user prefers bullet-point plans and minimal small talk.");
+    assert.equal(Object.hasOwn(created.contact, "workflowInput"), false);
+    assert.equal(Object.hasOwn(created.thread, "workflowInput"), false);
+    assert.equal(Object.hasOwn(created.contact.character, "persona"), false);
+    assertNoPromptConfigFields(created.contact);
+    assertNoPromptConfigFields(created.thread);
+
+    let state = service.store.read();
+    let storedContact = state.contacts.find((item) => item.id === created.contact.id);
+    let storedThread = state.threads.find((item) => item.contactId === created.contact.id);
+    let storedCharacter = state.characters.find((item) => item.id === storedContact.characterId);
+    assert.equal(storedCharacter.persona, "You are WorkflowContact. Reply concisely.");
+    assert.equal(storedContact.workflowId, "smallphone.default.contact");
+    assert.equal(storedContact.workflowVersion, 1);
+    assert.equal(storedCharacter.workflowId, "smallphone.default.contact");
+    assert.equal(storedCharacter.workflowVersion, 1);
+    assert.equal(storedThread.workflowId, "smallphone.default.contact");
+    assert.equal(storedThread.workflowVersion, 1);
+    assert.equal(storedThread.workflowInput.userPersona, "The user prefers bullet-point plans and minimal small talk.");
 
     const updated = await service.updateCompanion(created.contact.id, {
       name: "WorkflowContact",
@@ -201,14 +240,63 @@ test("companions: create/update materializes workflow inputs and rejects legacy 
     });
 
     assert.equal(updated.thread.runtime.workspaceDir, "/tmp/smallphone-contact-workflow-updated");
-    assert.equal(updated.contact.workflowId, "smallphone.default.contact");
+    assert.equal(Object.hasOwn(updated.contact, "workflowInput"), false);
+    assertNoPromptConfigFields(updated.contact);
+    assertNoPromptConfigFields(updated.thread);
 
-    const state = service.store.read();
+    state = service.store.read();
     const updatedContact = state.contacts.find((item) => item.id === created.contact.id);
     const updatedThread = state.threads.find((item) => item.contactId === created.contact.id);
     const updatedCharacter = state.characters.find((item) => item.id === updatedContact.characterId);
+    assert.equal(updatedContact.workflowId, "smallphone.default.contact");
     assert.equal(updatedThread.workflowInput.userPersona, "User persona v2.");
     assert.equal(updatedCharacter.persona, "You are WorkflowContact v2.");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("companions: minimal no-prompt create derives internal workflow defaults and returns public payload", async () => {
+  const home = tmpHome();
+  try {
+    const service = new SmallPhoneService({
+      smallphoneHome: home,
+      runtime: { mode: "mock" },
+    });
+
+    const created = await service.createCompanion({
+      name: "NoPrompt",
+      agentType: "codex",
+    });
+
+    assert.equal(created.contact.displayName, "NoPrompt");
+    assert.equal(created.thread.title, "NoPrompt");
+    assert.equal(created.thread.runtime.agentType, "codex");
+    assert.ok(created.thread.runtime.workspaceDir.endsWith(path.join("channel-workspaces", "channel-noprompt")));
+    assert.equal(Object.hasOwn(created.contact, "workflowInput"), false);
+    assert.equal(Object.hasOwn(created.thread, "workflowInput"), false);
+    assert.equal(Object.hasOwn(created.contact.character, "persona"), false);
+    assertNoPromptConfigFields(created.contact);
+    assertNoPromptConfigFields(created.thread);
+
+    const state = service.store.read();
+    const storedContact = state.contacts.find((item) => item.id === created.contact.id);
+    const storedThread = state.threads.find((item) => item.id === created.thread.id);
+    const storedCharacter = state.characters.find((item) => item.id === storedContact.characterId);
+    assert.equal(storedContact.workflowId, "smallphone.default.contact");
+    assert.equal(storedThread.workflowVersion, 1);
+    assert.equal(storedThread.workflowInput.contactProjectDir, created.thread.runtime.workspaceDir);
+    assert.match(storedCharacter.persona, /NoPrompt/);
+    assert.equal(storedCharacter.permissionPolicy.agentMode, "suggest");
+    assert.equal(storedCharacter.permissionPolicy.template, "safe");
+
+    const reply = await service.sendMessage(created.thread.id, { text: "hello" });
+    assert.equal(reply.userMessage.content, "hello");
+    assert.equal(reply.assistantMessage.role, "assistant");
+
+    const bootstrap = await service.bootstrapHydrated();
+    assertNoPromptConfigFields(bootstrap.contacts.find((item) => item.id === created.contact.id));
+    assertNoPromptConfigFields(bootstrap.threads.find((item) => item.id === created.thread.id));
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -246,12 +334,8 @@ test("store normalization: backfills workflow fields for legacy companion record
       displayName: "Aki Legacy Updated",
     });
 
-    assert.equal(updated.contact.workflowId, "smallphone.default.contact");
-    assert.equal(updated.contact.workflowVersion, 1);
-    assert.ok(updated.contact.workflowInput);
-    assert.ok(updated.contact.workflowInput.contactProjectDir);
-    assert.ok(updated.contact.workflowInput.contactPersona);
-    assert.ok(updated.contact.workflowInput.userPersona);
+    assert.equal(updated.contact.displayName, "Aki Legacy Updated");
+    assert.equal(Object.hasOwn(updated.contact, "workflowInput"), false);
 
     const normalized = service.store.read();
     const normalizedContact = normalized.contacts.find((item) => item.id === DEFAULT_CONTACT_ID);

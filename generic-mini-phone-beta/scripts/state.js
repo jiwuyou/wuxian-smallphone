@@ -5,41 +5,10 @@ export const STORAGE_KEY = 'generic-mini-phone-state-v1';
 export const defaultState = {
   theme: 'mist',
   phoneShell: {
-    mode: 'lock',
+    mode: 'desktop',
   },
   desktop: {
     page: 0,
-    mode: 'icons',
-  },
-  world: {
-    version: 3,
-    editMode: false,
-    selectedTerrain: 'grass',
-    currentMapId: 'home',
-    player: { x: 6, y: 8, facing: 'down' },
-    maps: {
-      home: {
-        id: 'home',
-        name: '主世界',
-        layout: [
-          ['forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest'],
-          ['forest', 'forest', 'grass', 'wild', 'bush', 'grass', 'grass', 'grass', 'grass', 'stone', 'grass', 'bush', 'wild', 'grass', 'forest', 'forest'],
-          ['forest', 'grass', 'wild', 'forest', 'grass', 'grass', 'path', 'path', 'path', 'grass', 'grass', 'wild', 'forest', 'grass', 'grass', 'forest'],
-          ['forest', 'grass', 'bush', 'grass', 'wild', 'path', 'path', 'grass', 'path', 'path', 'grass', 'stone', 'grass', 'bush', 'wild', 'forest'],
-          ['forest', 'grass', 'grass', 'grass', 'path', 'path', 'grass', 'house', 'grass', 'path', 'path', 'grass', 'wild', 'grass', 'grass', 'forest'],
-          ['forest', 'bush', 'grass', 'stone', 'path', 'grass', 'grass', 'path', 'grass', 'wild', 'path', 'grass', 'forest', 'grass', 'bush', 'forest'],
-          ['forest', 'grass', 'grass', 'path', 'path', 'grass', 'bush', 'path', 'path', 'grass', 'path', 'grass', 'grass', 'grass', 'grass', 'forest'],
-          ['forest', 'grass', 'path', 'path', 'grass', 'grass', 'path', 'path', 'path', 'path', 'path', 'path', 'grass', 'stone', 'grass', 'forest'],
-          ['forest', 'grass', 'path', 'grass', 'bush', 'grass', 'path', 'grass', 'wild', 'bush', 'grass', 'path', 'path', 'grass', 'grass', 'forest'],
-          ['forest', 'stone', 'path', 'grass', 'grass', 'path', 'path', 'wild', 'forest', 'grass', 'grass', 'grass', 'path', 'grass', 'bush', 'forest'],
-          ['forest', 'grass', 'path', 'path', 'path', 'path', 'grass', 'grass', 'grass', 'grass', 'stone', 'wild', 'path', 'grass', 'grass', 'forest'],
-          ['forest', 'grass', 'wild', 'bush', 'grass', 'grass', 'grass', 'stone', 'grass', 'bush', 'grass', 'grass', 'path', 'path', 'grass', 'forest'],
-          ['forest', 'forest', 'grass', 'grass', 'wild', 'forest', 'grass', 'grass', 'grass', 'grass', 'wild', 'grass', 'grass', 'path', 'grass', 'forest'],
-          ['forest', 'forest', 'forest', 'grass', 'bush', 'grass', 'wild', 'forest', 'grass', 'stone', 'grass', 'bush', 'grass', 'grass', 'wild', 'forest'],
-          ['forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest', 'forest'],
-        ],
-      },
-    },
   },
   apiSettings: {
     apiName: 'OpenAI / 自定义',
@@ -48,7 +17,7 @@ export const defaultState = {
     modelName: 'gpt-4o-mini',
     temperature: 0.8,
     maxTokens: 512,
-    systemPrompt: '你是一个细腻、自然、重视日常氛围与连续记忆的陪伴式角色聊天模型。回复时保持口语化，不要暴露系统设定，不要把自己说成 AI。',
+    systemPrompt: '',
   },
   persona: {
     name: '晚风',
@@ -74,7 +43,7 @@ export const defaultState = {
         '描述：海边摄影师，语气温柔，擅长把日常说得很浪漫。',
         '性格：温柔、观察细致、善于把普通时刻说得有画面感。',
         '场景：常出现在海边、码头、夜市和散步路线里，喜欢提出轻松的邀约。',
-        '补充提示词：回复保持亲近感和自然停顿，不要说教，不要过度戏剧化。',
+        '沟通偏好：回复保持亲近感和自然停顿，不要说教，不要过度戏剧化。',
       ].join('\n'),
       messages: [
         { side: 'other', text: '晚上海边风不大，适合慢慢走。你今天心情怎么样？' },
@@ -96,7 +65,7 @@ export const defaultState = {
         '描述：冷淡系记录员，负责整理记忆和提醒你收束剧情。',
         '性格：克制、冷静、条理清晰，像一个负责收束长期记忆的观察者。',
         '场景：常在聊天里帮助整理偏好、关系和最近事件。',
-        '补充提示词：说话简洁明确，尽量结构化，但保持有人味。',
+        '沟通偏好：说话简洁明确，尽量结构化，但保持有人味。',
       ].join('\n'),
       messages: [
         { side: 'other', text: '我刚刚把你最近提到的偏好整理好了，要不要顺便给角色关系打标签？' },
@@ -118,7 +87,7 @@ export const defaultState = {
         '描述：群聊气氛担当小组，适合安排周末和多人剧情。',
         '性格：热闹、轻松、适合多人协作和周末出行策划。',
         '场景：三人群聊，讨论路线、拍照点、零食和行程安排。',
-        '补充提示词：群聊里保留人物区分感，让每个人说话各有特点。',
+        '沟通偏好：群聊里保留人物区分感，让每个人说话各有特点。',
       ].join('\n'),
       messages: [
         { side: 'other', text: '苏苏：我把路线图发群里了，咖啡店和旧书店都顺路。' },
@@ -215,6 +184,8 @@ function isPlainRecord(value) {
 const LEGACY_TOP_LEVEL_KEYS = new Set([
   // Older versions stored a global worldbook in localStorage. We no longer support it.
   'worldbook',
+  // The beta shell no longer ships the old spatial desktop.
+  'world',
 ]);
 
 const LEGACY_CHAT_KEYS = new Set([
@@ -303,26 +274,6 @@ export function loadState() {
       desktop: {
         ...defaults.desktop,
         ...(incoming.desktop || {}),
-      },
-      world: {
-        ...defaults.world,
-        ...(incoming.world || {}),
-        version: defaults.world.version,
-        player: {
-          ...defaults.world.player,
-          ...(incoming.world?.player || {}),
-        },
-        maps: {
-          ...defaults.world.maps,
-          ...(incoming.world?.maps || {}),
-          home: {
-            ...defaults.world.maps.home,
-            ...(incoming.world?.maps?.home || {}),
-            layout: incoming.world?.version === defaults.world.version && Array.isArray(incoming.world?.maps?.home?.layout)
-              ? incoming.world.maps.home.layout
-              : defaults.world.maps.home.layout,
-          },
-        },
       },
     };
   } catch {

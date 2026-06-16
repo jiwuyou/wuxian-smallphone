@@ -1,10 +1,10 @@
 {
   "schemaVersion": "smallphone.app/v1",
   "id": "diary",
-  "name": "SmallPhone Diary",
-  "shortName": "Diary",
+  "name": "SmallPhone Memo",
+  "shortName": "Memo",
   "version": "0.1.0",
-  "description": "A standalone source-first diary app for listing, writing, editing, and deleting journal entries.",
+  "description": "A standalone source-first memo app for listing, writing, editing, and deleting concise notes.",
   "runtime": {
     "type": "node-http",
     "node": ">=22",

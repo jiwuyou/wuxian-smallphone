@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SmallPhone Diary</title>
+    <title>SmallPhone Memo</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">SmallPhone</p>
-        <h1>Diary</h1>
+        <h1>Memo</h1>
       </div>
       <div class="topbar-actions">
         <span class="status-pill" id="status-pill">Loading</span>
@@ -21,24 +21,24 @@
     <main class="workspace">
       <section class="editor-pane" aria-labelledby="editor-heading">
         <div class="pane-heading">
-          <p class="eyebrow">Entry</p>
-          <h2 id="editor-heading">New entry</h2>
+          <p class="eyebrow">备忘录</p>
+          <h2 id="editor-heading">New memo</h2>
         </div>
 
         <form class="entry-form" id="entry-form">
           <label>
             <span>Title</span>
-            <input id="entry-title" name="title" type="text" maxlength="160" required autocomplete="off" placeholder="今天的二维地图">
+            <input id="entry-title" name="title" type="text" maxlength="160" required autocomplete="off" placeholder="Quick title">
           </label>
 
           <label>
             <span>Text</span>
-            <textarea id="entry-text" name="text" rows="12" maxlength="20000" required placeholder="写下今天的想法、地图布局或应用入口设计。"></textarea>
+            <textarea id="entry-text" name="text" rows="12" maxlength="20000" required placeholder="Write a concise note."></textarea>
           </label>
 
           <div class="form-actions">
             <button class="ghost-button" id="cancel-edit-button" type="button" hidden>Cancel</button>
-            <button class="primary-button" id="save-button" type="submit">Save entry</button>
+            <button class="primary-button" id="save-button" type="submit">Save note</button>
           </div>
         </form>
       </section>
@@ -46,11 +46,16 @@
       <section class="list-pane" aria-labelledby="entries-heading">
         <div class="list-heading">
           <div>
-            <p class="eyebrow">Archive</p>
-            <h2 id="entries-heading">Entries</h2>
+            <p class="eyebrow">Notes</p>
+            <h2 id="entries-heading">Memo list</h2>
           </div>
-          <span class="count-pill" id="entry-count">0 entries</span>
+          <span class="count-pill" id="entry-count">0 notes</span>
         </div>
+
+        <label class="search-field">
+          <span>Search</span>
+          <input id="entry-search" type="search" autocomplete="off" placeholder="Search notes">
+        </label>
 
         <div class="entry-list" id="entry-list" aria-live="polite"></div>
       </section>

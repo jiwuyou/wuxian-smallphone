@@ -137,7 +137,8 @@ button:disabled {
 }
 
 .entry-form input,
-.entry-form textarea {
+.entry-form textarea,
+.search-field input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -155,10 +156,20 @@ button:disabled {
 }
 
 .entry-form input:focus,
-.entry-form textarea:focus {
+.entry-form textarea:focus,
+.search-field input:focus {
   border-color: rgba(47, 122, 88, 0.7);
   background: #ffffff;
   box-shadow: 0 0 0 4px rgba(47, 122, 88, 0.12);
+}
+
+.search-field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .form-actions {

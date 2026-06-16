@@ -7,14 +7,6 @@ export const manifest = {
   orbClass: 'orb-calendar',
   views: {
     normal: 'calendar',
-    space2d: 'calendar-courtyard',
-    space3d: 'calendar-observatory',
-  },
-  worldObject: {
-    type: 'notice-board',
-    label: '日历庭院',
-    defaultPlacement: { mapId: 'home', x: 4, y: 7 },
-    action: { type: 'openApp', appId: 'calendar', view: 'normal' },
   },
 };
 
@@ -42,65 +34,6 @@ export const template = `
       <button type="submit" class="soft-button small-button">添加</button>
     </form>
     <div class="stack-grid" id="calendar-list"></div>
-  </section>
-`;
-
-export const spaceTemplates = `
-  <section class="view app-space-view product-space calendar-space-2d" data-view="calendar-courtyard" data-space-app="calendar">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Calendar Courtyard</p>
-        <h2>时间庭院</h2>
-      </div>
-      <button class="secondary-button" data-app-normal="calendar" type="button">日程列表</button>
-    </div>
-    <div class="calendar-courtyard-board">
-      <div class="sun-dial">
-        <span class="dial-hand"></span>
-        <strong>26</strong>
-        <small>Apr</small>
-      </div>
-      <div class="calendar-pathway">
-        <span>10:30</span>
-        <strong>地图需求</strong>
-        <span>19:00</span>
-        <strong>海街散步</strong>
-        <span>09:20</span>
-        <strong>检查 beta</strong>
-      </div>
-      <div class="calendar-grove">
-        <span>周一</span><span>周二</span><span>周三</span><span>周四</span>
-      </div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-space3d="calendar" type="button">进入观测台</button>
-    </div>
-  </section>
-
-  <section class="view app-space-view product-space calendar-space-3d" data-view="calendar-observatory" data-space-app="calendar">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Calendar Observatory</p>
-        <h2>时间观测台</h2>
-      </div>
-      <button class="secondary-button" data-app-space2d="calendar" type="button">回庭院</button>
-    </div>
-    <div class="calendar-observatory-scene">
-      <div class="observatory-ring ring-one"></div>
-      <div class="observatory-ring ring-two"></div>
-      <div class="observatory-core">
-        <strong>今天</strong>
-        <span>3 个节点</span>
-      </div>
-      <div class="time-marker marker-a">10:30</div>
-      <div class="time-marker marker-b">19:00</div>
-      <div class="time-marker marker-c">09:20</div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-normal="calendar" type="button">打开日历</button>
-    </div>
   </section>
 `;
 

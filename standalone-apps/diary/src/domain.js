@@ -14,7 +14,7 @@ class DiaryValidationError extends Error {
 
 class DiaryNotFoundError extends Error {
   constructor(id) {
-    super(`Diary entry not found: ${id}`);
+    super(`Memo note not found: ${id}`);
     this.name = 'DiaryNotFoundError';
     this.statusCode = 404;
     this.code = 'DIARY_ENTRY_NOT_FOUND';
@@ -24,7 +24,7 @@ class DiaryNotFoundError extends Error {
 function assertEntryId(value) {
   const id = String(value || '').trim();
   if (!id) {
-    throw new DiaryValidationError('Diary entry id is required.');
+    throw new DiaryValidationError('Memo note id is required.');
   }
   return id;
 }
@@ -32,10 +32,10 @@ function assertEntryId(value) {
 function normalizeTitle(value) {
   const title = String(value ?? '').trim();
   if (!title) {
-    throw new DiaryValidationError('Diary entry title is required.');
+    throw new DiaryValidationError('Memo note title is required.');
   }
   if (title.length > maxTitleLength) {
-    throw new DiaryValidationError(`Diary entry title must be ${maxTitleLength} characters or fewer.`);
+    throw new DiaryValidationError(`Memo note title must be ${maxTitleLength} characters or fewer.`);
   }
   return title;
 }
@@ -43,10 +43,10 @@ function normalizeTitle(value) {
 function normalizeText(value) {
   const text = String(value ?? '').trim();
   if (!text) {
-    throw new DiaryValidationError('Diary entry text is required.');
+    throw new DiaryValidationError('Memo note text is required.');
   }
   if (text.length > maxTextLength) {
-    throw new DiaryValidationError(`Diary entry text must be ${maxTextLength} characters or fewer.`);
+    throw new DiaryValidationError(`Memo note text must be ${maxTextLength} characters or fewer.`);
   }
   return text;
 }
@@ -106,13 +106,13 @@ function listEntries(state) {
 
 function createEntry(state, input, context) {
   if (!state || !Array.isArray(state.entries)) {
-    throw new DiaryValidationError('Diary state must contain an entries array.');
+    throw new DiaryValidationError('Memo state must contain an entries array.');
   }
 
   const now = normalizeDate(context?.now, new Date().toISOString());
   const id = assertEntryId(context?.id);
   if (state.entries.some((entry) => entry.id === id)) {
-    throw new DiaryValidationError(`Diary entry id already exists: ${id}`);
+    throw new DiaryValidationError(`Memo note id already exists: ${id}`);
   }
 
   const entry = {
@@ -129,7 +129,7 @@ function createEntry(state, input, context) {
 
 function updateEntry(state, idValue, input, context) {
   if (!state || !Array.isArray(state.entries)) {
-    throw new DiaryValidationError('Diary state must contain an entries array.');
+    throw new DiaryValidationError('Memo state must contain an entries array.');
   }
 
   const id = assertEntryId(idValue);
@@ -151,7 +151,7 @@ function updateEntry(state, idValue, input, context) {
 
 function deleteEntry(state, idValue) {
   if (!state || !Array.isArray(state.entries)) {
-    throw new DiaryValidationError('Diary state must contain an entries array.');
+    throw new DiaryValidationError('Memo state must contain an entries array.');
   }
 
   const id = assertEntryId(idValue);

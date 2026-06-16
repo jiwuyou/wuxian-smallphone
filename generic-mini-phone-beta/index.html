@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>手机桌面</title>
-  <link rel="stylesheet" href="style.css?v=24">
+  <link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
   <div class="app-shell">
@@ -32,37 +32,11 @@
               <p class="eyebrow">桌面</p>
               <h2 id="desktop-greeting">晚上好，晚风</h2>
               <p class="desktop-weather" id="desktop-weather">晴 23°C · 海边风轻</p>
-              <p class="desktop-guidance">从桌面选择应用；世界模式是空间导航，图标模式是快速启动。</p>
+              <p class="desktop-guidance">从桌面选择应用，或从底部进入消息和联系人。</p>
             </div>
             <div class="desktop-head-actions">
-              <div class="desktop-mode-switch" aria-label="桌面模式">
-                <button class="desktop-mode-button" data-desktop-mode="world" type="button">世界</button>
-                <button class="desktop-mode-button" data-desktop-mode="icons" type="button">图标</button>
-              </div>
               <button class="ghost-pill ghost-pill-subtle" id="relock-button">锁屏</button>
             </div>
-          </div>
-
-          <div class="world-board" id="world-board">
-            <div class="world-toolbar">
-              <button class="world-edit-toggle" id="world-edit-toggle" type="button">编辑</button>
-              <div class="world-terrain-palette" id="world-terrain-palette" aria-label="地块类型"></div>
-            </div>
-            <div class="world-map-shell">
-              <canvas class="world-map" id="world-map" width="640" height="640"></canvas>
-            </div>
-            <div class="world-controls" aria-label="玩家移动">
-              <span></span>
-              <button class="world-move-button" data-world-move="up" type="button">↑</button>
-              <span></span>
-              <button class="world-move-button" data-world-move="left" type="button">←</button>
-              <button class="world-move-button" data-world-action="enter" type="button">进入</button>
-              <button class="world-move-button" data-world-move="right" type="button">→</button>
-              <span></span>
-              <button class="world-move-button" data-world-move="down" type="button">↓</button>
-              <span></span>
-            </div>
-            <div class="world-inspector" id="world-inspector">未开垦地块 · 点编辑后可填每一格</div>
           </div>
 
           <div class="desktop-pages-viewport" id="desktop-pages-viewport">
@@ -213,7 +187,7 @@
           <div class="chat-thread" id="chat-thread"></div>
 
           <div class="attachment-strip" id="attachment-strip"></div>
-          <div class="chat-status" id="chat-status">当前可使用本地演示回复；连接模型服务后可真实聊天。</div>
+          <div class="chat-status" id="chat-status">可以直接发送消息；离线时会使用本地演示回复。</div>
 
           <form class="input-bar" id="chat-form">
             <input id="chat-attachment-input" type="file" multiple hidden>
@@ -280,14 +254,6 @@
                     <strong>角色与联系人</strong>
                     <span>编辑头像、简介、语气和主动联系</span>
                   </button>
-                  <button type="button" class="settings-shortcut" data-panel-target="permissions">
-                    <strong>权限</strong>
-                    <span>设置联系人能做什么</span>
-                  </button>
-	                  <button type="button" class="settings-shortcut" data-panel-target="imports">
-	                    <strong>导入</strong>
-	                    <span>导入角色卡和聊天记录</span>
-	                  </button>
 	                  <button type="button" class="settings-shortcut" data-panel-target="persona">
 	                    <strong>我的资料</strong>
 	                    <span>调整昵称、签名和人设</span>
@@ -305,7 +271,7 @@
                   <summary>开发者选项</summary>
                   <div class="details-panel-body">
                     <label>
-                      <span>模型服务名称</span>
+                      <span>服务名称</span>
                       <input type="text" id="api-name" placeholder="例如：OpenAI / OpenRouter / 自定义">
                     </label>
                     <label>
@@ -317,8 +283,8 @@
                       <input type="password" id="api-key" placeholder="保存在本机浏览器">
                     </label>
                     <label>
-                      <span>模型名称</span>
-                      <input type="text" id="model-name" placeholder="例如：gpt-4o-mini">
+                      <span>引擎名称</span>
+                      <input type="text" id="model-name" placeholder="例如：默认引擎">
                     </label>
                     <label>
                       <span>回复随机度</span>
@@ -328,22 +294,10 @@
                       <span>回复长度上限</span>
                       <input type="number" id="max-tokens" min="64" max="8192" step="1" placeholder="512">
                     </label>
-                    <label>
-                      <span>系统提示词</span>
-                      <textarea id="system-prompt" rows="5" placeholder="高级用户可在这里调整全局行为规则。"></textarea>
-                    </label>
                   </div>
                 </details>
                 <button type="submit" class="soft-button small-button">保存设置</button>
               </form>
-              <details class="details-panel">
-                <summary>上下文预览</summary>
-                <article class="info-card">
-                  <p class="eyebrow">高级预览</p>
-                  <strong>当前聊天上下文</strong>
-                  <pre class="prompt-preview" id="prompt-preview"></pre>
-                </article>
-              </details>
             </section>
 
             <section class="panel-view" data-panel="app-manager">
@@ -411,81 +365,6 @@
               </details>
             </section>
 
-            <section class="panel-view" data-panel="permissions">
-              <div class="permission-capability-grid" id="permission-capabilities" data-permission-capabilities>
-                <article class="permission-capability" data-permission-capability>
-                  <strong>读取文件</strong>
-                  <span>允许联系人理解项目内容</span>
-                </article>
-                <article class="permission-capability" data-permission-capability>
-                  <strong>修改文件</strong>
-                  <span>允许联系人直接帮你编辑</span>
-                </article>
-                <article class="permission-capability" data-permission-capability>
-                  <strong>运行命令</strong>
-                  <span>用于测试、构建和自动化</span>
-                </article>
-                <article class="permission-capability" data-permission-capability>
-                  <strong>自动确认</strong>
-                  <span>高风险能力，谨慎开启</span>
-                </article>
-              </div>
-              <div class="permission-panel-head">
-                <label class="permission-contact-field">
-                  <span>联系人</span>
-                  <select id="permission-contact-select"></select>
-                </label>
-                <span class="runtime-pill" id="permission-panel-source">local</span>
-              </div>
-              <p class="permission-panel-summary" id="permission-panel-summary">当前联系人权限。</p>
-              <details class="details-panel">
-                <summary>权限模式</summary>
-                <div class="details-panel-body">
-                  <div class="permission-template-grid" id="permission-template-grid"></div>
-                </div>
-              </details>
-              <details class="details-panel">
-                <summary>技术明细</summary>
-                <div class="details-panel-body">
-                  <div class="permission-decision-stack" id="permission-decision-stack"></div>
-                </div>
-              </details>
-            </section>
-
-	            <section class="panel-view" data-panel="imports">
-	              <form class="settings-form" id="imports-form">
-	                <label>
-	                  <span>导入类型</span>
-	                  <select id="import-type">
-	                    <option value="auto">自动识别</option>
-	                    <option value="character">角色卡</option>
-	                    <option value="chat">聊天记录</option>
-	                  </select>
-	                </label>
-	                <label>
-	                  <span>导入模式</span>
-                  <select id="import-mode">
-                    <option value="replace">覆盖现有内容</option>
-                    <option value="append">追加到现有内容</option>
-                  </select>
-                </label>
-                <label>
-                  <span>选择 JSON 文件</span>
-                  <input type="file" id="import-file" accept="application/json,.json,text/plain">
-                </label>
-	                <label>
-	                  <span>粘贴 JSON</span>
-	                  <textarea id="import-json" rows="10" placeholder='支持粘贴角色卡、聊天记录，或包含 character / chat 的对象'></textarea>
-	                </label>
-	                <button type="submit" class="soft-button small-button">导入到当前项目</button>
-	              </form>
-	              <article class="info-card import-note-card">
-	                <p class="eyebrow">支持范围</p>
-	                <strong>角色卡 / 聊天记录</strong>
-	                <p id="import-result">可粘贴 JSON 或选择本地 JSON 文件。聊天记录支持覆盖或追加。</p>
-	              </article>
-	            </section>
-
             <section class="panel-view" data-panel="persona">
               <form class="settings-form" id="persona-form">
                 <label>
@@ -552,10 +431,6 @@
 	                <section class="character-form-section">
 	                  <p class="eyebrow">行为与人设</p>
 	                  <label>
-	                    <span>角色设定</span>
-	                    <textarea id="character-card-text" rows="6" placeholder="写下角色卡正文：人设、语气、关系、世界观等"></textarea>
-	                  </label>
-	                  <label>
 	                    <span>主动联系</span>
 	                    <div class="toggle-row">
 	                      <input type="checkbox" id="character-proactive-toggle">
@@ -567,6 +442,10 @@
                 <details class="details-panel">
                   <summary>高级运行设置</summary>
                   <div class="details-panel-body">
+                    <label>
+                      <span>高级上下文</span>
+                      <textarea id="character-card-text" rows="6" placeholder="写下这个联系人的补充背景、语气和关系线索"></textarea>
+                    </label>
                     <label>
                       <span>上下文类型</span>
                       <select id="character-role-level">
@@ -591,7 +470,7 @@
                         <span class="runtime-settings-status" id="character-runtime-status">未加载</span>
                       </div>
                       <label>
-                        <span>权限模式</span>
+                        <span>操作模式</span>
                         <select id="character-agent-mode">
                           <option value="suggest">建议 · 每次工具调用确认</option>
                           <option value="auto-edit">自动编辑 · 文件编辑自动通过</option>
@@ -690,6 +569,6 @@
     </div>
   </div>
 
-  <script type="module" src="scripts/main.js?v=29"></script>
+  <script type="module" src="scripts/main.js?v=30"></script>
 </body>
 </html>

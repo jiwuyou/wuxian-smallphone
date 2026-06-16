@@ -7,14 +7,6 @@ export const manifest = {
   orbClass: 'orb-vocabulary',
   views: {
     normal: 'vocabulary',
-    space2d: 'word-garden',
-    space3d: 'word-conservatory',
-  },
-  worldObject: {
-    type: 'word-gate',
-    label: '单词花园',
-    defaultPlacement: { mapId: 'home', x: 13, y: 11 },
-    action: { type: 'openApp', appId: 'vocabulary', view: 'normal' },
   },
 };
 
@@ -43,50 +35,6 @@ export const template = `
       <button type="submit" class="soft-button small-button">加入词库</button>
     </form>
     <div class="stack-grid" id="vocabulary-list"></div>
-  </section>
-`;
-
-export const spaceTemplates = `
-  <section class="view app-space-view product-space vocab-space-2d" data-view="word-garden" data-space-app="vocabulary">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Word Garden</p>
-        <h2>单词花园</h2>
-      </div>
-      <button class="secondary-button" data-app-normal="vocabulary" type="button">词卡</button>
-    </div>
-    <div class="word-garden-board">
-      <div class="word-plot plot-learned"><strong>archive</strong><span>已掌握</span></div>
-      <div class="word-plot"><strong>cultivate</strong><span>开垦；培养</span></div>
-      <div class="word-plot"><strong>portal</strong><span>入口</span></div>
-      <div class="word-plot"><strong>terrain</strong><span>地形</span></div>
-      <div class="garden-path"></div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-space3d="vocabulary" type="button">进入温室</button>
-    </div>
-  </section>
-
-  <section class="view app-space-view product-space vocab-space-3d" data-view="word-conservatory" data-space-app="vocabulary">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Word Conservatory</p>
-        <h2>单词温室</h2>
-      </div>
-      <button class="secondary-button" data-app-space2d="vocabulary" type="button">回花园</button>
-    </div>
-    <div class="word-conservatory-scene">
-      <div class="greenhouse-arch"></div>
-      <div class="word-orb orb-a">portal</div>
-      <div class="word-orb orb-b">terrain</div>
-      <div class="word-orb orb-c">archive</div>
-      <div class="study-podium"><strong>1 / 4</strong><span>已掌握</span></div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-normal="vocabulary" type="button">打开词卡</button>
-    </div>
   </section>
 `;
 

@@ -7,14 +7,6 @@ export const manifest = {
   orbClass: 'orb-files',
   views: {
     normal: 'files',
-    space2d: 'file-warehouse',
-    space3d: 'file-stacks',
-  },
-  worldObject: {
-    type: 'archive-crate',
-    label: '文件仓库',
-    defaultPlacement: { mapId: 'home', x: 11, y: 7 },
-    action: { type: 'openApp', appId: 'files', view: 'normal' },
   },
 };
 
@@ -41,53 +33,6 @@ export const template = `
       <button type="submit" class="soft-button small-button">新建</button>
     </form>
     <div class="file-grid" id="files-list"></div>
-  </section>
-`;
-
-export const spaceTemplates = `
-  <section class="view app-space-view product-space files-space-2d" data-view="file-warehouse" data-space-app="files">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">File Warehouse</p>
-        <h2>档案仓库</h2>
-      </div>
-      <button class="secondary-button" data-app-normal="files" type="button">文件列表</button>
-    </div>
-    <div class="file-warehouse-board">
-      <div class="warehouse-aisle">
-        <div class="archive-rack rack-left"><span>地图</span><span>角色</span><span>截图</span></div>
-        <div class="archive-cart"><strong>4</strong><span>最近项目</span></div>
-        <div class="archive-rack rack-right"><span>JSON</span><span>备份</span><span>素材</span></div>
-      </div>
-      <div class="warehouse-index">
-        <span>地图草稿</span><span>角色资料</span><span>角色设定备份</span>
-      </div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-space3d="files" type="button">进入立体档案库</button>
-    </div>
-  </section>
-
-  <section class="view app-space-view product-space files-space-3d" data-view="file-stacks" data-space-app="files">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">File Stacks</p>
-        <h2>立体档案库</h2>
-      </div>
-      <button class="secondary-button" data-app-space2d="files" type="button">回仓库</button>
-    </div>
-    <div class="file-stacks-scene">
-      <div class="stack-lane"></div>
-      <div class="file-column column-a"></div>
-      <div class="file-column column-b"></div>
-      <div class="file-column column-c"></div>
-      <div class="archive-terminal"><strong>31</strong><span>待整理截图</span></div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-normal="files" type="button">打开文件夹</button>
-    </div>
   </section>
 `;
 

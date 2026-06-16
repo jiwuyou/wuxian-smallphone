@@ -54,6 +54,10 @@ const ATTACHMENT_MAX_BYTES = Number.parseInt(
   process.env.SMALLPHONE_ATTACHMENT_MAX_BYTES || "10485760",
   10,
 );
+const DEFAULT_CONTACT_WORKFLOW_ID = "smallphone.default.contact";
+const DEFAULT_CONTACT_WORKFLOW_VERSION = 1;
+const DEFAULT_CONTACT_WORKFLOW_USER_PERSONA =
+  "The user prefers a SmallPhone-style AI product with persistent contacts, memory, and practical continuity.";
 const AVATAR_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const WORKSPACE_ATTACHMENT_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf", ".txt", ".md", ".csv", ".json"]);
 const WORKSPACE_ATTACHMENT_MIME_TYPES = {
@@ -512,6 +516,38 @@ class SmallPhoneService {
     const state = this.store.read();
     this.syncManagedArtifacts(state);
     return state.contacts.map((contact) => {
+      const rawCharacter = state.characters.find((item) => item.id === contact.characterId) || null;
+      const character = projectPublicCharacter(state, rawCharacter);
+      const thread = state.threads.find((item) => item.contactId === contact.id) || null;
+      const routedThread = thread ? attachThreadRouting(thread, this.runtimeInfo.id, this.paths) : null;
+      const timeSettings = resolveThreadTimeSettings({ contact, thread });
+      const publicContact = projectPublicContact(contact);
+      return {
+        ...publicContact,
+        timeSettings,
+        character,
+        thread: routedThread
+          ? projectPublicThread(
+              {
+                ...routedThread,
+                timeSettings,
+              },
+              contact,
+              rawCharacter,
+            )
+          : null,
+        relationshipState:
+          state.relationshipStates.find(
+            (item) => item.contactId === contact.id && (!thread || item.threadId === thread.id),
+          ) || null,
+      };
+    });
+  }
+
+  listContactsInternal() {
+    const state = this.store.read();
+    this.syncManagedArtifacts(state);
+    return state.contacts.map((contact) => {
       const character = hydrateCharacter(state, state.characters.find((item) => item.id === contact.characterId) || null);
       const thread = state.threads.find((item) => item.contactId === contact.id) || null;
       const routedThread = thread ? attachThreadRouting(thread, this.runtimeInfo.id, this.paths) : null;
@@ -552,15 +588,15 @@ class SmallPhoneService {
     this.syncManagedArtifacts(state);
     return state.threads.map((thread) => {
       const contact = state.contacts.find((item) => item.id === thread.contactId) || null;
-      const character = contact ? hydrateCharacter(state, state.characters.find((item) => item.id === contact.characterId) || null) : null;
+      const rawCharacter = contact ? state.characters.find((item) => item.id === contact.characterId) || null : null;
+      const character = projectPublicCharacter(state, rawCharacter);
       const lastMessage = state.messages.filter((item) => item.threadId === thread.id).at(-1) || null;
       const routedThread = attachThreadRouting(thread, this.runtimeInfo.id, this.paths);
       const timeSettings = resolveThreadTimeSettings({ contact, thread });
       return {
-        ...routedThread,
+        ...projectPublicThread(routedThread, contact, rawCharacter),
         timeSettings,
-        summary: resolveThreadProfileSummary(routedThread, contact, character),
-        contact: contact ? { ...contact, timeSettings, character } : null,
+        contact: contact ? { ...projectPublicContact(contact), timeSettings, character } : null,
         lastMessage,
         relationshipState:
           state.relationshipStates.find(
@@ -1022,12 +1058,22 @@ class SmallPhoneService {
   }
 
   async createCompanion(input) {
-    const payload = normalizeCompanionInput(input);
+    const source = input && typeof input === "object" ? input : {};
+    const requestedName = String(source.name || "").trim();
+    if (!requestedName) {
+      throw badRequest("Companion requires name.");
+    }
+    const existingState = this.store.read();
+    const uniqueSlug = createUniqueCompanionSlug(existingState, source.slug || requestedName);
+    const payload = normalizeCompanionInput(input, {
+      paths: this.paths,
+      slug: uniqueSlug,
+    });
     this.assertAvatarAttachmentId(payload.avatarAttachmentId);
     const createdAt = nowIso();
     let created = null;
     const nextState = this.store.update((state) => {
-      const slug = createUniqueCompanionSlug(state, payload.slug || payload.name);
+      const slug = payload.slug || createUniqueCompanionSlug(state, payload.name);
       const ids = {
         characterId: `char-${slug}`,
         contactId: `contact-${slug}`,
@@ -1204,7 +1250,6 @@ class SmallPhoneService {
     const hydratedContacts = this.listContacts();
     const hydratedThreads = this.listThreads();
     return {
-      ...created,
       contact: hydratedContacts.find((item) => item.id === created.contact.id) || created.contact,
       thread: hydratedThreads.find((item) => item.id === created.thread.id) || created.thread,
       openclaw: this.exportOpenClawAgentRegistry(),
@@ -3452,9 +3497,15 @@ function assertNoLegacyCompanionFields(input) {
   }
 }
 
-function normalizeWorkflowReference(input) {
-  const workflowId = String(input?.workflowId || "").trim();
-  const workflowVersion = Number.isFinite(Number(input?.workflowVersion)) ? Number(input.workflowVersion) : NaN;
+function normalizeWorkflowReference(input, options = {}) {
+  const hasWorkflowId = hasOwn(input || {}, "workflowId");
+  const hasWorkflowVersion = hasOwn(input || {}, "workflowVersion");
+  let workflowId = String(input?.workflowId || "").trim();
+  let workflowVersion = Number.isFinite(Number(input?.workflowVersion)) ? Number(input.workflowVersion) : NaN;
+  if (options.allowDefaults && !hasWorkflowId && !hasWorkflowVersion) {
+    workflowId = DEFAULT_CONTACT_WORKFLOW_ID;
+    workflowVersion = DEFAULT_CONTACT_WORKFLOW_VERSION;
+  }
   if (!workflowId || !Number.isFinite(workflowVersion)) {
     throw badRequest("Companion requires workflowId and workflowVersion.");
   }
@@ -3465,7 +3516,7 @@ function normalizeWorkflowReference(input) {
   return { workflowId, workflowVersion, workflow: def };
 }
 
-function normalizeWorkflowInput(input) {
+function normalizeWorkflowInput(input, options = {}) {
   const hasWorkflowInput = hasOwn(input, "workflowInput");
   const hasWorkflowInputs = hasOwn(input, "workflowInputs");
   if (hasWorkflowInput && hasWorkflowInputs) {
@@ -3473,16 +3524,47 @@ function normalizeWorkflowInput(input) {
   }
   const raw = hasWorkflowInput ? input.workflowInput : hasWorkflowInputs ? input.workflowInputs : null;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    if (options.allowDefaults) {
+      return normalizeWorkflowInputFromParts({}, options.defaults);
+    }
     throw badRequest("Companion requires workflowInput (object).");
   }
-  const contactProjectDir = String(raw.contactProjectDir || "").trim();
-  const contactPersona = String(raw.contactPersona || "").trim();
-  const userPersona = String(raw.userPersona || "").trim();
+  return normalizeWorkflowInputFromParts(raw, options.defaults, { allowDefaults: options.allowDefaults });
+}
+
+function normalizeWorkflowInputFromParts(raw, defaults = {}, options = {}) {
+  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const fallback = defaults && typeof defaults === "object" && !Array.isArray(defaults) ? defaults : {};
+  const contactProjectDir = String(source.contactProjectDir || fallback.contactProjectDir || "").trim();
+  const contactPersona = String(source.contactPersona || fallback.contactPersona || "").trim();
+  const userPersona = String(source.userPersona || fallback.userPersona || "").trim();
   if (!contactProjectDir || !contactPersona || !userPersona) {
+    if (options.allowDefaults) {
+      throw badRequest("Companion workflow defaults could not be derived.");
+    }
     throw badRequest("workflowInput requires contactProjectDir, contactPersona, and userPersona.");
   }
   return {
-    ...raw,
+    ...fallback,
+    ...source,
+    contactProjectDir,
+    contactPersona,
+    userPersona,
+  };
+}
+
+function normalizeStoredWorkflowInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return null;
+  }
+  const contactProjectDir = String(input.contactProjectDir || "").trim();
+  const contactPersona = String(input.contactPersona || "").trim();
+  const userPersona = String(input.userPersona || "").trim();
+  if (!contactProjectDir || !contactPersona || !userPersona) {
+    return null;
+  }
+  return {
+    ...input,
     contactProjectDir,
     contactPersona,
     userPersona,
@@ -3503,6 +3585,49 @@ function deriveCompanionWorldbookContent({ workflowId, workflowVersion, displayN
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function readCompanionAgentType(input) {
+  if (typeof input?.agent === "string") {
+    return input.agent;
+  }
+  if (input?.agent && typeof input.agent === "object") {
+    return input.agent.agentType || input.agent.type || input.agent.kind;
+  }
+  return input?.agentType || input?.runtimeAgentType;
+}
+
+function readCompanionAgentMode(input) {
+  if (input?.agent && typeof input.agent === "object") {
+    return input.agent.agentMode || input.agent.mode;
+  }
+  return input?.agentMode || input?.mode;
+}
+
+function deriveDefaultCompanionWorkflowInput(params = {}) {
+  const input = params.input && typeof params.input === "object" ? params.input : {};
+  const displayName = String(params.displayName || params.name || "Contact").trim() || "Contact";
+  const slug = String(params.slug || slugify(displayName) || "companion").trim();
+  const roleLevel = normalizeRoleLevel(params.roleLevel);
+  const channelId = String(params.channelId || `channel-${slug}`).trim();
+  const contactProjectDir =
+    String(input.workspaceDir || input.workDir || "").trim() ||
+    defaultWorkspaceDirForRole(roleLevel, channelId, slug, params.paths || DEFAULT_PATHS);
+  return {
+    contactProjectDir,
+    contactPersona: deriveDefaultContactPersona(displayName, params.agentType),
+    userPersona: DEFAULT_CONTACT_WORKFLOW_USER_PERSONA,
+  };
+}
+
+function deriveDefaultContactPersona(displayName, agentType) {
+  const name = String(displayName || "this contact").trim() || "this contact";
+  const type = normalizeAgentType(agentType) || "codex";
+  const toolLine =
+    type === "claudecode"
+      ? "You can help with code and workspace tasks when asked."
+      : "You can help with practical tasks when asked.";
+  return `You are ${name}, a private SmallPhone contact. Keep replies concise, concrete, and useful. ${toolLine}`;
 }
 
 function buildRuntimeMessages(messages, runtimeUserText) {
@@ -3903,6 +4028,90 @@ function hydrateCharacter(state, character) {
   };
 }
 
+function projectPublicCharacter(state, character) {
+  const hydrated = hydrateCharacter(state, character);
+  if (!hydrated) return null;
+  const {
+    persona,
+    workflowId,
+    workflowVersion,
+    workflowInput,
+    workflowInputs,
+    worldbookScopeIds,
+    worldbookEntryId,
+    worldbookContent,
+    worldbookPriority,
+    systemPrompt,
+    system_prompt,
+    roleCard,
+    role_card,
+    ...publicCharacter
+  } = hydrated;
+  return stripPublicPromptMetadataKeys(publicCharacter);
+}
+
+function projectPublicContact(contact) {
+  if (!contact || typeof contact !== "object") {
+    return null;
+  }
+  const {
+    workflowId,
+    workflowVersion,
+    workflowInput,
+    workflowInputs,
+    worldbookScopeIds,
+    worldbookEntryId,
+    worldbookContent,
+    worldbookPriority,
+    systemPrompt,
+    system_prompt,
+    roleCard,
+    role_card,
+    ...publicContact
+  } = contact;
+  return stripPublicPromptMetadataKeys(publicContact);
+}
+
+function projectPublicThread(thread, contact, character) {
+  if (!thread || typeof thread !== "object") {
+    return null;
+  }
+  const {
+    workflowId,
+    workflowVersion,
+    workflowInput,
+    workflowInputs,
+    worldbookScopeIds,
+    worldbookEntryId,
+    worldbookContent,
+    worldbookPriority,
+    promptBoard,
+    systemPrompt,
+    system_prompt,
+    roleCard,
+    role_card,
+    ...publicThread
+  } = thread;
+  return {
+    ...stripPublicPromptMetadataKeys(publicThread),
+    summary: resolvePublicThreadSummary(thread, contact, character),
+  };
+}
+
+function stripPublicPromptMetadataKeys(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    return record;
+  }
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => {
+      const normalized = normalizePublicKeyHint(key);
+      if (normalized === "workflowid" || normalized === "workflowversion") return false;
+      if (normalized.startsWith("worldbook")) return false;
+      return true;
+    }),
+  );
+}
+
 function normalizeArtifactSyncOptions(input, paths = DEFAULT_PATHS) {
   const configPaths = Array.isArray(input?.configPaths)
     ? input.configPaths.map((item) => String(item).trim()).filter(Boolean)
@@ -4093,12 +4302,29 @@ function resolveThreadProfileSummary(thread, contact, character) {
   return `${displayName} 的独立一对一窗口。`;
 }
 
+function resolvePublicThreadSummary(thread, contact, character) {
+  const current = String(thread?.summary || "").trim();
+  if (current && !looksLikeConversationSummary(current) && !looksLikeRoleCardText(current)) {
+    return current;
+  }
+  const displayName = String(contact?.displayName || character?.name || thread?.title || "联系人").trim();
+  return `${displayName} 的独立一对一窗口。`;
+}
+
 function looksLikeConversationSummary(value) {
   const text = String(value || "").trim();
   if (!text) {
     return false;
   }
   return /(?:^|\s|\|)(user|assistant|system):/i.test(text) || isQueuedWebclientPlaceholder(text);
+}
+
+function looksLikeRoleCardText(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return false;
+  }
+  return /^(?:you are|persona:|character persona:|system prompt:|role card:|role-card:)/i.test(text);
 }
 
 function firstMeaningfulLine(value) {
@@ -4296,21 +4522,37 @@ function normalizeRelationshipStateInput(input) {
   };
 }
 
-function normalizeCompanionInput(input) {
+function normalizeCompanionInput(input, options = {}) {
   const source = input && typeof input === "object" ? input : {};
   assertNoLegacyCompanionFields(source);
-  const { workflowId, workflowVersion } = normalizeWorkflowReference(source);
-  const workflowInput = normalizeWorkflowInput(source);
   const name = String(input?.name || "").trim();
   if (!name) {
     throw badRequest("Companion requires name.");
   }
   const displayName = String(input?.displayName || "").trim() || name;
+  const slug = String(options.slug || input?.slug || "").trim() || slugify(name) || "companion";
+  const roleLevel = normalizeRoleLevel(input?.roleLevel);
+  const channelId = String(input?.channelId || "").trim() || `channel-${slug}`;
+  const agentType = normalizeAgentType(readCompanionAgentType(input)) || "codex";
+  const { workflowId, workflowVersion } = normalizeWorkflowReference(source, { allowDefaults: true });
+  const workflowDefaults = deriveDefaultCompanionWorkflowInput({
+    input,
+    name,
+    displayName,
+    slug,
+    channelId,
+    roleLevel,
+    agentType,
+    paths: options.paths || DEFAULT_PATHS,
+  });
+  const workflowInput = normalizeWorkflowInput(source, {
+    allowDefaults: true,
+    defaults: workflowDefaults,
+  });
   const persona = workflowInput.contactPersona;
   const style = String(input?.style || "").trim() || "concise, private, mobile-native";
   const avatar = String(input?.avatar || "").trim() || displayName.slice(0, 2).toUpperCase();
   const avatarAttachmentId = normalizeAvatarAttachmentId(input?.avatarAttachmentId || input?.avatarId || input?.avatar_image_id);
-  const roleLevel = normalizeRoleLevel(input?.roleLevel);
   const workspaceScope = normalizeWorkspaceScope(input?.workspaceScope) || workspaceScopeForRole(roleLevel);
   const relationship = normalizeRelationshipBaseline(input?.relationship);
   const relationshipState = normalizeCompanionRelationshipState(input?.relationshipState);
@@ -4330,7 +4572,7 @@ function normalizeCompanionInput(input) {
     workflowVersion,
     workflowInput,
     name,
-    slug: String(input?.slug || "").trim(),
+    slug,
     displayName,
     persona,
     style,
@@ -4351,14 +4593,14 @@ function normalizeCompanionInput(input) {
       `${displayName} 的 SmallPhone 独立窗口已建立，后续消息固定路由到该 agent。`,
     greeting: String(input?.greeting || "").trim(),
     model: String(input?.model || "").trim(),
-    agentType: normalizeAgentType(input?.agentType || input?.runtimeAgentType),
-    agentMode: normalizeAgentPermissionMode(input?.agentMode || input?.mode, input?.agentType || input?.runtimeAgentType),
+    agentType,
+    agentMode: normalizeAgentPermissionMode(readCompanionAgentMode(input), agentType),
     runtimeProject: String(input?.runtimeProject || input?.project || "").trim(),
     agentId: String(input?.agentId || "").trim(),
     // Materialized from workflow input.
     workspaceDir: workflowInput.contactProjectDir,
     sessionKey: String(input?.sessionKey || "").trim(),
-    channelId: String(input?.channelId || "").trim(),
+    channelId,
     windowId: String(input?.windowId || "").trim(),
     threadTitle: String(input?.threadTitle || "").trim(),
     threadSummary: String(input?.threadSummary || "").trim(),
@@ -4385,12 +4627,37 @@ function normalizeCompanionPatchInput(params) {
     const ref = normalizeWorkflowReference(input);
     workflowId = ref.workflowId;
     workflowVersion = ref.workflowVersion;
-    workflowInput = normalizeWorkflowInput(input);
+    const existingWorkflowInput = normalizeStoredWorkflowInput(character.workflowInput || contact.workflowInput || thread.workflowInput);
+    const nameForDefaults =
+      String(input?.name || "").trim() || String(character.name || "").trim() || String(contact.displayName || "").trim();
+    const displayNameForDefaults =
+      String(input?.displayName || "").trim() || String(contact.displayName || "").trim() || nameForDefaults;
+    const previousRoleLevel = normalizeRoleLevel(thread.roleLevel || contact.roleLevel || thread.runtime?.roleLevel);
+    const nextRoleLevel = normalizeRoleLevel(input?.roleLevel || previousRoleLevel);
+    const slugForDefaults = slugify(nameForDefaults || displayNameForDefaults) || String(contact.id || thread.id || "companion").replace(/^contact-/, "");
+    const channelIdForDefaults =
+      String(input?.channelId || "").trim() || String(thread.channelId || "").trim() || `channel-${slugForDefaults}`;
+    workflowInput = normalizeWorkflowInput(input, {
+      allowDefaults: true,
+      defaults: {
+        ...deriveDefaultCompanionWorkflowInput({
+          input,
+          name: nameForDefaults,
+          displayName: displayNameForDefaults,
+          slug: slugForDefaults,
+          channelId: channelIdForDefaults,
+          roleLevel: nextRoleLevel,
+          agentType: readCompanionAgentType(input) || thread.runtime?.agentType,
+          paths: params.paths || DEFAULT_PATHS,
+        }),
+        ...(existingWorkflowInput || {}),
+      },
+    });
   } else {
     workflowId = String(character.workflowId || contact.workflowId || thread.workflowId || "").trim();
     const rawVersion = character.workflowVersion ?? contact.workflowVersion ?? thread.workflowVersion;
     workflowVersion = Number.isFinite(Number(rawVersion)) ? Number(rawVersion) : NaN;
-    workflowInput = character.workflowInput || contact.workflowInput || thread.workflowInput || null;
+    workflowInput = normalizeStoredWorkflowInput(character.workflowInput || contact.workflowInput || thread.workflowInput);
 
     if (!workflowId || !Number.isFinite(workflowVersion)) {
       throw badRequest("Companion requires workflowId and workflowVersion.");
@@ -4483,10 +4750,13 @@ function normalizeCompanionPatchInput(params) {
       String(thread.runtime?.model || "").trim() ||
       String(runtimeInfo.model || "").trim() ||
       "",
-    agentType: normalizeAgentType(input?.agentType) || normalizeAgentType(thread.runtime?.agentType),
+    agentType: normalizeAgentType(readCompanionAgentType(input)) || normalizeAgentType(thread.runtime?.agentType) || "codex",
     agentMode: normalizeAgentPermissionMode(
-      input?.agentMode || input?.mode || character.permissionPolicy?.agentMode || character.permissionPolicy?.mode || character.permissionPolicy?.template,
-      input?.agentType || thread.runtime?.agentType,
+      readCompanionAgentMode(input) ||
+        character.permissionPolicy?.agentMode ||
+        character.permissionPolicy?.mode ||
+        character.permissionPolicy?.template,
+      readCompanionAgentType(input) || thread.runtime?.agentType,
     ),
     runtimeProject:
       String(input?.runtimeProject || input?.project || "").trim() ||

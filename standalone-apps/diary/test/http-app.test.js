@@ -31,7 +31,7 @@ function jsonBody(response) {
   return JSON.parse(String(response.body || '{}'));
 }
 
-test('dispatches health, manifest, and diary entry API routes', async () => {
+test('dispatches health, manifest, and memo entry API routes', async () => {
   const service = await createTestService();
 
   const health = await dispatchDiaryRequest({
@@ -48,6 +48,7 @@ test('dispatches health, manifest, and diary entry API routes', async () => {
   }, { service });
   assert.equal(manifest.statusCode, 200);
   assert.equal(jsonBody(manifest).id, 'diary');
+  assert.equal(jsonBody(manifest).name, 'SmallPhone Memo');
 
   const create = await dispatchDiaryRequest({
     method: 'POST',
@@ -83,6 +84,32 @@ test('dispatches health, manifest, and diary entry API routes', async () => {
     url: '/api/entries',
   }, { service });
   assert.deepEqual(jsonBody(afterDelete).entries, []);
+});
+
+test('serves concise memo UI copy while preserving stored entries', async () => {
+  const service = await createTestService();
+  await service.createEntry({
+    title: 'Persisted note',
+    text: 'Existing stored entries should still render.',
+  });
+
+  const response = await dispatchDiaryRequest({
+    method: 'GET',
+    url: '/',
+  }, { service });
+
+  assert.equal(response.statusCode, 200);
+  const html = String(response.body);
+  assert.match(html, /SmallPhone Memo/);
+  assert.match(html, /Memo list/);
+  assert.match(html, /Search notes/);
+  assert.doesNotMatch(html, /Diary|Room|Studio|world|二维地图|地图布局|应用入口/);
+
+  const list = await dispatchDiaryRequest({
+    method: 'GET',
+    url: '/api/entries',
+  }, { service });
+  assert.deepEqual(jsonBody(list).entries.map((entry) => entry.title), ['Persisted note']);
 });
 
 test('returns validation errors as JSON API responses', async () => {

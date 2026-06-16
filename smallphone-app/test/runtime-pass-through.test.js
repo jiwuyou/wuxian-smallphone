@@ -205,7 +205,7 @@ test("cc-webclient runtime message includes numbered parts and time block", asyn
     throw new Error(`Unexpected fetch call: ${call.method} ${call.url}`);
   });
   service.runtime = runtime;
-  const existing = service.listContacts().find((item) => item.id === "contact-aki");
+  const existing = service.store.read().contacts.find((item) => item.id === "contact-aki");
   assert.ok(existing);
   const testUserPersona = "The user prefers bullet-point plans and minimal small talk.";
   await service.updateCompanion("contact-aki", {

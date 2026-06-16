@@ -56,14 +56,6 @@ export const manifest = {
   orbClass: 'orb-workflows',
   views: {
     normal: 'workflows',
-    space2d: 'workflow-board',
-    space3d: 'workflow-lab',
-  },
-  worldObject: {
-    type: 'workflow-console',
-    label: '模块画板台',
-    defaultPlacement: { mapId: 'home', x: 9, y: 6 },
-    action: { type: 'openApp', appId: 'workflows', view: 'normal' },
   },
 };
 
@@ -124,50 +116,6 @@ export const template = `
       </div>
       <div class="promptboard-module-body" id="promptboard-module-body"></div>
     </aside>
-  </section>
-`;
-
-export const spaceTemplates = `
-  <section class="view app-space-view product-space workflows-space-2d" data-view="workflow-board" data-space-app="workflows">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Prompt Board</p>
-        <h2>模块画板台</h2>
-      </div>
-      <button class="secondary-button" data-app-normal="workflows" type="button">模块</button>
-    </div>
-    <div class="workflow-board-scene">
-      <div class="workflow-node node-active">标题</div>
-      <div class="workflow-node">上下文</div>
-      <div class="workflow-node">最近对话</div>
-      <div class="workflow-link link-a"></div>
-      <div class="workflow-link link-b"></div>
-      <div class="workflow-console-panel"><strong>∞</strong><span>模块片段</span></div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-space3d="workflows" type="button">进入运行室</button>
-    </div>
-  </section>
-
-  <section class="view app-space-view product-space workflows-space-3d" data-view="workflow-lab" data-space-app="workflows">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Prompt Lab</p>
-        <h2>提示词运行室</h2>
-      </div>
-      <button class="secondary-button" data-app-space2d="workflows" type="button">回模块画板台</button>
-    </div>
-    <div class="workflow-lab-scene">
-      <div class="workflow-rack rack-left">Schema</div>
-      <div class="workflow-rack rack-right">Runtime</div>
-      <div class="workflow-orb">Flow</div>
-      <div class="workflow-terminal"><strong>Default Contact</strong><span>workspace + contact persona + user persona</span></div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-normal="workflows" type="button">打开模块画板</button>
-    </div>
   </section>
 `;
 

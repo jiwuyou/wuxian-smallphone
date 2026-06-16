@@ -81,6 +81,8 @@ print_intended_services() {
 
   backend_port="${BACKEND_PORT:-22096}"
   backend_host="${BACKEND_HOST:-127.0.0.1}"
+  sillytavern_port="${SMALLPHONE_SILLYTAVERN_PORT:-${SILLYTAVERN_PORT:-8000}}"
+  sillytavern_host="${SMALLPHONE_SILLYTAVERN_HOST:-${SILLYTAVERN_HOST:-127.0.0.1}}"
 
   log "Intended services (name | bind | tags):"
   log "  smallphone-core | ${core_host}:${core_port} | ${group_tag}, openhouse-component:smallphone-core"
@@ -92,6 +94,7 @@ print_intended_services() {
   log "  smallphone-standalone-like-girl-clone | 127.0.0.1:23008 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:like-girl-clone"
   log "  smallphone-standalone-album | 127.0.0.1:23004 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:album"
   log "  smallphone-like-girl-source | 127.0.0.1:23002 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-kind:source-app"
+  log "  smallphone-sillytavern | ${sillytavern_host}:${sillytavern_port} | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:sillytavern"
   log ""
   log "Notes:"
   log "  - smallphone-core port is SMALLPHONE_PORT (default 22000) or APP_BACKEND_PORT."
@@ -178,6 +181,7 @@ emit_spec() {
     "$service_manager_url" \
     "$service_manager_token" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -355,6 +359,25 @@ elif key == "smallphone-like-girl-source":
         [tcp_check("127.0.0.1", port)],
         [group_tag, "openhouse-component:smallphone-standalone", "smallphone", "smallphone-kind:source-app"],
     )
+elif key == "smallphone-sillytavern":
+    app_dir = Path(os.environ.get("SMALLPHONE_SILLYTAVERN_DIR") or os.environ.get("SILLYTAVERN_DIR") or str(parent / "sillytavern"))
+    data_dir = Path(os.environ.get("SMALLPHONE_SILLYTAVERN_DATA_DIR") or os.environ.get("SILLYTAVERN_DATA_DIR") or str(app_dir / "data"))
+    host = os.environ.get("SMALLPHONE_SILLYTAVERN_HOST") or os.environ.get("SILLYTAVERN_HOST") or "127.0.0.1"
+    port = os.environ.get("SMALLPHONE_SILLYTAVERN_PORT") or os.environ.get("SILLYTAVERN_PORT") or "8000"
+    spec = spec_process(
+        "smallphone-sillytavern",
+        "SmallPhone SillyTavern service (Node app)",
+        ["node", "server.js"],
+        app_dir,
+        {
+            "HOST": host,
+            "PORT": port,
+            "SILLYTAVERN_DATA_DIR": str(data_dir),
+            "SMALLPHONE_SILLYTAVERN_DATA_DIR": str(data_dir),
+        },
+        [tcp_check(host, port)],
+        [group_tag, "openhouse-component:smallphone-standalone", "smallphone", "smallphone-app:sillytavern", "smallphone-instance:sillytavern"],
+    )
 else:
     raise SystemExit(f"unknown spec key: {key}")
 
@@ -506,7 +529,7 @@ main() {
   backend_port="${BACKEND_PORT:-22096}"
   backend_host="${BACKEND_HOST:-127.0.0.1}"
 
-  upsert_keys="smallphone-core smallphone-frontend smallphone-frontend-beta smallphone-standalone-diary smallphone-standalone-like-girl smallphone-standalone-like-girl-clone smallphone-standalone-album smallphone-like-girl-source"
+  upsert_keys="smallphone-core smallphone-frontend smallphone-frontend-beta smallphone-standalone-diary smallphone-standalone-like-girl smallphone-standalone-like-girl-clone smallphone-standalone-album smallphone-like-girl-source smallphone-sillytavern"
 
   # Register the OpenCode backend only when the checkout exists.
   if [ -d "$PARENT_DIR/opencode" ]; then
@@ -526,6 +549,7 @@ main() {
       smallphone-standalone-like-girl-clone) name="smallphone-standalone-like-girl-clone" ;;
       smallphone-standalone-album) name="smallphone-standalone-album" ;;
       smallphone-like-girl-source) name="smallphone-like-girl-source" ;;
+      smallphone-sillytavern) name="smallphone-sillytavern" ;;
       *) die "unknown key: $key" ;;
     esac
 

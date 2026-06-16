@@ -7,14 +7,6 @@ export const manifest = {
   orbClass: 'orb-weather',
   views: {
     normal: 'weather',
-    space2d: 'weather-station',
-    space3d: 'weather-atrium',
-  },
-  worldObject: {
-    type: 'weather-tower',
-    label: '天气塔',
-    defaultPlacement: { mapId: 'home', x: 10, y: 3 },
-    action: { type: 'openApp', appId: 'weather', view: 'normal' },
   },
 };
 
@@ -59,61 +51,6 @@ export const template = `
       <span id="weather-humidity">湿度 62%</span>
     </div>
     <div class="stack-grid" id="weather-forecast"></div>
-  </section>
-`;
-
-export const spaceTemplates = `
-  <section class="view app-space-view product-space weather-space-2d" data-view="weather-station" data-space-app="weather">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Weather Station</p>
-        <h2>海街观测站</h2>
-      </div>
-      <button class="secondary-button" data-app-normal="weather" type="button">天气面板</button>
-    </div>
-    <div class="weather-station-board">
-      <div class="weather-sky-dome">
-        <span class="weather-sun"></span>
-        <span class="weather-cloud cloud-a"></span>
-        <span class="weather-cloud cloud-b"></span>
-        <strong>23°</strong>
-        <p>晴间多云</p>
-      </div>
-      <div class="weather-instruments">
-        <div><strong>26°</strong><span>最高</span></div>
-        <div><strong>18°</strong><span>最低</span></div>
-        <div><strong>62%</strong><span>湿度</span></div>
-        <div><strong>2 级</strong><span>东南风</span></div>
-      </div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-space3d="weather" type="button">进入气象中庭</button>
-    </div>
-  </section>
-
-  <section class="view app-space-view product-space weather-space-3d" data-view="weather-atrium" data-space-app="weather">
-    <div class="space-topbar">
-      <div>
-        <p class="eyebrow">Weather Atrium</p>
-        <h2>气象中庭</h2>
-      </div>
-      <button class="secondary-button" data-app-space2d="weather" type="button">回观测站</button>
-    </div>
-    <div class="weather-atrium-scene">
-      <div class="glass-arc arc-left"></div>
-      <div class="glass-arc arc-right"></div>
-      <div class="floating-weather-orb">
-        <strong>23°</strong>
-        <span>海风轻</span>
-      </div>
-      <div class="rain-gauge"></div>
-      <div class="wind-vane"></div>
-    </div>
-    <div class="space-actions">
-      <button class="secondary-button" data-world-return="home" type="button">回主世界</button>
-      <button class="secondary-button" data-app-normal="weather" type="button">打开天气</button>
-    </div>
   </section>
 `;
 
