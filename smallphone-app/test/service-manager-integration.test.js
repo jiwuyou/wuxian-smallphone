@@ -368,7 +368,7 @@ test("service-manager: logs/actions redact secrets and never expose raw token-be
         },
       };
     }
-    if (request.url.includes("/api/v1/services/") && request.url.includes("/start")) {
+    if (request.url.includes("/api/v1/services/") && (request.url.includes("/start") || request.url.includes("/repair"))) {
       return {
         status: 200,
         body: {
@@ -422,6 +422,14 @@ test("service-manager: logs/actions redact secrets and never expose raw token-be
   assert.ok(!("env" in action.service));
   assert.ok(!("runtime" in action.service));
 
+  const repair = await service.runServiceManagerServiceAction("svc-example", "repair");
+  const repairSerialized = JSON.stringify(repair);
+  assert.equal(repairSerialized.includes(serviceManagerToken), false, "Repair response leaked service-manager token.");
+  assert.equal(repairSerialized.includes(secretCommand), false, "Repair response leaked command.");
+  assert.equal(repairSerialized.includes(secretEnv), false, "Repair response leaked env secret.");
+  assert.equal(repair.action, "repair");
+  assert.ok(repair.ok);
+
   const logReq = requests.find((item) => item.url.includes("/logs"));
   assert.ok(logReq);
   assert.ok(
@@ -440,6 +448,16 @@ test("service-manager: logs/actions redact secrets and never expose raw token-be
   );
   assert.match(
     String(startReq.headers?.authorization || startReq.headers?.Authorization || ""),
+    new RegExp(`^Bearer\\s+${escapeRegExp(serviceManagerToken)}$`, "i"),
+  );
+  const repairReq = requests.find((item) => item.url.includes("/repair"));
+  assert.ok(repairReq);
+  assert.ok(
+    repairReq.url.includes("/api/v1/services/"),
+    `Expected repair request URL to include /api/v1/services/: ${repairReq.url}`,
+  );
+  assert.match(
+    String(repairReq.headers?.authorization || repairReq.headers?.Authorization || ""),
     new RegExp(`^Bearer\\s+${escapeRegExp(serviceManagerToken)}$`, "i"),
   );
 });

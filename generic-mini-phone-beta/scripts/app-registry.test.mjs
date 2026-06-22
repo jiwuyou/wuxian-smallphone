@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { normalizeDynamicAppRegistry, registeredApps } from './app-registry.js';
+import { bind as bindMessages, render as renderMessages, template as messagesTemplate } from '../apps/messages/index.js';
+
+const currentDir = dirname(fileURLToPath(import.meta.url));
 
 test('app-registry normalization preserves safe service metadata for dynamic apps', () => {
   const payload = {
@@ -105,4 +111,102 @@ test('workflows is a static bundled app, not a broken dynamic iframe entry', () 
   });
 
   assert.equal(normalized.dynamicAppEntries.length, 0);
+});
+
+test('messages is a registered static app', () => {
+  assert.ok(registeredApps.find((app) => (
+    app.id === 'messages' &&
+    app.views?.normal === 'messages' &&
+    app.badge === 'unread'
+  )));
+});
+
+test('messages app owns message and chat views', () => {
+  assert.equal(typeof renderMessages, 'function');
+  assert.equal(typeof bindMessages, 'function');
+  assert.match(messagesTemplate, /data-view="messages"/);
+  assert.match(messagesTemplate, /id="message-list"/);
+  assert.match(messagesTemplate, /data-view="chat"/);
+  assert.match(messagesTemplate, /id="chat-form"/);
+});
+
+test('shell html does not hardcode messages primary dom', () => {
+  const html = readFileSync(resolve(currentDir, '../index.html'), 'utf8');
+  assert.doesNotMatch(html, /data-view="messages"/);
+  assert.doesNotMatch(html, /id="message-list"/);
+  assert.doesNotMatch(html, /data-view="chat"/);
+  assert.doesNotMatch(html, /id="chat-form"/);
+  assert.match(html, /id="registered-app-views"/);
+});
+
+test('component registry consumes smallphoneApp for hidden static apps and dynamic webview apps', () => {
+  const normalized = normalizeDynamicAppRegistry({
+    components: [
+      {
+        id: 'messages',
+        smallphoneApp: {
+          visible: false,
+          staticAppId: 'messages',
+          entry: {
+            type: 'native-view',
+            view: 'messages',
+          },
+        },
+      },
+      {
+        id: 'hermes-webui',
+        title: 'Hermes',
+        kind: 'ai-partner',
+        smallphoneApp: {
+          visible: true,
+          entry: {
+            type: 'webview',
+            url: 'http://127.0.0.1:23084/',
+          },
+        },
+        serviceManager: {
+          services: [
+            {
+              id: 'hermes-webui',
+              name: 'hermes-webui',
+              serviceRef: 'service-manager://services/hermes-webui',
+            },
+          ],
+        },
+      },
+      {
+        id: 'legacy-menu-only',
+        title: 'Legacy',
+        menu: {
+          entry: {
+            type: 'webview',
+            url: 'http://127.0.0.1:29999/',
+          },
+        },
+      },
+    ],
+    apps: [
+      {
+        id: 'hermes-webui',
+        title: 'Hermes',
+        entry: 'http://127.0.0.1:23084/',
+      },
+    ],
+    appInstances: [
+      {
+        id: 'component-hermes-webui',
+        appId: 'hermes-webui',
+        title: 'Hermes',
+        settings: {
+          url: 'http://127.0.0.1:23084/',
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(normalized.staticAppControls.hiddenAppIds, ['messages']);
+  assert.equal(normalized.components.find((component) => component.id === 'messages').visible, false);
+  assert.equal(Boolean(normalized.components.find((component) => component.id === 'legacy-menu-only')), false);
+  assert.equal(normalized.dynamicAppEntries.length, 1);
+  assert.equal(normalized.dynamicAppEntries[0].appId, 'hermes-webui');
 });

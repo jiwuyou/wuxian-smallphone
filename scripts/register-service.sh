@@ -83,6 +83,8 @@ print_intended_services() {
   backend_host="${BACKEND_HOST:-127.0.0.1}"
   sillytavern_port="${SMALLPHONE_SILLYTAVERN_PORT:-${SILLYTAVERN_PORT:-8000}}"
   sillytavern_host="${SMALLPHONE_SILLYTAVERN_HOST:-${SILLYTAVERN_HOST:-127.0.0.1}}"
+  controlled_browser_port="${SMALLPHONE_CONTROLLED_BROWSER_PORT:-23080}"
+  controlled_browser_host="${SMALLPHONE_CONTROLLED_BROWSER_HOST:-127.0.0.1}"
 
   log "Intended services (name | bind | tags):"
   log "  smallphone-core | ${core_host}:${core_port} | ${group_tag}, openhouse-component:smallphone-core"
@@ -95,6 +97,7 @@ print_intended_services() {
   log "  smallphone-standalone-album | 127.0.0.1:23004 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:album"
   log "  smallphone-like-girl-source | 127.0.0.1:23002 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-kind:source-app"
   log "  smallphone-sillytavern | ${sillytavern_host}:${sillytavern_port} | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:sillytavern"
+  log "  controlled-browser | ${controlled_browser_host}:${controlled_browser_port} | ${group_tag}, openhouse-component:controlled-browser, smallphone-app:controlled-browser"
   log ""
   log "Notes:"
   log "  - smallphone-core port is SMALLPHONE_PORT (default 22000) or APP_BACKEND_PORT."
@@ -378,6 +381,24 @@ elif key == "smallphone-sillytavern":
         [tcp_check(host, port)],
         [group_tag, "openhouse-component:smallphone-standalone", "smallphone", "smallphone-app:sillytavern", "smallphone-instance:sillytavern"],
     )
+elif key == "controlled-browser":
+    status_command = os.environ.get("SMALLPHONE_CONTROLLED_BROWSER_COMMAND") or (
+        "while :; do "
+        "if command -v openhouse-browser >/dev/null 2>&1; then "
+        "openhouse-browser status || true; "
+        "else printf '%s\\n' 'openhouse-browser CLI not found'; fi; "
+        'sleep "${SMALLPHONE_CONTROLLED_BROWSER_STATUS_INTERVAL:-30}"; '
+        "done"
+    )
+    spec = spec_process(
+        "controlled-browser",
+        "OpenHouse controlled browser CLI helper",
+        ["sh", "-lc", status_command],
+        root,
+        {},
+        [],
+        [group_tag, "openhouse-component:controlled-browser", "smallphone", "smallphone-app:controlled-browser", "smallphone-instance:controlled-browser"],
+    )
 else:
     raise SystemExit(f"unknown spec key: {key}")
 
@@ -529,7 +550,7 @@ main() {
   backend_port="${BACKEND_PORT:-22096}"
   backend_host="${BACKEND_HOST:-127.0.0.1}"
 
-  upsert_keys="smallphone-core smallphone-frontend smallphone-frontend-beta smallphone-standalone-diary smallphone-standalone-like-girl smallphone-standalone-like-girl-clone smallphone-standalone-album smallphone-like-girl-source smallphone-sillytavern"
+  upsert_keys="smallphone-core smallphone-frontend smallphone-frontend-beta smallphone-standalone-diary smallphone-standalone-like-girl smallphone-standalone-like-girl-clone smallphone-standalone-album smallphone-like-girl-source smallphone-sillytavern controlled-browser"
 
   # Register the OpenCode backend only when the checkout exists.
   if [ -d "$PARENT_DIR/opencode" ]; then
@@ -550,6 +571,7 @@ main() {
       smallphone-standalone-album) name="smallphone-standalone-album" ;;
       smallphone-like-girl-source) name="smallphone-like-girl-source" ;;
       smallphone-sillytavern) name="smallphone-sillytavern" ;;
+      controlled-browser) name="controlled-browser" ;;
       *) die "unknown key: $key" ;;
     esac
 

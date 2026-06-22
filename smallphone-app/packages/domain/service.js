@@ -1,4 +1,5 @@
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const {
   DEFAULT_OFFICIAL_SHELL_ID,
@@ -35,6 +36,7 @@ const {
   listContactWorkflows,
   getWorkflowDefinition,
 } = require("./contact-workflows");
+const { readComponentRegistry } = require("./component-registry");
 
 const DEFAULT_PATHS = resolveSmallPhonePaths();
 const MANAGED_BLOCK_START = "BEGIN_SMALLPHONE_MANAGED_BLOCK";
@@ -72,6 +74,7 @@ const WORKSPACE_ATTACHMENT_MIME_TYPES = {
 };
 const DEFAULT_TIMEZONE = "Etc/UTC";
 const DEFAULT_PERMISSION_TEMPLATE = "safe";
+const AI_CAPABILITY_FILE_MAX_BYTES = 256 * 1024;
 const DEFAULT_PERMISSION_CHECKS = [
   "chat.send",
   "session.read",
@@ -157,6 +160,8 @@ class SmallPhoneService {
     this.projectInfo = this.ccConnectProjects.describe();
     this.serviceManager = createServiceManagerClient(options.serviceManager || {});
     this.serviceManagerInfo = this.serviceManager.describe();
+    this.componentRegistryDir =
+      String(options.componentRegistryDir || options.env?.SMALLPHONE_COMPONENTS_DIR || process.env.SMALLPHONE_COMPONENTS_DIR || "").trim();
     this.artifactSync = normalizeArtifactSyncOptions(options.artifactSync, this.paths);
     this.threadEventSubscribers = new Map();
   }
@@ -240,13 +245,17 @@ class SmallPhoneService {
   getAppRegistry(options = {}) {
     const content = this.getUserContent();
     const activeShellId = content.activeShell;
+    const componentRegistry = this.readComponentRegistry(options);
 
-    const apps = Array.isArray(content.apps)
-      ? content.apps.map((app) => ({
+    const apps = mergeRegistryRecordsById(
+      Array.isArray(content.apps)
+        ? content.apps.map((app) => ({
           ...app,
           entry: redactPublicUrlString(app?.entry),
         }))
-      : [];
+        : [],
+      componentRegistry.apps,
+    );
     const shells = Array.isArray(content.shells)
       ? content.shells.map((shell) => ({
           ...shell,
@@ -256,8 +265,9 @@ class SmallPhoneService {
     const activeShellRecord = shells.find((item) => item.id === activeShellId) ||
       shells.find((item) => item.id === DEFAULT_OFFICIAL_SHELL_ID) ||
       null;
-    const appInstances = Array.isArray(content.appInstances)
-      ? content.appInstances.map((instance) => {
+    const appInstances = mergeRegistryRecordsById(
+      Array.isArray(content.appInstances)
+        ? content.appInstances.map((instance) => {
           const settings = instance?.settings && typeof instance.settings === "object" ? instance.settings : {};
           const url = Object.prototype.hasOwnProperty.call(settings, "url") ? redactPublicUrlString(settings.url) : undefined;
           return {
@@ -265,7 +275,9 @@ class SmallPhoneService {
             settings: url === undefined ? settings : { ...settings, url },
           };
         })
-      : [];
+        : [],
+      componentRegistry.appInstances,
+    );
 
     const baseRegistry = {
       generatedAt: nowIso(),
@@ -276,6 +288,13 @@ class SmallPhoneService {
       shells,
       activeShell: content.activeShell,
       activeShellRecord,
+      components: componentRegistry.components,
+      componentRegistry: {
+        sourceDir: componentRegistry.sourceDir,
+        generatedAt: componentRegistry.generatedAt,
+        errors: componentRegistry.errors,
+      },
+      staticAppControls: componentRegistry.staticAppControls,
       serviceManager: this.serviceManager.describePublic({ available: false }),
     };
     const sanitizedRegistry = sanitizePublicRegistryPayload(baseRegistry);
@@ -286,6 +305,74 @@ class SmallPhoneService {
     }
 
     return this.getAppRegistryWithServiceMetadata(sanitizedRegistry);
+  }
+
+  readComponentRegistry(options = {}) {
+    return readComponentRegistry({
+      dir: this.componentRegistryDir,
+      env: options.env || process.env,
+    });
+  }
+
+  getComponents(options = {}) {
+    const componentRegistry = this.readComponentRegistry(options);
+    return sanitizePublicRegistryPayload({
+      generatedAt: nowIso(),
+      components: componentRegistry.components,
+      componentRegistry: {
+        sourceDir: componentRegistry.sourceDir,
+        generatedAt: componentRegistry.generatedAt,
+        errors: componentRegistry.errors,
+      },
+      staticAppControls: componentRegistry.staticAppControls,
+    });
+  }
+
+  getAiCapabilities(options = {}) {
+    const componentRegistry = this.readComponentRegistry(options);
+    const errors = [...(Array.isArray(componentRegistry.errors) ? componentRegistry.errors : [])];
+    const components = [];
+
+    for (const component of Array.isArray(componentRegistry.components) ? componentRegistry.components : []) {
+      const ai = component?.ai && typeof component.ai === "object" ? component.ai : null;
+      if (!ai || ai.visible === false) continue;
+
+      const summary = readRegisteredAiText(ai.summaryDoc, {
+        component,
+        paths: this.paths,
+        errors,
+      });
+      const capabilities = readRegisteredAiJson(ai.capabilities, {
+        component,
+        paths: this.paths,
+        errors,
+      });
+
+      components.push(sanitizePublicRegistryPayload({
+        id: component.id,
+        title: component.title,
+        description: component.description,
+        kind: component.kind,
+        smallphoneApp: component.smallphoneApp,
+        serviceManager: component.serviceManager,
+        ai: {
+          visible: ai.visible,
+          summaryDoc: ai.summaryDoc,
+          summaryDocFragment: summary.fragment,
+          summary: summary.text,
+          capabilities: ai.capabilities,
+          capabilitiesDocument: capabilities.data,
+          intents: ai.intents,
+        },
+      }));
+    }
+
+    return {
+      generatedAt: nowIso(),
+      sourceDir: componentRegistry.sourceDir,
+      components,
+      errors,
+    };
   }
 
   async getAppRegistryWithServiceMetadata(baseRegistry) {
@@ -454,7 +541,7 @@ class SmallPhoneService {
         error: "Missing service id",
       };
     }
-    if (verb !== "start" && verb !== "stop" && verb !== "restart") {
+    if (verb !== "start" && verb !== "stop" && verb !== "restart" && verb !== "repair") {
       return {
         serviceManager: this.serviceManager.describePublic({ available: false }),
         service: null,
@@ -2999,6 +3086,20 @@ function selectUserContent(state) {
     shells: projectPublicUserContentCollection("shells", state.shells),
     activeShell: String(state.activeShell || DEFAULT_OFFICIAL_SHELL_ID).trim() || DEFAULT_OFFICIAL_SHELL_ID,
   };
+}
+
+function mergeRegistryRecordsById(primary, secondary) {
+  const merged = [];
+  const used = new Set();
+  for (const item of [...(Array.isArray(primary) ? primary : []), ...(Array.isArray(secondary) ? secondary : [])]) {
+    const id = String(item?.id || "").trim();
+    if (!id || used.has(id)) {
+      continue;
+    }
+    used.add(id);
+    merged.push(item);
+  }
+  return merged;
 }
 
 function applyUserContentPatch(state, input, updatedAt) {
@@ -6148,9 +6249,11 @@ function extractServiceManagerLogsPayload(data, text) {
   if (data && typeof data === "object") {
     if (Array.isArray(data.logs)) return data.logs;
     if (Array.isArray(data.entries)) return data.entries;
+    if (Array.isArray(data.lines)) return data.lines;
     if (data.data && typeof data.data === "object") {
       if (Array.isArray(data.data.logs)) return data.data.logs;
       if (Array.isArray(data.data.entries)) return data.data.entries;
+      if (Array.isArray(data.data.lines)) return data.data.lines;
     }
   }
   const raw = String(text || "").trim();
@@ -6241,6 +6344,99 @@ function matchBestServiceRecord(records, criteria) {
   return scored[0]?.record || null;
 }
 
+function readRegisteredAiText(ref, options = {}) {
+  const resolved = resolveRegisteredAiFile(ref, options);
+  if (!resolved.filePath) {
+    if (resolved.error) pushAiCapabilityError(options.errors, ref, resolved.error);
+    return { text: "", fragment: resolved.fragment || "" };
+  }
+  try {
+    const stat = fs.statSync(resolved.filePath);
+    if (!stat.isFile()) {
+      pushAiCapabilityError(options.errors, ref, "AI capability path is not a file");
+      return { text: "", fragment: resolved.fragment || "" };
+    }
+    if (stat.size > AI_CAPABILITY_FILE_MAX_BYTES) {
+      pushAiCapabilityError(options.errors, ref, "AI capability file is too large");
+      return { text: "", fragment: resolved.fragment || "" };
+    }
+    return {
+      text: fs.readFileSync(resolved.filePath, "utf8"),
+      fragment: resolved.fragment || "",
+    };
+  } catch (error) {
+    pushAiCapabilityError(options.errors, ref, error instanceof Error ? error.message : String(error));
+    return { text: "", fragment: resolved.fragment || "" };
+  }
+}
+
+function readRegisteredAiJson(ref, options = {}) {
+  const loaded = readRegisteredAiText(ref, options);
+  const text = String(loaded.text || "").trim();
+  if (!text) return { data: null, fragment: loaded.fragment || "" };
+  try {
+    return {
+      data: JSON.parse(text),
+      fragment: loaded.fragment || "",
+    };
+  } catch (error) {
+    pushAiCapabilityError(options.errors, ref, error instanceof Error ? error.message : String(error));
+    return { data: null, fragment: loaded.fragment || "" };
+  }
+}
+
+function resolveRegisteredAiFile(ref, options = {}) {
+  const raw = String(ref || "").trim();
+  if (!raw) return { filePath: "", fragment: "", error: "" };
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) {
+    return { filePath: "", fragment: "", error: "AI capability refs must be local files" };
+  }
+
+  const hashIndex = raw.indexOf("#");
+  const withoutFragment = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const fragment = hashIndex >= 0 ? raw.slice(hashIndex + 1).trim() : "";
+  const fileRef = withoutFragment.split("?")[0].trim();
+  if (!fileRef || fileRef.includes("\0")) {
+    return { filePath: "", fragment, error: "AI capability ref is invalid" };
+  }
+
+  const expanded = fileRef.startsWith("~/")
+    ? path.join(os.homedir(), fileRef.slice(2))
+    : fileRef;
+  const componentSourcePath = String(options.component?.sourcePath || "").trim();
+  const baseDir = componentSourcePath ? path.dirname(componentSourcePath) : process.cwd();
+  const filePath = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(baseDir, expanded));
+  const roots = getAllowedAiDocRoots(options, componentSourcePath);
+  if (!roots.some((root) => isPathInside(root, filePath))) {
+    return { filePath: "", fragment, error: "AI capability path is outside allowed roots" };
+  }
+
+  return { filePath, fragment, error: "" };
+}
+
+function getAllowedAiDocRoots(options = {}, componentSourcePath = "") {
+  const roots = [
+    path.join(os.homedir(), ".config", "openhouseai", "ai-docs"),
+  ];
+  const smallphoneHome = String(options.paths?.smallphoneHome || "").trim();
+  if (smallphoneHome) {
+    roots.push(path.join(smallphoneHome, "ai-docs"));
+    roots.push(path.join(smallphoneHome, ".config", "openhouseai", "ai-docs"));
+  }
+  if (componentSourcePath) {
+    roots.push(path.dirname(componentSourcePath));
+  }
+  return [...new Set(roots.map((root) => path.resolve(root)))];
+}
+
+function pushAiCapabilityError(errors, ref, message) {
+  if (!Array.isArray(errors)) return;
+  errors.push({
+    file: String(ref || "").trim(),
+    error: String(message || "Unable to read AI capability file").trim(),
+  });
+}
+
 function sanitizePublicRegistryPayload(registry) {
   return sanitizePublicPayload(registry, {
     stripEntry: false,
@@ -6307,6 +6503,9 @@ function sanitizePublicString(value, keyHint) {
   const hint = String(keyHint || "").trim();
   const normalizedHint = normalizePublicKeyHint(hint);
   const raw = String(value || "");
+  if (raw.trim().startsWith("service-manager://")) {
+    return raw.trim().replace(/[\s"'<>`]/g, "");
+  }
   if (normalizedHint.includes("url") || normalizedHint.includes("uri") || normalizedHint === "entry" || normalizedHint.includes("href")) {
     return redactPublicUrlString(raw);
   }
@@ -6352,7 +6551,7 @@ function shouldStripPublicKey(key, options) {
   if (options?.stripRuntime && normalized === "runtime") {
     return true;
   }
-  if (options?.stripCommand && normalized === "command") {
+  if (options?.stripCommand && (normalized === "command" || normalized === "shell" || normalized === "script" || normalized === "args")) {
     return true;
   }
   if (options?.stripEntry && normalized === "entry") {

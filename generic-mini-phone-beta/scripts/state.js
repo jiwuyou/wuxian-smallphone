@@ -266,7 +266,7 @@ export function loadState() {
 export const state = loadState();
 
 export const uiState = {
-  previousView: 'messages',
+  previousView: 'contacts',
   activeChatKey: 'claude',
   editingCharacterKey: 'claude',
   desktopTouchStartX: 0,

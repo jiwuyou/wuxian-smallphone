@@ -169,6 +169,12 @@ async function handleApi(req, res, url) {
   if (method === "GET" && url.pathname === "/api/app-registry") {
     return sendJson(res, 200, await service.getAppRegistry({ includeServiceManager: true }));
   }
+  if (method === "GET" && url.pathname === "/api/components") {
+    return sendJson(res, 200, service.getComponents());
+  }
+  if (method === "GET" && url.pathname === "/api/ai-capabilities") {
+    return sendJson(res, 200, service.getAiCapabilities());
+  }
   if (method === "GET" && url.pathname === "/api/workflows") {
     return sendJson(res, 200, service.listWorkflows());
   }
@@ -191,7 +197,7 @@ async function handleApi(req, res, url) {
     const limit = url.searchParams.get("limit") || "";
     return sendJson(res, 200, await service.getServiceManagerServiceLogs(serviceLogsMatch[1], { limit }));
   }
-  const serviceActionMatch = url.pathname.match(/^\/api\/service-manager\/services\/([^/]+)\/(start|stop|restart)$/);
+  const serviceActionMatch = url.pathname.match(/^\/api\/service-manager\/services\/([^/]+)\/(start|stop|restart|repair)$/);
   if (method === "POST" && serviceActionMatch) {
     return sendJson(res, 200, await service.runServiceManagerServiceAction(serviceActionMatch[1], serviceActionMatch[2]));
   }
@@ -220,7 +226,7 @@ async function handleApi(req, res, url) {
     }
     return sendJson(res, 200, await service.getServiceManagerServiceLogs(target.serviceRecord.id, { limit }));
   }
-  const sillyTavernActionMatch = url.pathname.match(/^\/api\/sillytavern\/(start|stop|restart)$/);
+  const sillyTavernActionMatch = url.pathname.match(/^\/api\/sillytavern\/(start|stop|restart|repair)$/);
   if (sillyTavernActionMatch && method === "POST") {
     const target = await getSillyTavernServiceTarget();
     if (!target.serviceRecord?.id) {

@@ -4,7 +4,7 @@ import {
   fetchDynamicAppRegistry,
   mergeStaticAndDynamicDesktopApps,
   registeredApps,
-} from './app-registry.js?v=17';
+} from './app-registry.js?v=19';
 import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=17';
 import {
   buildServiceManagerDefinitions,
@@ -29,7 +29,7 @@ let backendBase = DEFAULT_BACKEND_BASE;
 let threadEventSource = null;
 let threadEventSourceKey = '';
 let characterCreateDraftKey = '';
-let dynamicAppRegistry = { dynamicAppEntries: [] };
+let dynamicAppRegistry = { dynamicAppEntries: [], staticAppControls: { hiddenAppIds: [] } };
 let dynamicRegistryStatus = {
   text: '后端未连接，使用内置 App。',
   isError: false,
@@ -42,6 +42,7 @@ let serviceManagerStatus = {
   loading: false,
 };
 const serviceManagerActionInflight = new Set();
+const serviceManagerLogSnippets = new Map();
 let activeDynamicApp = null;
 let characterRuntimeSettingsState = {
   threadId: '',
@@ -59,7 +60,6 @@ const displayedWaifuMessageKeys = loadDisplayedWaifuMessageKeys();
 const recentPersistedAssistantByThreadId = new Map();
 
 const CORE_DESKTOP_APPS = [
-  { id: 'messages', name: '消息', shortName: '聊', orbClass: 'orb-chat', target: 'messages', badge: 'unread' },
   { id: 'contacts', name: '联系人', shortName: '人', orbClass: 'orb-character', target: 'contacts' },
   { id: 'app-manager', name: '应用管理', shortName: '管', orbClass: 'orb-app-manager', panel: 'app-manager' },
   { id: 'settings', name: '设置', shortName: '设', orbClass: 'orb-settings', panel: 'settings' },
@@ -1145,7 +1145,7 @@ function beginCreateContact() {
   openPanel('character');
   renderCharacterEditor();
   renderCharacterHighlight();
-  renderMessages();
+  renderMessagesApp();
   renderContacts();
 }
 
@@ -1595,10 +1595,9 @@ async function uploadCharacterAvatar(file) {
   }
   saveState();
   renderCharacterAvatarPreview(chat);
-  renderMessages();
+  renderMessagesApp();
   renderContacts();
   renderCharacterHighlight();
-  renderChat();
   setChatStatus('头像已上传，保存角色后会同步到后端。');
 }
 
@@ -1609,10 +1608,9 @@ function removeCharacterAvatarImage() {
   chat.avatarImage = '';
   saveState();
   renderCharacterAvatarPreview(chat);
-  renderMessages();
+  renderMessagesApp();
   renderContacts();
   renderCharacterHighlight();
-  renderChat();
 }
 
 function renderMyProfile() {
@@ -1894,8 +1892,7 @@ function upsertHydratedChatMessage(threadId, rawMessage) {
   chat.summary = hydratedMapped.text || (hydratedMapped.attachments?.length ? '[附件]' : chat.summary);
   chat.time = '刚刚';
   saveState();
-  if (uiState.activeChatKey === key) renderChat();
-  renderMessages();
+  renderMessagesApp();
 }
 
 function updateStreamingAssistant(threadId, content, done = false) {
@@ -1941,10 +1938,7 @@ function updateStreamingAssistant(threadId, content, done = false) {
   chat.summary = text;
   chat.time = '刚刚';
   saveState();
-  if (uiState.activeChatKey === key) {
-    renderChat();
-  }
-  renderMessages();
+  renderMessagesApp();
 }
 
 function handleThreadStreamEvent(event) {
@@ -1982,12 +1976,12 @@ async function openChat(chatKey) {
     } catch {}
     subscribeThreadEvents(key);
   }
-  renderMessages();
+  renderMessagesApp();
   renderDesktopBadge();
   renderLockNotification();
   setPhoneShell('app');
   setActiveView('chat');
-  renderChat();
+  renderMessagesApp();
 }
 
 function getRecentMemories(limit = 4) {
@@ -2063,6 +2057,10 @@ function submitSlashCommand(command) {
     return;
   }
   dom.chatForm?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+}
+
+function submitActiveSlashCommand() {
+  submitSlashCommand(slashCommandState.matches[slashCommandState.activeIndex]?.command);
 }
 
 function renderSlashCommandPalette() {
@@ -2361,7 +2359,7 @@ async function flushPendingOutbox() {
       if (message.pending) message.pending = false;
     });
     saveState();
-    renderChat();
+    renderMessagesApp();
     uiState.isGenerating = false;
     await generateAssistantReply(batchText);
   } catch (error) {
@@ -2436,10 +2434,9 @@ async function generateAssistantReply(userInput = '', { continueOnly = false } =
     chat.summary = replyText;
     chat.time = '刚刚';
     saveState();
-    renderMessages();
+    renderMessagesApp();
     renderDesktopBadge();
     renderLockNotification();
-    renderChat();
     setChatStatus(apiUrl && apiKey ? '已生成回复。' : '当前使用本地演示回复。');
   } catch (error) {
     setChatStatus(error instanceof Error ? error.message : '生成失败', true);
@@ -2470,17 +2467,35 @@ function applyTheme() {
 }
 
 function setActiveView(viewName) {
+  const resolvedViewName = resolveAllowedViewName(viewName);
   let activeView = null;
   document.querySelectorAll('.view').forEach((view) => {
-    const isActive = view.dataset.view === viewName;
+    const isActive = Boolean(resolvedViewName) && view.dataset.view === resolvedViewName;
     view.classList.toggle('view-active', isActive);
     if (isActive) activeView = view;
   });
 
   dom.tabs.forEach((tab) => {
-    tab.classList.toggle('active', tab.dataset.tab === viewName);
+    tab.classList.toggle('active', Boolean(resolvedViewName) && tab.dataset.tab === resolvedViewName);
   });
-  document.body.dataset.activeView = viewName;
+  document.body.dataset.activeView = resolvedViewName;
+}
+
+function resolveAllowedViewName(viewName) {
+  const requested = String(viewName || '').trim();
+  if (requested && isViewAllowed(requested)) return requested;
+  if (isViewAllowed('contacts')) return 'contacts';
+  const fallback = Array.from(document.querySelectorAll('.view')).find((view) => isViewAllowed(view.dataset.view || ''));
+  return fallback?.dataset?.view || '';
+}
+
+function isViewAllowed(viewName) {
+  const normalized = String(viewName || '').trim();
+  if (!normalized) return false;
+  const view = Array.from(document.querySelectorAll('.view')).find((item) => item.dataset.view === normalized) || null;
+  if (!view) return false;
+  const componentAppId = String(view.getAttribute('data-component-app-id') || '').trim();
+  return !componentAppId || isStaticDesktopAppVisible(componentAppId);
 }
 
 function applyPhoneShell() {
@@ -2497,6 +2512,7 @@ function applyPhoneShell() {
 }
 
 function getStaticDesktopAppEntries() {
+  const hiddenIds = getHiddenStaticAppIds();
   return [
     ...CORE_DESKTOP_APPS,
     ...registeredApps.map((app) => ({
@@ -2505,9 +2521,10 @@ function getStaticDesktopAppEntries() {
       shortName: app.shortName,
       orbClass: app.orbClass,
       target: app.views.normal,
+      badge: app.badge,
       manifest: app,
     })),
-  ];
+  ].filter((app) => !hiddenIds.has(String(app.id || '').trim()));
 }
 
 function getStaticDesktopAppIds() {
@@ -2522,6 +2539,34 @@ function getDesktopAppEntries() {
     getStaticDesktopAppEntries(),
     dynamicAppRegistry.dynamicAppEntries,
   );
+}
+
+function getHiddenStaticAppIds() {
+  const hiddenIds = new Set(
+    (dynamicAppRegistry.staticAppControls?.hiddenAppIds || [])
+      .map((id) => String(id || '').trim())
+      .filter(Boolean),
+  );
+  CORE_DESKTOP_APP_ALIASES.forEach((alias) => {
+    if (hiddenIds.has(alias.backendId)) hiddenIds.add(alias.nativeId);
+  });
+  return hiddenIds;
+}
+
+function isStaticDesktopAppVisible(appId) {
+  const id = String(appId || '').trim();
+  return Boolean(id) && !getHiddenStaticAppIds().has(id);
+}
+
+function applyComponentVisibility() {
+  document.querySelectorAll('[data-component-app-id]').forEach((element) => {
+    const visible = isStaticDesktopAppVisible(element.getAttribute('data-component-app-id'));
+    element.hidden = !visible;
+    element.setAttribute('aria-hidden', String(!visible));
+  });
+  if (document.body.dataset.activeView && !isViewAllowed(document.body.dataset.activeView)) {
+    setActiveView('contacts');
+  }
 }
 
 function getDesktopPageCount() {
@@ -2548,6 +2593,9 @@ function setPhoneShell(mode) {
   state.phoneShell.mode = mode;
   saveState();
   applyPhoneShell();
+  if (mode === 'app' && !document.body.dataset.activeView) {
+    setActiveView('contacts');
+  }
 }
 
 function openPanel(panelName) {
@@ -2645,6 +2693,10 @@ function renderServiceManagerPanel() {
     const inflight = serviceManagerActionInflight.has(target.serviceId);
     const openDisabled = target.open?.kind === 'url' && !target.open.url;
     const actionDisabled = !backendEnabled || inflight;
+    const controls = new Set(Array.isArray(target.controls) && target.controls.length
+      ? target.controls
+      : ['status', 'start', 'stop', 'restart', 'logs', 'repair']);
+    const logsPreview = serviceManagerLogSnippets.get(target.serviceId) || null;
 
     const pills = [
       availability ? `<span class="service-pill service-pill-strong">${escapeHtml(availability)}</span>` : '',
@@ -2669,11 +2721,14 @@ function renderServiceManagerPanel() {
         </div>
         <div class="service-pill-row">${pills || '<span class="service-pill">未返回服务状态</span>'}</div>
         ${message ? `<p>${escapeHtml(message)}</p>` : ''}
+        ${logsPreview ? renderServiceLogsPreview(logsPreview) : ''}
         <div class="service-actions">
-          <button type="button" class="secondary-button small-button" data-service-action="refresh" data-service-id="${escapeHtml(target.serviceId)}" ${serviceManagerStatus.loading ? 'disabled' : ''}>刷新</button>
-          <button type="button" class="secondary-button small-button" data-service-action="start" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>启动</button>
-          <button type="button" class="secondary-button small-button" data-service-action="stop" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>停止</button>
-          <button type="button" class="secondary-button small-button" data-service-action="restart" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>重启</button>
+          ${controls.has('status') ? `<button type="button" class="secondary-button small-button" data-service-action="status" data-service-id="${escapeHtml(target.serviceId)}" ${serviceManagerStatus.loading ? 'disabled' : ''}>状态</button>` : ''}
+          ${controls.has('start') ? `<button type="button" class="secondary-button small-button" data-service-action="start" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>启动</button>` : ''}
+          ${controls.has('stop') ? `<button type="button" class="secondary-button small-button" data-service-action="stop" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>停止</button>` : ''}
+          ${controls.has('restart') ? `<button type="button" class="secondary-button small-button" data-service-action="restart" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>重启</button>` : ''}
+          ${controls.has('logs') ? `<button type="button" class="secondary-button small-button" data-service-action="logs" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>日志</button>` : ''}
+          ${controls.has('repair') ? `<button type="button" class="soft-button small-button" data-service-action="repair" data-service-id="${escapeHtml(target.serviceId)}" ${actionDisabled ? 'disabled' : ''}>修复</button>` : ''}
           <button type="button" class="soft-button small-button" data-service-action="open" data-service-id="${escapeHtml(target.serviceId)}" ${(openDisabled || inflight) ? 'disabled' : ''}>打开</button>
         </div>
       </article>
@@ -2686,6 +2741,22 @@ function renderServiceManagerPanel() {
     if (!serviceId || !action) return;
     button.addEventListener('click', () => void handleServiceManagerAction(serviceId, action));
   });
+}
+
+function renderServiceLogsPreview(logsPayload) {
+  const entries = Array.isArray(logsPayload?.entries) ? logsPayload.entries : [];
+  const count = Number.isFinite(Number(logsPayload?.entryCount)) ? Number(logsPayload.entryCount) : entries.length;
+  const tail = entries.slice(-3).map((entry) => {
+    const at = String(entry?.at || '').trim();
+    const level = String(entry?.level || '').trim();
+    return [at, level, entry?.message || '[REDACTED]'].filter(Boolean).join(' ');
+  });
+  return `
+    <div class="service-log-preview">
+      <strong>最近日志：${escapeHtml(String(count))} 行（已脱敏）</strong>
+      ${tail.length ? `<pre>${escapeHtml(tail.join('\n'))}</pre>` : '<p>暂无日志内容。</p>'}
+    </div>
+  `;
 }
 
 function summarizeDynamicRegistry(registry) {
@@ -2784,10 +2855,11 @@ async function refreshDynamicAppRegistry({ manual = false } = {}) {
   }
 
   if (!backendEnabled) {
-    dynamicAppRegistry = { dynamicAppEntries: [] };
+    dynamicAppRegistry = { dynamicAppEntries: [], staticAppControls: { hiddenAppIds: [] } };
     setDynamicRegistryStatus('后端未连接，使用内置 App。');
     renderDesktopApps();
     renderDesktopBadge();
+    applyComponentVisibility();
     syncActiveDynamicAppAfterRegistryRefresh();
     renderServiceManagerPanel();
     return false;
@@ -2801,6 +2873,7 @@ async function refreshDynamicAppRegistry({ manual = false } = {}) {
     setDynamicRegistryStatus(summarizeDynamicRegistry(dynamicAppRegistry));
     renderDesktopApps();
     renderDesktopBadge();
+    applyComponentVisibility();
     syncActiveDynamicAppAfterRegistryRefresh();
     renderServiceManagerPanel();
     return true;
@@ -2811,9 +2884,10 @@ async function refreshDynamicAppRegistry({ manual = false } = {}) {
       true,
     );
     if (!hasExistingEntries) {
-      dynamicAppRegistry = { dynamicAppEntries: [] };
+      dynamicAppRegistry = { dynamicAppEntries: [], staticAppControls: { hiddenAppIds: [] } };
       renderDesktopApps();
       renderDesktopBadge();
+      applyComponentVisibility();
       renderServiceManagerPanel();
     }
     return false;
@@ -2832,6 +2906,15 @@ async function fetchServiceManagerServiceStatus(serviceId) {
   const normalizedId = String(serviceId || '').trim();
   if (!normalizedId) throw new Error('缺少 serviceId');
   return requestBackend(`/service-manager/services/${encodeURIComponent(normalizedId)}/status`, {
+    preserveBackendOnError: true,
+  });
+}
+
+async function fetchServiceManagerServiceLogs(serviceId, limit = 80) {
+  const normalizedId = String(serviceId || '').trim();
+  if (!normalizedId) throw new Error('缺少 serviceId');
+  const normalizedLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(500, Number(limit))) : 80;
+  return requestBackend(`/service-manager/services/${encodeURIComponent(normalizedId)}/logs?limit=${encodeURIComponent(String(normalizedLimit))}`, {
     preserveBackendOnError: true,
   });
 }
@@ -2899,7 +2982,7 @@ async function callServiceManagerAction(serviceId, action) {
   if (!normalizedId) throw new Error('缺少 serviceId');
   if (!normalizedAction) throw new Error('缺少 action');
 
-  if (!['start', 'stop', 'restart'].includes(normalizedAction)) {
+  if (!['start', 'stop', 'restart', 'repair'].includes(normalizedAction)) {
     throw new Error(`不支持的服务操作：${normalizedAction}`);
   }
 
@@ -2969,7 +3052,7 @@ async function handleServiceManagerAction(serviceId, action) {
     return;
   }
 
-  if (normalizedAction === 'refresh') {
+  if (normalizedAction === 'refresh' || normalizedAction === 'status') {
     await refreshServiceManagerSnapshot({ manual: true });
     return;
   }
@@ -2984,8 +3067,15 @@ async function handleServiceManagerAction(serviceId, action) {
   renderServiceManagerPanel();
 
   try {
-    await callServiceManagerAction(normalizedId, normalizedAction);
-    await refreshServiceManagerSnapshot({ manual: false });
+    if (normalizedAction === 'logs') {
+      const payload = await fetchServiceManagerServiceLogs(normalizedId);
+      serviceManagerLogSnippets.set(normalizedId, payload.logs || { entryCount: 0, entries: [] });
+      setServiceManagerStatus(`已读取 ${normalizedId} 日志。`);
+      renderServiceManagerPanel();
+    } else {
+      await callServiceManagerAction(normalizedId, normalizedAction);
+      await refreshServiceManagerSnapshot({ manual: false });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : '服务操作失败';
     setServiceManagerStatus(`服务操作失败：${message}`, true);
@@ -3027,6 +3117,7 @@ function openDesktopApp(entry) {
 }
 
 function openAppNormal(appId) {
+  if (!isStaticDesktopAppVisible(appId)) return;
   const app = registeredApps.find((item) => item.id === appId);
   if (!app?.views?.normal) return;
   closePanel();
@@ -3077,72 +3168,76 @@ function renderDesktopApps() {
 function mountRegisteredAppViews() {
   if (!dom.registeredAppViews) return;
   dom.registeredAppViews.innerHTML = appModules.map((app) => app.template || '').join('');
+  dom.refreshDynamicDomBindings?.();
+}
+
+function createRegisteredAppContext() {
+  return {
+    state,
+    uiState,
+    saveState,
+    refresh: renderAll,
+    backendEnabled: () => backendEnabled,
+    queueStateSync,
+    renderAvatar,
+    personaAvatarSource,
+    getActiveChat,
+    openChat,
+    setActiveView,
+    closeThreadEventStream,
+    renderDesktopBadge,
+    renderLockNotification,
+    setChatStatus,
+    renderAttachmentStrip,
+    updateMagicWandState,
+    updateRuntimePassThroughToggle,
+    uploadChatAttachments,
+    flushPendingOutbox,
+    prepareChatSubmit,
+    queueLocalUserMessage,
+    closeSlashCommandPalette,
+    updateSlashCommandPalette,
+    moveSlashCommandSelection,
+    submitActiveSlashCommand,
+    isSlashCommandOpen: () => slashCommandState.open,
+    hasSlashCommandMatches: () => slashCommandState.matches.length > 0,
+    clearWaifuDisplayTimers,
+    resolveChatWaifuSettings,
+    getWaifuDisplaySegments,
+    getWaifuSegmentDelay,
+    renderBubbleTextHtml,
+    renderMessageTextHtml,
+    scheduleWaifuSegments,
+    attachmentDownloadUrl,
+    formatBytes,
+    submitThreadAction,
+  };
+}
+
+function renderRegisteredApp(appId) {
+  const app = appModules.find((candidate) => candidate.manifest?.id === appId);
+  app?.render?.(createRegisteredAppContext());
+}
+
+function renderMessagesApp() {
+  renderRegisteredApp('messages');
 }
 
 function refreshRegisteredApps() {
-  const context = {
-    state,
-    saveState,
-    refresh: renderAll,
-  };
+  const context = createRegisteredAppContext();
   appModules.forEach((app) => {
     app.render?.(context);
   });
 }
 
 function bindRegisteredApps() {
-  const context = {
-    state,
-    saveState,
-    refresh: renderAll,
-  };
+  const context = createRegisteredAppContext();
   appModules.forEach((app) => {
     app.bind?.(context);
   });
 
   document.querySelectorAll('[data-app-normal]').forEach((button) => {
     button.addEventListener('click', () => openAppNormal(button.dataset.appNormal));
-  });
-}
-
-function renderMessages() {
-  dom.messageList.innerHTML = '';
-
-  const entries = Object.entries(state.chats);
-  const unreadTotal = entries.reduce((sum, [, chat]) => sum + Number(chat.unread || 0), 0);
-  const latest = entries.find(([, chat]) => Number(chat.unread || 0) > 0) || entries[0];
-
-  if (dom.messageOverviewTitle) {
-    dom.messageOverviewTitle.textContent = latest?.[1]?.name
-      ? `最近联系人：${latest[1].name}`
-      : '最近联系人';
-  }
-  if (dom.messageOverviewSubtitle) {
-    dom.messageOverviewSubtitle.textContent = latest?.[1]?.summary || '从桌面进入消息后，继续最近的 AI 联系人对话。';
-  }
-  if (dom.messageOverviewBadge) {
-    dom.messageOverviewBadge.textContent = unreadTotal ? `${unreadTotal} 条未读` : '已读';
-  }
-
-  entries.forEach(([key, chat]) => {
-    const button = document.createElement('button');
-    button.className = 'message-item';
-    button.dataset.openChat = key;
-    button.innerHTML = `
-      ${renderAvatar(chat)}
-      <div class="message-meta">
-        <div class="message-topline">
-          <strong>${chat.name}</strong>
-          <span>${chat.time}</span>
-        </div>
-        <p>${escapeHtml(chat.summary)}</p>
-      </div>
-      ${chat.unread ? `<span class="badge">${chat.unread}</span>` : ''}
-    `;
-    button.addEventListener('click', () => {
-      void openChat(key);
-    });
-    dom.messageList.appendChild(button);
   });
 }
 
@@ -3237,65 +3332,6 @@ function renderCharacterHighlight() {
   });
 }
 
-function renderMessageAttachments(message) {
-  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
-  if (!attachments.length) return '';
-  return `<div class="bubble-attachments">${attachments.map((attachment) => {
-    const url = attachmentDownloadUrl(attachment);
-    const label = escapeHtml(attachment.fileName || 'attachment');
-    const mime = String(attachment.mimeType || '').toLowerCase();
-    const isImage = attachment.kind === 'image' || mime.startsWith('image/');
-    if (isImage && url) {
-      return `<a class="bubble-image-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><img class="bubble-image" src="${escapeHtml(url)}" alt="${label}"></a>`;
-    }
-    return `<a class="bubble-file" href="${escapeHtml(url || '#')}" target="_blank" rel="noreferrer"><span>${isImage ? '图片' : '文件'}</span><strong>${label}</strong><em>${escapeHtml(formatBytes(attachment.size))}</em></a>`;
-  }).join('')}</div>`;
-}
-
-function renderMessageActions(message) {
-  const actions = Array.isArray(message?.actions) ? message.actions : [];
-  if (!actions.length) return '';
-  return `<div class="approval-card"><p>需要操作确认</p><div class="approval-actions">${actions.map((action) => `
-    <button type="button" data-thread-action="${escapeHtml(action.action)}" data-reply-ctx="${escapeHtml(action.replyCtx || '')}">${escapeHtml(action.label || action.action)}</button>
-  `).join('')}</div></div>`;
-}
-
-function bindMessageActions(container) {
-  container.querySelectorAll('[data-thread-action]').forEach((button) => {
-    button.addEventListener('click', () => {
-      void submitThreadAction(button.dataset.threadAction || '', button.dataset.replyCtx || '');
-    });
-  });
-}
-
-function appendChatMessageRow(message, chat, options = {}) {
-  const side = message.side === 'self' ? 'self' : 'other';
-  const row = document.createElement('div');
-  row.className = ['chat-message-row', `chat-message-${side}`, options.rowClass || ''].filter(Boolean).join(' ');
-  if (options.hidden) row.hidden = true;
-  if (Number.isFinite(options.waifuDelayMs)) row.dataset.waifuDelayMs = String(options.waifuDelayMs);
-  if (Number.isInteger(options.waifuSegmentIndex)) row.dataset.waifuSegment = String(options.waifuSegmentIndex);
-
-  const bubble = document.createElement('div');
-  bubble.className = [
-    `bubble bubble-${side}`,
-    message.pending ? 'bubble-pending' : '',
-    message.streaming ? 'bubble-streaming' : '',
-    options.bubbleClass || '',
-  ].filter(Boolean).join(' ');
-  bubble.innerHTML = [
-    options.textHtml ?? renderMessageTextHtml(message, chat),
-    options.includeAttachments === false ? '' : renderMessageAttachments(message),
-    options.includeActions === false ? '' : renderMessageActions(message),
-  ].filter(Boolean).join('');
-  bindMessageActions(bubble);
-
-  if (side === 'other') row.innerHTML = renderAvatar(chat, 'avatar chat-avatar');
-  row.appendChild(bubble);
-  if (side === 'self') row.insertAdjacentHTML('beforeend', renderAvatar(personaAvatarSource(), 'avatar chat-avatar'));
-  dom.chatThread.appendChild(row);
-}
-
 async function submitThreadAction(action, replyCtx = '') {
   const chat = getActiveChat();
   const threadId = String(chat?.backend?.threadId || uiState.activeChatKey || '').trim();
@@ -3320,60 +3356,6 @@ async function submitThreadAction(action, replyCtx = '') {
     uiState.isGenerating = false;
     updateMagicWandState();
   }
-}
-
-function renderChat() {
-  const chat = getActiveChat();
-  if (!chat) {
-    dom.chatTitle.textContent = '暂无聊天';
-    dom.chatSubtitle.textContent = '';
-    if (dom.chatHeaderAvatar) dom.chatHeaderAvatar.innerHTML = '';
-    dom.chatThread.innerHTML = '';
-    clearWaifuDisplayTimers();
-    renderAttachmentStrip();
-    updateRuntimePassThroughToggle();
-    return;
-  }
-  dom.chatTitle.textContent = chat.name;
-  dom.chatSubtitle.textContent = chat.subtitle;
-  if (dom.chatHeaderAvatar) dom.chatHeaderAvatar.innerHTML = renderAvatar(chat, 'avatar');
-  clearWaifuDisplayTimers();
-  dom.chatThread.innerHTML = '';
-  const waifuSettings = resolveChatWaifuSettings(chat);
-
-  chat.messages.forEach((message) => {
-    const waifuSegments = getWaifuDisplaySegments(message, chat);
-    if (waifuSegments.length) {
-      let previousSegmentText = '';
-      waifuSegments.forEach((segmentText, index) => {
-        const isLastSegment = index === waifuSegments.length - 1;
-        appendChatMessageRow(message, chat, {
-          rowClass: 'chat-message-waifu-line',
-          bubbleClass: 'bubble-message-waifu',
-          textHtml: renderBubbleTextHtml(segmentText),
-          includeAttachments: isLastSegment,
-          includeActions: isLastSegment,
-          hidden: message.waifuDisplayPending === true && index > 0,
-          waifuDelayMs: index > 0
-            ? getWaifuSegmentDelay(previousSegmentText || segmentText, waifuSettings)
-            : 0,
-          waifuSegmentIndex: index,
-        });
-        previousSegmentText = `${previousSegmentText}${segmentText}`;
-      });
-      return;
-    }
-    appendChatMessageRow(message, chat);
-  });
-
-  renderAttachmentStrip();
-  updateMagicWandState();
-  updateRuntimePassThroughToggle();
-
-  requestAnimationFrame(() => {
-    scheduleWaifuSegments(chat);
-    dom.chatThread.scrollTop = dom.chatThread.scrollHeight;
-  });
 }
 
 function renderMoments() {
@@ -3886,11 +3868,10 @@ function renderAll() {
   applyTheme();
   applyPhoneShell();
   renderDesktopApps();
+  applyComponentVisibility();
   applyDesktopPage();
-  renderMessages();
   renderContacts();
   renderCharacterHighlight();
-  renderChat();
   renderMoments();
   renderForumPosts();
   renderMemories();
@@ -4012,127 +3993,6 @@ dom.desktopPages.addEventListener('touchend', (event) => {
   setDesktopPage((state.desktop?.page || 0) + (deltaX < 0 ? 1 : -1));
 }, { passive: true });
 
-dom.backButton.addEventListener('click', () => {
-  closeThreadEventStream();
-  setActiveView(uiState.previousView === 'contacts' ? 'contacts' : 'messages');
-});
-
-dom.markReadButton.addEventListener('click', () => {
-  Object.values(state.chats).forEach((chat) => {
-    chat.unread = 0;
-  });
-  saveState();
-  queueStateSync();
-  renderMessages();
-  renderDesktopBadge();
-  renderLockNotification();
-});
-
-if (dom.attachmentButton) {
-  dom.attachmentButton.addEventListener('click', () => {
-    if (!backendEnabled) {
-      setChatStatus('附件需要连接 smallphone-app 后端。', true);
-      return;
-    }
-    dom.chatAttachmentInput?.click();
-  });
-}
-
-if (dom.chatAttachmentInput) {
-  dom.chatAttachmentInput.addEventListener('change', () => {
-    const files = dom.chatAttachmentInput.files;
-    dom.chatAttachmentInput.value = '';
-    if (!files?.length) return;
-    uploadChatAttachments(files).catch((error) => {
-      setChatStatus(error instanceof Error ? error.message : '附件上传失败', true);
-    });
-  });
-}
-
-if (dom.magicWandButton) {
-  dom.magicWandButton.addEventListener('click', () => {
-    void flushPendingOutbox();
-  });
-}
-
-dom.chatInput?.addEventListener('input', () => {
-  updateSlashCommandPalette();
-});
-
-dom.chatInput?.addEventListener('focus', () => {
-  updateSlashCommandPalette();
-});
-
-dom.chatInput?.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && slashCommandState.open) {
-    event.preventDefault();
-    closeSlashCommandPalette();
-    return;
-  }
-
-  if (!slashCommandState.open) return;
-
-  if (event.key === 'ArrowDown') {
-    event.preventDefault();
-    moveSlashCommandSelection(1);
-    return;
-  }
-
-  if (event.key === 'ArrowUp') {
-    event.preventDefault();
-    moveSlashCommandSelection(-1);
-    return;
-  }
-
-  if (event.key === 'Enter' && slashCommandState.matches.length) {
-    event.preventDefault();
-    submitSlashCommand(slashCommandState.matches[slashCommandState.activeIndex]?.command);
-  }
-});
-
-document.addEventListener('click', (event) => {
-  if (!slashCommandState.open) return;
-  if (dom.chatInputShell?.contains(event.target)) return;
-  closeSlashCommandPalette();
-});
-
-dom.runtimePassThroughToggle?.addEventListener('click', () => {
-  uiState.runtimePassThroughEnabled = !uiState.runtimePassThroughEnabled;
-  updateRuntimePassThroughToggle();
-});
-
-dom.chatForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const hasAttachments = Array.isArray(uiState.pendingAttachments) && uiState.pendingAttachments.length > 0;
-  const { text: value, runtimePassThrough } = prepareChatSubmit(dom.chatInput.value, hasAttachments);
-  if (!value && !hasAttachments) return;
-
-  const chat = getActiveChat();
-  if (!chat) return;
-  queueLocalUserMessage(chat, value, { runtimePassThrough });
-
-  if (value && state.memories.length < 12) {
-    state.memories.unshift({
-      title: '聊天碎片',
-      text: value,
-      tags: ['新对话', chat.name],
-    });
-  }
-
-  dom.chatInput.value = '';
-  closeSlashCommandPalette();
-  saveState();
-  renderAll();
-  if (backendEnabled) {
-    setChatStatus(runtimePassThrough
-      ? '正在通过 smallphone-app 肘击 AI...'
-      : '正在发送到 smallphone-app 后端...');
-    void flushPendingOutbox();
-    return;
-  }
-  setChatStatus('已先放在前端。点魔法棒后生成回复。');
-});
-
 dom.memoryForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const value = dom.memoryInput.value.trim();
@@ -4199,7 +4059,7 @@ dom.characterSelect.addEventListener('change', () => {
   void loadCharacterRuntimeSettingsForCurrent({ force: true });
   if (backendEnabled) {
     void loadThreadMessages(uiState.editingCharacterKey).then(() => {
-      renderChat();
+      renderMessagesApp();
     }).catch(() => {});
   }
 });
@@ -4417,14 +4277,13 @@ dom.myProfileForm?.addEventListener('submit', (event) => {
   renderContacts();
 });
 
-dom.chatInput.addEventListener('input', () => {
-});
-
 mountRegisteredAppViews();
 bindRegisteredApps();
 updateClock();
 window.setInterval(updateClock, 60 * 1000);
-setActiveView('messages');
+state.phoneShell.mode = 'desktop';
+saveState();
+setActiveView('');
 
 bootstrapState()
   .then(async () => {

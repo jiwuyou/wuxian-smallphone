@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "componentsDir": "~/.config/openhouseai/components.d",
+  "layers": {
+    "shellMenu": "Android app shell sidebar registration.",
+    "smallphoneApp": "SmallPhone desktop app registration.",
+    "serviceManager": "Service control, logs, status, and repair registration.",
+    "ai": "AI-readable documentation and intent mapping."
+  },
+  "smallphoneConsumes": ["smallphoneApp", "serviceManager"],
+  "runtimeApis": {
+    "components": "/api/components",
+    "aiCapabilities": "/api/ai-capabilities"
+  },
+  "forbiddenManifestKeys": ["command", "shell", "script", "args"],
+  "components": [
+    {
+      "id": "messages",
+      "kind": "core-app",
+      "smallphoneApp": {
+        "staticAppId": "messages",
+        "entry": {
+          "type": "native-view",
+          "view": "messages"
+        }
+      },
+      "purpose": "AI conversations with Claude Code, OpenCode, and Codex contacts."
+    },
+    {
+      "id": "sillytavern",
+      "kind": "ai-partner",
+      "smallphoneApp": {
+        "staticAppId": "sillytavern",
+        "entry": {
+          "type": "native-view",
+          "view": "sillytavern"
+        },
+        "controlEntry": {
+          "type": "service-control",
+          "serviceNames": ["smallphone-sillytavern"]
+        }
+      },
+      "serviceManager": {
+        "services": ["smallphone-sillytavern"]
+      }
+    },
+    {
+      "id": "controlled-browser",
+      "kind": "controlled-browser",
+      "smallphoneApp": {
+        "entry": {
+          "type": "webview",
+          "url": "http://127.0.0.1:23080/"
+        },
+        "controlEntry": {
+          "type": "service-control",
+          "serviceNames": ["controlled-browser"]
+        }
+      },
+      "serviceManager": {
+        "services": ["controlled-browser"]
+      }
+    }
+  ]
+}

@@ -6,10 +6,12 @@ import * as vocabulary from '../apps/vocabulary/index.js';
 import * as airplane from '../apps/airplane/index.js';
 import * as likeGirl from '../apps/like-girl/index.js';
 import * as likeGirlClone from '../apps/like-girl-clone/index.js';
+import * as messages from '../apps/messages/index.js';
 import * as sillytavern from '../apps/sillytavern/index.js';
 import * as workflows from '../apps/workflows/index.js?v=6';
 
 export const appModules = [
+  messages,
   calendar,
   weather,
   diary,
@@ -49,6 +51,9 @@ const DYNAMIC_APP_ORB_CLASSES = [
   'orb-app-manager',
   'orb-character',
 ];
+const STATIC_APP_ALIASES = {
+  chat: 'messages',
+};
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -140,6 +145,75 @@ function normalizeRegistryApp(app) {
     version: normalizeString(app.version),
     service: normalizeServiceMeta(app.service || app.serviceManager || app.service_manager),
     services: normalizeServiceMetaList(app.services || app.serviceList || app.service_list),
+  };
+}
+
+function normalizeRegistryComponent(component) {
+  if (!isPlainObject(component)) return null;
+  const id = normalizePublicId(component.id);
+  if (!id) return null;
+  const smallphoneApp = isPlainObject(component.smallphoneApp)
+    ? component.smallphoneApp
+    : (isPlainObject(component.smallphone_app) ? component.smallphone_app : null);
+  if (!smallphoneApp) return null;
+  const entry = isPlainObject(smallphoneApp.entry) ? smallphoneApp.entry : {};
+  const serviceManager = isPlainObject(component.serviceManager)
+    ? component.serviceManager
+    : (isPlainObject(component.service_manager) ? component.service_manager : {});
+  return {
+    id,
+    name: normalizeString(component.name || component.title || id),
+    title: normalizeString(component.title || component.name || id),
+    kind: normalizeString(component.kind || 'app'),
+    source: normalizeString(component.source || 'component-registry'),
+    visible: smallphoneApp.visible !== false,
+    section: normalizeString(smallphoneApp.section || 'apps'),
+    order: Number.isFinite(Number(smallphoneApp.order)) ? Number(smallphoneApp.order) : 100,
+    staticAppId: normalizePublicId(
+      smallphoneApp.staticAppId ||
+        smallphoneApp.static_app_id ||
+        smallphoneApp.appId ||
+        smallphoneApp.app_id,
+    ),
+    entry: {
+      type: normalizeString(entry.type),
+      url: normalizeString(entry.url),
+      view: normalizePublicId(entry.view),
+    },
+    controlEntry: isPlainObject(smallphoneApp.controlEntry || smallphoneApp.control_entry)
+      ? (smallphoneApp.controlEntry || smallphoneApp.control_entry)
+      : null,
+    services: normalizeServiceMetaList(serviceManager.services),
+    aiDocs: normalizeString(component.ai?.summaryDoc || component.ai?.summary_doc || component.aiDocs || component.ai_docs),
+    capabilities: normalizeString(component.ai?.capabilities || component.capabilities),
+  };
+}
+
+function normalizeStaticAppControls(registry) {
+  const hiddenIds = new Set();
+  const controls = isPlainObject(registry.staticAppControls) ? registry.staticAppControls : {};
+  const configuredHiddenIds = Array.isArray(controls.hiddenAppIds)
+    ? controls.hiddenAppIds
+    : Array.isArray(controls.hidden_app_ids)
+      ? controls.hidden_app_ids
+      : [];
+
+  configuredHiddenIds
+    .map(normalizePublicId)
+    .filter(Boolean)
+    .forEach((id) => hiddenIds.add(STATIC_APP_ALIASES[id] || id));
+
+  const components = Array.isArray(registry.components) ? registry.components : [];
+  components
+    .map(normalizeRegistryComponent)
+    .filter((component) => component && component.visible === false)
+    .forEach((component) => {
+      const id = component.staticAppId || component.appId || component.id;
+      if (id) hiddenIds.add(STATIC_APP_ALIASES[id] || id);
+    });
+
+  return {
+    hiddenAppIds: [...hiddenIds].sort(),
   };
 }
 
@@ -328,6 +402,10 @@ export function mergeStaticAndDynamicDesktopApps(staticEntries = [], dynamicEntr
 
 export function normalizeDynamicAppRegistry(payload, options = {}) {
   const registry = isPlainObject(payload) ? payload : {};
+  const components = (Array.isArray(registry.components) ? registry.components : [])
+    .map(normalizeRegistryComponent)
+    .filter(Boolean);
+  const staticAppControls = normalizeStaticAppControls(registry);
   const apps = (Array.isArray(registry.apps) ? registry.apps : [])
     .map(normalizeRegistryApp)
     .filter(Boolean);
@@ -347,6 +425,8 @@ export function normalizeDynamicAppRegistry(payload, options = {}) {
 
   return {
     generatedAt: normalizeString(registry.generatedAt),
+    components,
+    staticAppControls,
     apps,
     appInstances,
     dynamicAppEntries,

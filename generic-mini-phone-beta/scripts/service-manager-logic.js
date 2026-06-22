@@ -34,6 +34,29 @@ function normalizeTags(raw) {
   return [];
 }
 
+const DEFAULT_SERVICE_CONTROLS = ['status', 'start', 'stop', 'restart', 'logs', 'repair'];
+
+function normalizeControls(raw) {
+  const source = Array.isArray(raw?.controls)
+    ? raw.controls
+    : Array.isArray(raw?.spec?.controls)
+      ? raw.spec.controls
+      : Array.isArray(raw?.capabilities)
+        ? raw.capabilities
+        : Array.isArray(raw?.spec?.capabilities)
+          ? raw.spec.capabilities
+          : [];
+  const allowed = new Set(DEFAULT_SERVICE_CONTROLS);
+  const controls = source
+    .map((item) => normalizeString(item).toLowerCase())
+    .filter((item) => allowed.has(item));
+  return [...new Set(controls)];
+}
+
+function normalizeRepairActionRef(raw) {
+  return normalizeString(raw?.repairActionRef || raw?.repair_action_ref || raw?.spec?.repairActionRef || raw?.spec?.repair_action_ref);
+}
+
 export function normalizeServiceManagerList(payload) {
   return normalizeListValue(payload);
 }
@@ -53,6 +76,8 @@ export function normalizeServiceManagerService(raw) {
     state: normalizeString(raw.state || raw.phase || ''),
     message: normalizeString(raw.message || raw.detail || raw.reason || ''),
     url: normalizeString(raw.url || raw.openUrl || raw.open_url || ''),
+    controls: normalizeControls(raw),
+    repairActionRef: normalizeRepairActionRef(raw),
     raw,
   };
 }
@@ -151,6 +176,12 @@ export function resolveManagedServiceUrl(meta) {
   return normalizeString(meta.url || meta.openUrl || meta.open_url || '');
 }
 
+export function resolveManagedServiceControls(meta) {
+  if (!meta || typeof meta !== 'object') return DEFAULT_SERVICE_CONTROLS;
+  const controls = normalizeControls(meta);
+  return controls.length ? controls : DEFAULT_SERVICE_CONTROLS;
+}
+
 export function resolveServiceMetasForAppId(appId, { serviceManagerSnapshot = {}, dynamicAppRegistry = {} } = {}) {
   const normalizedAppId = normalizeString(appId);
   if (!normalizedAppId) return [];
@@ -203,14 +234,15 @@ export function getManagedServiceTargets({ serviceManagerSnapshot = {}, dynamicA
     ? likeGirlMetas.map((meta) => resolveManagedServiceId(meta)).filter(Boolean)
     : ['like-girl'];
   likeGirlServiceIds.forEach((serviceId) => {
-    pushUnique({
-      key: `standalone:like-girl:${serviceId}`,
-      kind: 'standalone',
-      label: 'LikeGirl',
-      serviceId,
-      meta: likeGirlMetas.find((meta) => resolveManagedServiceId(meta) === serviceId) || null,
-      open: { kind: 'static-app', appId: 'like-girl', path: '' },
-    });
+      pushUnique({
+        key: `standalone:like-girl:${serviceId}`,
+        kind: 'standalone',
+        label: 'LikeGirl',
+        serviceId,
+        meta: likeGirlMetas.find((meta) => resolveManagedServiceId(meta) === serviceId) || null,
+        controls: resolveManagedServiceControls(likeGirlMetas.find((meta) => resolveManagedServiceId(meta) === serviceId) || null),
+        open: { kind: 'static-app', appId: 'like-girl', path: '' },
+      });
   });
 
   const likeGirlCloneMetas = resolveServiceMetasForAppId('like-girl-clone', { serviceManagerSnapshot, dynamicAppRegistry });
@@ -218,14 +250,15 @@ export function getManagedServiceTargets({ serviceManagerSnapshot = {}, dynamicA
     ? likeGirlCloneMetas.map((meta) => resolveManagedServiceId(meta)).filter(Boolean)
     : ['like-girl-clone'];
   likeGirlCloneServiceIds.forEach((serviceId) => {
-    pushUnique({
-      key: `standalone:like-girl-clone:${serviceId}`,
-      kind: 'standalone',
-      label: 'LikeGirl 分身',
-      serviceId,
-      meta: likeGirlCloneMetas.find((meta) => resolveManagedServiceId(meta) === serviceId) || null,
-      open: { kind: 'static-app', appId: 'like-girl-clone', path: '' },
-    });
+      pushUnique({
+        key: `standalone:like-girl-clone:${serviceId}`,
+        kind: 'standalone',
+        label: 'LikeGirl 分身',
+        serviceId,
+        meta: likeGirlCloneMetas.find((meta) => resolveManagedServiceId(meta) === serviceId) || null,
+        controls: resolveManagedServiceControls(likeGirlCloneMetas.find((meta) => resolveManagedServiceId(meta) === serviceId) || null),
+        open: { kind: 'static-app', appId: 'like-girl-clone', path: '' },
+      });
   });
 
   const instances = Array.isArray(dynamicAppRegistry?.appInstances) ? dynamicAppRegistry.appInstances : [];
@@ -247,6 +280,7 @@ export function getManagedServiceTargets({ serviceManagerSnapshot = {}, dynamicA
         label: normalizeString(instance?.title || instance?.id || serviceId) || serviceId,
         serviceId,
         meta,
+        controls: resolveManagedServiceControls(meta),
         open: entry?.launchUrl
           ? { kind: 'dynamic-entry', instanceId: normalizeString(entry.instanceId || entry.id || '') }
           : { kind: 'url', url: resolveManagedServiceUrl(meta) },
@@ -264,6 +298,7 @@ export function getManagedServiceTargets({ serviceManagerSnapshot = {}, dynamicA
       label: normalizeString(service?.name || serviceId) || serviceId,
       serviceId,
       meta: service.raw || service,
+      controls: resolveManagedServiceControls(service.raw || service),
       open: { kind: 'url', url: resolveManagedServiceUrl(service) },
     });
   }

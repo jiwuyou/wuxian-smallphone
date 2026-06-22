@@ -6,6 +6,7 @@ import {
   createServiceFromDefinition,
   getManagedServiceTargets,
   mergeServiceManagerDefinitionWithStatus,
+  resolveManagedServiceControls,
 } from './service-manager-logic.js';
 
 test('service-manager status merge preserves definition metadata when status payload is sparse', () => {
@@ -105,4 +106,36 @@ test('managed targets preserve real LikeGirl IDs when status fetch falls back to
   assert.equal(targets.find((target) => target.label === 'LikeGirl 分身')?.serviceId, 'svc-like-girl-clone');
   assert.equal(targets.some((target) => target.serviceId === 'like-girl'), false);
   assert.equal(targets.some((target) => target.serviceId === 'like-girl-clone'), false);
+});
+
+test('managed targets preserve declared service controls including repair and logs', () => {
+  const dynamicAppRegistry = {
+    appInstances: [
+      {
+        id: 'component-hermes-webui',
+        appId: 'hermes-webui',
+        title: 'Hermes',
+        service: {
+          id: 'hermes-webui',
+          controls: ['status', 'logs', 'repair'],
+          repairActionRef: 'service-manager://actions/hermes-webui.repair',
+        },
+      },
+    ],
+    dynamicAppEntries: [
+      {
+        id: 'component-hermes-webui',
+        instanceId: 'component-hermes-webui',
+        launchUrl: 'http://127.0.0.1:23084/',
+      },
+    ],
+  };
+
+  assert.deepEqual(resolveManagedServiceControls(dynamicAppRegistry.appInstances[0].service), ['status', 'logs', 'repair']);
+
+  const targets = getManagedServiceTargets({ serviceManagerSnapshot: { services: [] }, dynamicAppRegistry });
+  const hermes = targets.find((target) => target.serviceId === 'hermes-webui');
+  assert.ok(hermes);
+  assert.deepEqual(hermes.controls, ['status', 'logs', 'repair']);
+  assert.equal(hermes.open.kind, 'dynamic-entry');
 });
