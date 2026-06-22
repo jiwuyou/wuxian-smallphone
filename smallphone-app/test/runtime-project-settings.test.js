@@ -14,12 +14,13 @@ function tmpDataFile() {
   return path.join(os.tmpdir(), `smallphone-runtime-project-settings-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
 }
 
-function createTestService() {
+function createTestService(options = {}) {
+  const mode = options.mode || "cc-webclient";
   const dataFile = tmpDataFile();
   const service = new SmallPhoneService({
     dataFile,
     runtime: {
-      mode: "cc-webclient",
+      mode,
       ccConnectProject: PROJECT_NAME,
     },
     permissions: {
@@ -33,7 +34,7 @@ function createTestService() {
     assert.ok(thread);
     thread.runtime = {
       ...(thread.runtime || {}),
-      provider: "cc-webclient",
+      provider: mode,
       project: PROJECT_NAME,
       agentType: "codex",
       workspaceDir: "/workspace/local-old",
@@ -119,6 +120,24 @@ test("runtime project settings GET maps cc-connect fields and sanitizes response
   assert.equal(serialized.includes("secret-token"), false);
   assert.equal(serialized.includes(MANAGEMENT_TOKEN), false);
   assert.equal(serialized.includes(MANAGEMENT_URL), false);
+});
+
+test("runtime project settings are available in cc-connect bridge mode", async (t) => {
+  const { service, dataFile } = createTestService({ mode: "cc-connect" });
+  const calls = installFetchStub(t, (call) => {
+    assert.equal(call.method, "GET");
+    return { body: { ok: true, data: projectResponse({ name: PROJECT_NAME }) } };
+  });
+  t.after(() => fs.rmSync(dataFile, { force: true }));
+
+  const result = await service.getThreadRuntimeProjectSettings("thread-aki");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, `${MANAGEMENT_URL}/api/v1/projects/${PROJECT_NAME}`);
+  assert.equal(result.available, true);
+  assert.equal(result.project, PROJECT_NAME);
+  assert.equal(result.settings.replyFooter, true);
+  assert.equal(result.settings.showContextIndicator, true);
 });
 
 test("runtime project settings PATCH sends only allowed fields and syncs local mode/work_dir", async (t) => {

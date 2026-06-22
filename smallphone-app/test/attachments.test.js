@@ -338,7 +338,7 @@ test("cc-webclient hydration updates thread preview without replacing profile su
     const threads = await service.listThreadsHydrated();
     const thread = threads.find((item) => item.id === "thread-aki");
     assert.ok(thread);
-    assert.equal(thread.summary, "Aki 的独立一对一窗口。");
+    assert.equal(thread.summary, "Claude Code 的独立一对一窗口。");
     assert.equal(thread.lastMessage.content, "remote assistant reply");
 
     const bootstrap = await service.bootstrapHydrated();

@@ -56,8 +56,6 @@ const ATTACHMENT_MAX_BYTES = Number.parseInt(
 );
 const DEFAULT_CONTACT_WORKFLOW_ID = "smallphone.default.contact";
 const DEFAULT_CONTACT_WORKFLOW_VERSION = 1;
-const DEFAULT_CONTACT_WORKFLOW_USER_PERSONA =
-  "The user prefers a SmallPhone-style AI product with persistent contacts, memory, and practical continuity.";
 const AVATAR_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const WORKSPACE_ATTACHMENT_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf", ".txt", ".md", ".csv", ".json"]);
 const WORKSPACE_ATTACHMENT_MIME_TYPES = {
@@ -1121,7 +1119,7 @@ class SmallPhoneService {
         status: "active",
         agentId,
         timeSettings: payload.timeSettings,
-        worldbookScopeIds: [ids.worldbookEntryId],
+        worldbookScopeIds: payload.worldbookContent ? [ids.worldbookEntryId] : [],
         relationship: {
           trust: payload.relationship.trust,
           intimacy: payload.relationship.intimacy,
@@ -1173,35 +1171,38 @@ class SmallPhoneService {
         evidence: payload.relationshipState.evidence,
         updatedAt: createdAt,
       };
-      const worldbookEntry = {
-        id: ids.worldbookEntryId,
-        name: `${payload.name} 联系人默认设定`,
-        enabled: true,
-        type: "contact",
-        scope: "contact",
-        mode: "always_on",
-        priority: payload.worldbookPriority,
-        tags: ["contact", slug],
-        triggers: {
-          keywords: [],
-          contactIds: [ids.contactId],
-          threadIds: [ids.threadId],
-          requiresTags: [],
-          excludesTags: [],
-        },
-        content: payload.worldbookContent,
-        createdAt,
-        updatedAt: createdAt,
-      };
-      const initialMessages = [
-        {
+      const worldbookEntry = payload.worldbookContent
+        ? {
+            id: ids.worldbookEntryId,
+            name: `${payload.name} 联系人上下文`,
+            enabled: true,
+            type: "contact",
+            scope: "contact",
+            mode: "always_on",
+            priority: payload.worldbookPriority,
+            tags: ["contact", slug],
+            triggers: {
+              keywords: [],
+              contactIds: [ids.contactId],
+              threadIds: [ids.threadId],
+              requiresTags: [],
+              excludesTags: [],
+            },
+            content: payload.worldbookContent,
+            createdAt,
+            updatedAt: createdAt,
+          }
+        : null;
+      const initialMessages = [];
+      if (payload.bootstrapMessage) {
+        initialMessages.push({
           id: createId("msg"),
           threadId: ids.threadId,
           role: "system",
           content: payload.bootstrapMessage,
           createdAt,
-        },
-      ];
+        });
+      }
       if (payload.greeting) {
         initialMessages.push({
           id: createId("msg"),
@@ -1215,7 +1216,7 @@ class SmallPhoneService {
       state.contacts.push(contact);
       state.threads.push(thread);
       state.relationshipStates.push(relationshipState);
-      state.worldbookEntries.push(worldbookEntry);
+      if (worldbookEntry) state.worldbookEntries.push(worldbookEntry);
       state.messages.push(...initialMessages);
       state.timeline.push({
         id: createId("tl"),
@@ -1702,15 +1703,15 @@ class SmallPhoneService {
 
   resolveRuntimeProjectSettingsTarget(threadId) {
     const target = this.resolvePermissionTarget(threadId);
-    if (this.runtimeInfo.id !== "cc-webclient") {
+    if (!isCcConnectProjectRuntime(this.runtimeInfo.id)) {
       return unavailableRuntimeProjectSettings(threadId, {
-        reason: "runtime project settings are only available for cc-webclient runtime",
+        reason: "runtime project settings are only available for cc-connect runtime",
       });
     }
     const project = normalizeRuntimeProjectName(target.runtimeProject || target.project);
     if (!project) {
       return unavailableRuntimeProjectSettings(threadId, {
-        reason: "thread has no cc-webclient runtime project",
+        reason: "thread has no cc-connect runtime project",
       });
     }
     if (!this.projectInfo.configured) {
@@ -1777,7 +1778,7 @@ class SmallPhoneService {
 
   async getRuntimeProjectPermissionInfo(target) {
     const project = String(target?.runtimeProject || target?.project || "").trim();
-    if (!project || this.runtimeInfo.id !== "cc-webclient") {
+    if (!project || !isCcConnectProjectRuntime(this.runtimeInfo.id)) {
       return null;
     }
     try {
@@ -3059,6 +3060,7 @@ function attachThreadRouting(thread, runtimeProvider = "", paths = DEFAULT_PATHS
   const sessionGeneration = getSessionGeneration(thread);
   const roleLevel = normalizeRoleLevel(thread.roleLevel || thread.runtime?.roleLevel || "contact");
   const workspaceScope = normalizeWorkspaceScope(thread.runtime?.workspaceScope) || workspaceScopeForRole(roleLevel);
+  const agentType = normalizeAgentType(thread.runtime?.agentType || "");
   return {
     ...thread,
     roleLevel,
@@ -3066,8 +3068,8 @@ function attachThreadRouting(thread, runtimeProvider = "", paths = DEFAULT_PATHS
     channelId,
     runtime: {
       provider: runtimeProvider || thread.runtime?.provider || "mock",
-      project: thread.runtime?.project || "",
-      agentType: thread.runtime?.agentType || "",
+      project: thread.runtime?.project || defaultRuntimeProjectForAgent(runtimeProvider, agentType),
+      agentType,
       model: thread.runtime?.model || "",
       roleLevel,
       workspaceScope,
@@ -3081,6 +3083,29 @@ function attachThreadRouting(thread, runtimeProvider = "", paths = DEFAULT_PATHS
       resumeSummary: normalizeSessionResumeSummary(thread.runtime?.resumeSummary, ""),
     },
   };
+}
+
+function defaultRuntimeProjectForAgent(runtimeProvider, agentType) {
+  if (normalizeRuntimeProvider(runtimeProvider) !== "cc-connect") return "";
+  switch (normalizeAgentType(agentType)) {
+    case "claudecode":
+      return "smallphone-claude";
+    case "opencode":
+      return "smallphone-opencode";
+    case "codex":
+      return "smallphone-codex";
+    default:
+      return "";
+  }
+}
+
+function normalizeRuntimeProvider(value) {
+  return String(value || "").trim().toLowerCase().replace(/_/g, "-");
+}
+
+function isCcConnectProjectRuntime(value) {
+  const provider = normalizeRuntimeProvider(value);
+  return provider === "cc-connect" || provider === "cc-webclient";
 }
 
 function buildThreadSessionKey(threadId, generation = 1) {
@@ -3538,11 +3563,11 @@ function normalizeWorkflowInputFromParts(raw, defaults = {}, options = {}) {
   const contactProjectDir = String(source.contactProjectDir || fallback.contactProjectDir || "").trim();
   const contactPersona = String(source.contactPersona || fallback.contactPersona || "").trim();
   const userPersona = String(source.userPersona || fallback.userPersona || "").trim();
-  if (!contactProjectDir || !contactPersona || !userPersona) {
+  if (!contactProjectDir) {
     if (options.allowDefaults) {
       throw badRequest("Companion workflow defaults could not be derived.");
     }
-    throw badRequest("workflowInput requires contactProjectDir, contactPersona, and userPersona.");
+    throw badRequest("workflowInput requires contactProjectDir.");
   }
   return {
     ...fallback,
@@ -3560,7 +3585,7 @@ function normalizeStoredWorkflowInput(input) {
   const contactProjectDir = String(input.contactProjectDir || "").trim();
   const contactPersona = String(input.contactPersona || "").trim();
   const userPersona = String(input.userPersona || "").trim();
-  if (!contactProjectDir || !contactPersona || !userPersona) {
+  if (!contactProjectDir) {
     return null;
   }
   return {
@@ -3577,6 +3602,9 @@ function deriveCompanionWorldbookContent({ workflowId, workflowVersion, displayN
     .split("\n")
     .slice(0, 6)
     .join("\n");
+  if (!compactPersona) {
+    return "";
+  }
   return [
     `${displayName} 是一个独立联系人窗口。`,
     `Workflow: ${workflowId}@${workflowVersion}`,
@@ -3615,19 +3643,9 @@ function deriveDefaultCompanionWorkflowInput(params = {}) {
     defaultWorkspaceDirForRole(roleLevel, channelId, slug, params.paths || DEFAULT_PATHS);
   return {
     contactProjectDir,
-    contactPersona: deriveDefaultContactPersona(displayName, params.agentType),
-    userPersona: DEFAULT_CONTACT_WORKFLOW_USER_PERSONA,
+    contactPersona: "",
+    userPersona: "",
   };
-}
-
-function deriveDefaultContactPersona(displayName, agentType) {
-  const name = String(displayName || "this contact").trim() || "this contact";
-  const type = normalizeAgentType(agentType) || "codex";
-  const toolLine =
-    type === "claudecode"
-      ? "You can help with code and workspace tasks when asked."
-      : "You can help with practical tasks when asked.";
-  return `You are ${name}, a private SmallPhone contact. Keep replies concise, concrete, and useful. ${toolLine}`;
 }
 
 function buildRuntimeMessages(messages, runtimeUserText) {
@@ -4550,7 +4568,7 @@ function normalizeCompanionInput(input, options = {}) {
     defaults: workflowDefaults,
   });
   const persona = workflowInput.contactPersona;
-  const style = String(input?.style || "").trim() || "concise, private, mobile-native";
+  const style = String(input?.style || "").trim();
   const avatar = String(input?.avatar || "").trim() || displayName.slice(0, 2).toUpperCase();
   const avatarAttachmentId = normalizeAvatarAttachmentId(input?.avatarAttachmentId || input?.avatarId || input?.avatar_image_id);
   const workspaceScope = normalizeWorkspaceScope(input?.workspaceScope) || workspaceScopeForRole(roleLevel);
@@ -4588,9 +4606,7 @@ function normalizeCompanionInput(input, options = {}) {
     worldbookPriority: Number.isFinite(Number(input?.worldbookPriority))
       ? Number(input.worldbookPriority)
       : 85,
-    bootstrapMessage:
-      String(input?.bootstrapMessage || "").trim() ||
-      `${displayName} 的 SmallPhone 独立窗口已建立，后续消息固定路由到该 agent。`,
+    bootstrapMessage: String(input?.bootstrapMessage || "").trim(),
     greeting: String(input?.greeting || "").trim(),
     model: String(input?.model || "").trim(),
     agentType,
@@ -4669,8 +4685,8 @@ function normalizeCompanionPatchInput(params) {
     const contactProjectDir = String(workflowInput.contactProjectDir || "").trim();
     const contactPersona = String(workflowInput.contactPersona || "").trim();
     const userPersona = String(workflowInput.userPersona || "").trim();
-    if (!contactProjectDir || !contactPersona || !userPersona) {
-      throw badRequest("workflowInput requires contactProjectDir, contactPersona, and userPersona.");
+    if (!contactProjectDir) {
+      throw badRequest("workflowInput requires contactProjectDir.");
     }
     workflowInput = {
       ...workflowInput,
@@ -4703,7 +4719,7 @@ function normalizeCompanionPatchInput(params) {
     String(input?.sessionKey || "").trim() ||
     String(thread.runtime?.sessionKey || "").trim() ||
     `smallphone:thread:${thread.id}`;
-  const derivedStyle = String(input?.style || "").trim() || String(character.style || "").trim() || "concise, private, mobile-native";
+  const derivedStyle = String(input?.style || "").trim() || String(character.style || "").trim();
   const worldbookContent = deriveCompanionWorldbookContent({
     workflowId,
     workflowVersion,
@@ -4788,6 +4804,7 @@ function normalizeAgentType(value) {
   const text = String(value || "").trim().toLowerCase().replace(/[-_\s]+/g, "");
   if (text === "codex") return "codex";
   if (text === "claudecode" || text === "claude") return "claudecode";
+  if (text === "opencode" || text === "open") return "opencode";
   return "";
 }
 
@@ -4813,6 +4830,12 @@ function resolveAgentPermissionCapabilities(agentType) {
   const type = normalizeAgentType(agentType) || "codex";
   const modesByAgent = {
     codex: [
+      { key: "suggest", name: "Suggest", nameZh: "建议", description: "Ask permission for every tool call.", descriptionZh: "每次工具调用都需确认。" },
+      { key: "auto-edit", name: "Auto Edit", nameZh: "自动编辑", description: "Auto-approve file edits, ask for shell commands.", descriptionZh: "自动允许文件编辑，Shell 命令需确认。" },
+      { key: "full-auto", name: "Full Auto", nameZh: "全自动", description: "Auto-approve with workspace sandbox.", descriptionZh: "自动通过，但保留工作区沙箱。" },
+      { key: "yolo", name: "YOLO", nameZh: "YOLO 模式", description: "Bypass all approvals and sandbox.", descriptionZh: "跳过所有审批和沙箱。" },
+    ],
+    opencode: [
       { key: "suggest", name: "Suggest", nameZh: "建议", description: "Ask permission for every tool call.", descriptionZh: "每次工具调用都需确认。" },
       { key: "auto-edit", name: "Auto Edit", nameZh: "自动编辑", description: "Auto-approve file edits, ask for shell commands.", descriptionZh: "自动允许文件编辑，Shell 命令需确认。" },
       { key: "full-auto", name: "Full Auto", nameZh: "全自动", description: "Auto-approve with workspace sandbox.", descriptionZh: "自动通过，但保留工作区沙箱。" },
@@ -5043,7 +5066,7 @@ function normalizeAgentPermissionMode(value, agentType) {
 function templateForAgentMode(agentMode, agentType) {
   const type = normalizeAgentType(agentType) || "codex";
   const mode = normalizeAgentPermissionMode(agentMode, type);
-  if (type === "codex") {
+  if (type === "codex" || type === "opencode") {
     if (mode === "suggest") return "safe";
     if (mode === "auto-edit") return "developer";
     if (mode === "full-auto") return "trusted";

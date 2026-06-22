@@ -3,7 +3,9 @@ const os = require("os");
 const path = require("path");
 
 const DEFAULT_CC_CONNECT_CONFIG_FILE = "/root/.smallphoneai/cc-connect.toml";
+const OPENHOUSE_CC_CONNECT_CONFIG_FILE = "/root/smallphoneai-repos/openhouse-connect/config.smallphoneai.toml";
 const LEGACY_CC_CONNECT_CONFIG_FILE = "/root/.cc-connect/config.toml";
+const CC_CONNECT_DAEMON_FILE = "/root/.cc-connect/daemon.json";
 
 function applyCcConnectEnvDefaults(env = process.env) {
   if (!env.SMALLPHONE_RUNTIME_MODE) {
@@ -70,15 +72,42 @@ function applyCcBridgeDefaults(env, config) {
 }
 
 function readCcConnectConfig(configFile) {
-  const resolved = path.resolve(configFile || DEFAULT_CC_CONNECT_CONFIG_FILE);
-  if (fs.existsSync(resolved)) {
-    return parseMinimalToml(fs.readFileSync(resolved, "utf8"));
-  }
-  const legacy = path.resolve(LEGACY_CC_CONNECT_CONFIG_FILE);
-  if (resolved !== legacy && fs.existsSync(legacy)) {
-    return parseMinimalToml(fs.readFileSync(legacy, "utf8"));
+  const candidates = buildCcConnectConfigCandidates(configFile);
+  for (const candidate of candidates) {
+    if (!candidate || !fs.existsSync(candidate)) continue;
+    try {
+      return parseMinimalToml(fs.readFileSync(candidate, "utf8"));
+    } catch {}
   }
   return null;
+}
+
+function buildCcConnectConfigCandidates(configFile) {
+  const explicit = normalizeText(configFile);
+  const candidates = [
+    explicit,
+    DEFAULT_CC_CONNECT_CONFIG_FILE,
+    OPENHOUSE_CC_CONNECT_CONFIG_FILE,
+    LEGACY_CC_CONNECT_CONFIG_FILE,
+    resolveDaemonConfigFile(),
+    path.join(os.homedir(), "cc-connect", "config.toml"),
+    path.join(resolveSmallphoneRoot(), "cc-connect", "config.toml"),
+  ]
+    .filter(Boolean)
+    .map((item) => path.resolve(item));
+  return [...new Set(candidates)];
+}
+
+function resolveDaemonConfigFile() {
+  try {
+    if (!fs.existsSync(CC_CONNECT_DAEMON_FILE)) return "";
+    const daemon = JSON.parse(fs.readFileSync(CC_CONNECT_DAEMON_FILE, "utf8"));
+    const workDir = normalizeText(daemon?.work_dir);
+    if (!workDir) return "";
+    return path.join(workDir, "config.toml");
+  } catch {
+    return "";
+  }
 }
 
 function parseMinimalToml(source) {
@@ -204,7 +233,7 @@ function findSmallphoneProject(projects) {
     const displayName = normalizeText(project?.display_name);
     return displayName === "smallphone" || name.startsWith("smallphone");
   });
-  return normalizeText(match?.name);
+  return normalizeText(match?.name) || normalizeText(items[0]?.name);
 }
 
 function setDefault(env, key, value) {
@@ -245,5 +274,6 @@ function findTailscaleIp() {
 
 module.exports = {
   applyCcConnectEnvDefaults,
+  buildCcConnectConfigCandidates,
   parseMinimalToml,
 };

@@ -786,6 +786,7 @@ function normalizeAgentType(value) {
   const text = String(value || '').trim().toLowerCase().replace(/[-_\s]+/g, '');
   if (text === 'codex') return 'codex';
   if (text === 'claudecode' || text === 'claude') return 'claudecode';
+  if (text === 'opencode' || text === 'open') return 'opencode';
   return '';
 }
 
@@ -1029,13 +1030,12 @@ async function syncCharacterEdits(threadId, chat) {
   const cardText = String(chat.cardText || '').trim();
   const personaFromCard = extractCardTextLineValue(cardText, ['描述', '简介', 'Description']);
   const styleFromCard = extractCardTextLineValue(cardText, ['性格', '风格', 'Style']);
-  const persona = (String(chat.description || '').trim() || personaFromCard || chat.name).trim();
-  const style = (styleFromCard || chat.subtitle || 'concise, private, mobile-native').trim();
+  const contactPersona = (String(chat.description || '').trim() || personaFromCard || '').trim();
+  const style = (styleFromCard || chat.subtitle || '').trim();
   const payload = {
     name: chat.name,
     displayName: chat.name,
     style,
-    persona,
     cardText,
     threadSummary: chat.summary || chat.description || chat.name,
     roleLevel: normalizeRoleLevel(chat.roleLevel),
@@ -1045,6 +1045,12 @@ async function syncCharacterEdits(threadId, chat) {
     avatarAttachmentId: String(chat.avatarAttachmentId || '').trim(),
     timeSettings: resolveChatTimeSettings(chat),
   };
+  const workflowInput = buildCompanionWorkflowInput(chat, { contactPersona });
+  if (workflowInput.contactProjectDir) {
+    payload.workflowId = 'smallphone.default.contact';
+    payload.workflowVersion = 1;
+    payload.workflowInput = workflowInput;
+  }
   if (chat.backend?.relationship) payload.relationship = chat.backend.relationship;
   if (chat.backend?.relationshipState?.state) {
     payload.relationshipState = {
@@ -1084,13 +1090,12 @@ function buildCompanionPayload(chat) {
   const cardText = String(chat?.cardText || '').trim();
   const personaFromCard = extractCardTextLineValue(cardText, ['描述', '简介', 'Description']);
   const styleFromCard = extractCardTextLineValue(cardText, ['性格', '风格', 'Style']);
-  const persona = (String(chat.description || '').trim() || personaFromCard || chat.name).trim();
-  const style = (styleFromCard || chat.subtitle || 'concise, private, mobile-native').trim();
+  const contactPersona = (String(chat.description || '').trim() || personaFromCard || '').trim();
+  const style = (styleFromCard || chat.subtitle || '').trim();
   return {
     name: chat.name,
     displayName: chat.name,
     style,
-    persona,
     cardText,
     threadSummary: chat.summary || chat.description || chat.name,
     roleLevel: normalizeRoleLevel(chat.roleLevel),
@@ -1099,7 +1104,35 @@ function buildCompanionPayload(chat) {
     avatar: String(chat.avatarText || chat.name.slice(0, 1) || '').trim(),
     avatarAttachmentId: String(chat.avatarAttachmentId || '').trim(),
     timeSettings: resolveChatTimeSettings(chat),
+    workflowId: 'smallphone.default.contact',
+    workflowVersion: 1,
+    workflowInput: buildCompanionWorkflowInput(chat, { contactPersona }),
   };
+}
+
+function buildCompanionWorkflowInput(chat, options = {}) {
+  return {
+    contactProjectDir: resolveCompanionProjectDir(chat),
+    contactPersona: String(options.contactPersona ?? '').trim(),
+    userPersona: '',
+  };
+}
+
+function resolveCompanionProjectDir(chat) {
+  const existing = String(chat?.backend?.workspaceDir || '').trim();
+  if (existing && !existing.includes('/openhouse-connect-fresh')) return existing;
+  const agentType = normalizeAgentType(chat?.agentType) || 'contact';
+  const name = slugForPath(chat?.name || chat?.backend?.threadId || 'contact');
+  return `/root/smallphoneai/projects/${agentType}/${name}`;
+}
+
+function slugForPath(value) {
+  const ascii = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return ascii || `contact-${Date.now().toString(36)}`;
 }
 
 function beginCreateContact() {
@@ -1962,33 +1995,7 @@ function getRecentMemories(limit = 4) {
 }
 
 function buildPromptBundle(chat, userInput = '') {
-  const memories = getRecentMemories();
-  const cardText = String(chat.cardText || '').trim();
-  const systemParts = [
-    state.apiSettings.systemPrompt,
-    `当前用户人设`,
-    `名字：${state.persona.name}`,
-    `签名：${state.persona.signature}`,
-    `设定：${state.persona.bio}`,
-    '',
-    `当前联系人资料`,
-    `名字：${chat.name}`,
-    `简介：${chat.description}`,
-    cardText ? '卡片内容：' : '卡片内容：未设置',
-  ];
-  if (cardText) systemParts.push(cardText);
-
-  if (memories.length) {
-    systemParts.push('', '长期记忆');
-    memories.forEach((memory, index) => {
-      systemParts.push(`${index + 1}. ${memory.title}：${memory.text}`);
-    });
-  }
-
-  systemParts.push('', '回复要求', `- 保持 ${chat.name} 的口吻`, '- 回复自然，不要复读系统内容', '- 优先延续当前关系和聊天氛围');
-
   const messages = [
-    { role: 'system', content: systemParts.join('\n') },
     ...chat.messages.map((message) => ({
       role: message.side === 'self' ? 'user' : 'assistant',
       content: message.text,
@@ -2000,7 +2007,7 @@ function buildPromptBundle(chat, userInput = '') {
   }
 
   return {
-    system: systemParts.join('\n'),
+    system: '',
     messages,
   };
 }

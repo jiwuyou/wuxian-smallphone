@@ -17,8 +17,6 @@ const DEFAULT_APP_INSTANCE_ID = "instance-chat";
 const DEFAULT_WORKFLOWS_APP_INSTANCE_ID = "instance-workflows";
 const DEFAULT_CONTACT_WORKFLOW_ID = "smallphone.default.contact";
 const DEFAULT_CONTACT_WORKFLOW_VERSION = 1;
-const DEFAULT_CONTACT_WORKFLOW_USER_PERSONA =
-  "The user prefers a SmallPhone-style AI product with persistent contacts, memory, and practical continuity.";
 
 class JsonStore {
   constructor(filePathOrOptions, options = {}) {
@@ -230,29 +228,26 @@ function defaultContactWorkflowInput(input) {
 }
 
 function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
-  const akiPersona =
-    "You are Aki, a sharp but caring small-phone companion. Keep replies concise, concrete, and useful. You track commitments, follow up proactively, and avoid generic assistant phrasing.";
-  const miraPersona =
-    "You are Mira, a calm planning-oriented companion. You help the user structure scattered thoughts into next steps, timelines, and priorities without sounding robotic.";
-  const soraPersona =
-    "You are Sora, a lively field-note style companion. You notice little details, suggest moments worth capturing, and keep the conversation light but useful.";
-  const akiWorkspaceDir = path.join(paths.channelWorkspacesRoot, "channel-aki");
-  const miraWorkspaceDir = path.join(paths.channelWorkspacesRoot, "channel-mira");
-  const soraWorkspaceDir = path.join(paths.channelWorkspacesRoot, "channel-sora");
+  const akiPersona = "";
+  const miraPersona = "";
+  const soraPersona = "";
+  const akiWorkspaceDir = path.join(paths.channelWorkspacesRoot, "channel-claude");
+  const miraWorkspaceDir = path.join(paths.channelWorkspacesRoot, "channel-opencode");
+  const soraWorkspaceDir = path.join(paths.channelWorkspacesRoot, "channel-codex");
   const akiWorkflowInput = defaultContactWorkflowInput({
     contactProjectDir: akiWorkspaceDir,
     contactPersona: akiPersona,
-    userPersona: "The user prefers a SmallPhone-style AI product with persistent contacts, memory, and practical continuity.",
+    userPersona: "",
   });
   const miraWorkflowInput = defaultContactWorkflowInput({
     contactProjectDir: miraWorkspaceDir,
     contactPersona: miraPersona,
-    userPersona: "The user prefers structured plans, clear priorities, and low-drama execution.",
+    userPersona: "",
   });
   const soraWorkflowInput = defaultContactWorkflowInput({
     contactProjectDir: soraWorkspaceDir,
     contactPersona: soraPersona,
-    userPersona: "The user values mobile-life atmosphere, concrete observations, and concise companionship.",
+    userPersona: "",
   });
   return {
     characters: [
@@ -261,12 +256,12 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
         workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
         workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
         workflowInput: akiWorkflowInput,
-        name: "Aki",
-        avatar: "AK",
+        name: "Claude Code",
+        avatar: "C",
         persona: akiPersona,
-        style: "direct, warm, observant",
+        style: "",
         toolPolicy: {
-          allow: ["browser", "search", "file"],
+          allow: [],
         },
         createdAt,
         updatedAt: createdAt,
@@ -276,12 +271,12 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
         workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
         workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
         workflowInput: miraWorkflowInput,
-        name: "Mira",
-        avatar: "MI",
+        name: "OpenCode",
+        avatar: "O",
         persona: miraPersona,
-        style: "steady, clear, low-drama",
+        style: "",
         toolPolicy: {
-          allow: ["search", "file"],
+          allow: [],
         },
         createdAt,
         updatedAt: createdAt,
@@ -291,12 +286,12 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
         workflowId: DEFAULT_CONTACT_WORKFLOW_ID,
         workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
         workflowInput: soraWorkflowInput,
-        name: "Sora",
-        avatar: "SO",
+        name: "Codex",
+        avatar: "X",
         persona: soraPersona,
-        style: "playful, observant, mobile-native",
+        style: "",
         toolPolicy: {
-          allow: ["browser", "search"],
+          allow: [],
         },
         createdAt,
         updatedAt: createdAt,
@@ -309,11 +304,11 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
         workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
         workflowInput: akiWorkflowInput,
         characterId: DEFAULT_CHARACTER_ID,
-        displayName: "Aki",
+        displayName: "Claude Code",
         kind: "agent",
         status: "active",
-        agentId: "main",
-        worldbookScopeIds: ["contact_aki_default"],
+        agentId: "smallphone-channel-claude",
+        worldbookScopeIds: [],
         relationship: {
           trust: 0.72,
           intimacy: 0.45,
@@ -329,11 +324,11 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
         workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
         workflowInput: miraWorkflowInput,
         characterId: "char-mira",
-        displayName: "Mira",
+        displayName: "OpenCode",
         kind: "agent",
         status: "active",
-        agentId: "main",
-        worldbookScopeIds: ["contact_mira_default"],
+        agentId: "smallphone-channel-opencode",
+        worldbookScopeIds: [],
         relationship: {
           trust: 0.63,
           intimacy: 0.29,
@@ -349,11 +344,11 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
         workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
         workflowInput: soraWorkflowInput,
         characterId: "char-sora",
-        displayName: "Sora",
+        displayName: "Codex",
         kind: "agent",
         status: "active",
-        agentId: "main",
-        worldbookScopeIds: ["contact_sora_default"],
+        agentId: "smallphone-channel-codex",
+        worldbookScopeIds: [],
         relationship: {
           trust: 0.57,
           intimacy: 0.34,
@@ -371,17 +366,19 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
         workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
         workflowInput: akiWorkflowInput,
         contactId: DEFAULT_CONTACT_ID,
-        title: "Aki",
-        windowId: "window-aki",
-        channelId: "channel-aki",
+        title: "Claude Code",
+        windowId: "window-claude",
+        channelId: "channel-claude",
         state: "active",
         channel: "smallphone",
-        summary: "Default starter thread for the SmallPhone P0 prototype.",
+        summary: "Claude Code",
         runtimeSessionId: "",
         runtime: {
           provider: "mock",
+          project: "smallphone-claude",
           model: "",
-          agentId: "smallphone-channel-aki",
+          agentType: "claudecode",
+          agentId: "smallphone-channel-claude",
           workspaceDir: akiWorkspaceDir,
           sessionKey: `smallphone:thread:${DEFAULT_THREAD_ID}`,
         },
@@ -395,21 +392,23 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
         workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
         workflowInput: miraWorkflowInput,
         contactId: "contact-mira",
-        title: "Mira",
-        windowId: "window-mira",
-        channelId: "channel-mira",
+        title: "OpenCode",
+        windowId: "window-opencode",
+        channelId: "channel-opencode",
         state: "active",
         channel: "smallphone",
-        summary: "Mira keeps plans, deadlines, and next-step structure tidy.",
+        summary: "OpenCode",
         runtimeSessionId: "",
         runtime: {
           provider: "mock",
+          project: "smallphone-opencode",
           model: "",
-          agentId: "smallphone-channel-mira",
+          agentType: "opencode",
+          agentId: "smallphone-channel-opencode",
           workspaceDir: miraWorkspaceDir,
           sessionKey: "smallphone:thread:thread-mira",
         },
-        unreadCount: 1,
+        unreadCount: 0,
         createdAt,
         updatedAt: createdAt,
       },
@@ -419,88 +418,29 @@ function createDefaultCompanionSeed(createdAt, paths = DEFAULT_PATHS) {
         workflowVersion: DEFAULT_CONTACT_WORKFLOW_VERSION,
         workflowInput: soraWorkflowInput,
         contactId: "contact-sora",
-        title: "Sora",
-        windowId: "window-sora",
-        channelId: "channel-sora",
+        title: "Codex",
+        windowId: "window-codex",
+        channelId: "channel-codex",
         state: "active",
         channel: "smallphone",
-        summary: "Sora turns scattered moments into quick little field notes.",
+        summary: "Codex",
         runtimeSessionId: "",
         runtime: {
           provider: "mock",
+          project: "smallphone-codex",
           model: "",
-          agentId: "smallphone-channel-sora",
+          agentType: "codex",
+          agentId: "smallphone-channel-codex",
           workspaceDir: soraWorkspaceDir,
           sessionKey: "smallphone:thread:thread-sora",
         },
-        unreadCount: 1,
+        unreadCount: 0,
         createdAt,
         updatedAt: createdAt,
       },
     ],
-    messages: [
-      {
-        id: "msg-seed-user",
-        threadId: DEFAULT_THREAD_ID,
-        role: "system",
-        content: "SmallPhone P0 is ready. This is a seeded conversation.",
-        createdAt,
-      },
-      {
-        id: "msg-seed-mira-user",
-        threadId: "thread-mira",
-        role: "user",
-        content: "这周把多联系人和关系推进梳理一下。",
-        createdAt,
-      },
-      {
-        id: "msg-seed-mira-assistant",
-        threadId: "thread-mira",
-        role: "assistant",
-        content: "好，我先帮你压成三件事：联系人体系、关系更新、事件落盘。",
-        createdAt,
-      },
-      {
-        id: "msg-seed-sora-user",
-        threadId: "thread-sora",
-        role: "user",
-        content: "今天这个小手机看起来还是太工具了。",
-        createdAt,
-      },
-      {
-        id: "msg-seed-sora-assistant",
-        threadId: "thread-sora",
-        role: "assistant",
-        content: "那就给它多一点生活感，别只剩面板和配置。",
-        createdAt,
-      },
-    ],
-    memories: [
-      {
-        id: "mem-seed",
-        scope: "thread",
-        threadId: DEFAULT_THREAD_ID,
-        text: "The user wants a small-phone style AI product with persistent contacts, memory, and proactive behavior.",
-        salience: 0.95,
-        createdAt,
-      },
-      {
-        id: "mem-seed-mira",
-        scope: "thread",
-        threadId: "thread-mira",
-        text: "Mira is the contact for planning, structure, and decision compression.",
-        salience: 0.82,
-        createdAt,
-      },
-      {
-        id: "mem-seed-sora",
-        scope: "thread",
-        threadId: "thread-sora",
-        text: "Sora is the contact for mood, atmosphere, and mobile-life moments.",
-        salience: 0.78,
-        createdAt,
-      },
-    ],
+    messages: [],
+    memories: [],
   };
 }
 
@@ -933,12 +873,9 @@ function normalizeCompanionWorkflowTriple({
     path.join(paths.channelWorkspacesRoot, `channel-${slugLike(contact?.id || thread?.id || character?.id || "companion")}`);
 
   const contactPersona =
-    coalesceNonEmptyString(existingInput?.contactPersona, character?.persona, seedInput?.contactPersona) ||
-    `You are ${coalesceNonEmptyString(character?.name, contact?.displayName, contact?.id, "a SmallPhone companion")}. Reply concisely and helpfully.`;
+    coalesceNonEmptyString(existingInput?.contactPersona, character?.persona, seedInput?.contactPersona) || "";
 
-  const userPersona =
-    coalesceNonEmptyString(existingInput?.userPersona, seedInput?.userPersona, DEFAULT_CONTACT_WORKFLOW_USER_PERSONA) ||
-    DEFAULT_CONTACT_WORKFLOW_USER_PERSONA;
+  const userPersona = coalesceNonEmptyString(existingInput?.userPersona, seedInput?.userPersona) || "";
 
   const workflowInput = {
     ...(existingInput || {}),

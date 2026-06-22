@@ -286,7 +286,9 @@ test("companions: minimal no-prompt create derives internal workflow defaults an
     assert.equal(storedContact.workflowId, "smallphone.default.contact");
     assert.equal(storedThread.workflowVersion, 1);
     assert.equal(storedThread.workflowInput.contactProjectDir, created.thread.runtime.workspaceDir);
-    assert.match(storedCharacter.persona, /NoPrompt/);
+    assert.equal(storedThread.workflowInput.contactPersona, "");
+    assert.equal(storedThread.workflowInput.userPersona, "");
+    assert.equal(storedCharacter.persona, "");
     assert.equal(storedCharacter.permissionPolicy.agentMode, "suggest");
     assert.equal(storedCharacter.permissionPolicy.template, "safe");
 
@@ -346,9 +348,9 @@ test("store normalization: backfills workflow fields for legacy companion record
     assert.ok(normalizedContact && normalizedThread && normalizedCharacter);
     assert.ok(normalizedContact.workflowId);
     assert.ok(normalizedContact.workflowVersion);
-    assert.ok(normalizedContact.workflowInput?.userPersona);
+    assert.equal(normalizedContact.workflowInput?.userPersona, "");
     assert.ok(normalizedThread.workflowInput?.contactProjectDir);
-    assert.ok(normalizedCharacter.workflowInput?.contactPersona);
+    assert.equal(normalizedCharacter.workflowInput?.contactPersona, "");
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

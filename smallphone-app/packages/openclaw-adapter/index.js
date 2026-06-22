@@ -44,7 +44,9 @@ function createCcConnectAdapter(config) {
       };
     },
     async sendTurn(payload) {
+      const turnProject = normalizeText(payload.thread?.runtime?.project) || project;
       const reply = await client.sendTurn({
+        project: turnProject,
         sessionKey: payload.thread?.runtime?.sessionKey || `smallphone:thread:${payload.thread?.id || createId("thread")}`,
         userId: payload.contact?.id || "smallphone-user",
         userName: payload.contact?.displayName || "SmallPhone",
@@ -266,6 +268,14 @@ class CcConnectBridgeClient {
       };
       const pendingEntry = {
         chunks,
+        idleTimer: null,
+        scheduleIdleSettle: () => {
+          clearTimeout(pendingEntry.idleTimer);
+          pendingEntry.idleTimer = setTimeout(() => {
+            pendingEntry.settleReply({ type: "reply_idle_timeout" });
+          }, 350);
+          pendingEntry.idleTimer.unref?.();
+        },
         addReply: (message) => {
           const text = extractBridgeText(message);
           if (text && !chunks.includes(text)) {
@@ -280,8 +290,12 @@ class CcConnectBridgeClient {
             done: false,
             raw: message,
           });
+          if (!isBridgeCompletionMessage(message)) {
+            pendingEntry.scheduleIdleSettle();
+          }
         },
         settleReply: (message = {}) => {
+          clearTimeout(pendingEntry.idleTimer);
           const finalText = extractBridgeText(message);
           if (finalText && !chunks.includes(finalText)) {
             chunks.push(finalText);
@@ -304,6 +318,7 @@ class CcConnectBridgeClient {
         },
         reject: (error) => {
           this.pending.delete(replyCtx);
+          clearTimeout(pendingEntry.idleTimer);
           clearTimeout(timer);
           reject(error);
         },
@@ -320,7 +335,7 @@ class CcConnectBridgeClient {
         user_name: turn.userName,
         content: turn.content,
         reply_ctx: replyCtx,
-        project: this.project,
+        project: normalizeText(turn.project) || this.project,
       }),
     );
     return pending;
