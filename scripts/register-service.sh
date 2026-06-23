@@ -383,12 +383,8 @@ elif key == "smallphone-sillytavern":
     )
 elif key == "controlled-browser":
     status_command = os.environ.get("SMALLPHONE_CONTROLLED_BROWSER_COMMAND") or (
-        "while :; do "
-        "if command -v openhouse-browser >/dev/null 2>&1; then "
-        "openhouse-browser status || true; "
-        "else printf '%s\\n' 'openhouse-browser CLI not found'; fi; "
-        'sleep "${SMALLPHONE_CONTROLLED_BROWSER_STATUS_INTERVAL:-30}"; '
-        "done"
+        "printf '%s\\n' 'controlled-browser is event-driven; use openhouse-browser commands to control the app WebView'; "
+        "exec tail -f /dev/null"
     )
     spec = spec_process(
         "controlled-browser",
