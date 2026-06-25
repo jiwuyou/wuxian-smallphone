@@ -275,6 +275,8 @@ test("service-manager: Core uses server-side Bearer token and redacts secrets fr
   assert.ok(enriched.service, "Expected app instance to be enriched with a matching service record.");
   assert.equal(typeof enriched.service.id, "string");
   assert.equal(enriched.service.name, "Example (spec)");
+  assert.equal(enriched.service.state, "running");
+  assert.equal(enriched.service.pid, 4242);
   assert.ok(!("token" in enriched.service));
   assert.ok(!("command" in enriched.service));
   assert.ok(!("env" in enriched.service));
@@ -294,6 +296,55 @@ test("service-manager: Core uses server-side Bearer token and redacts secrets fr
   assert.ok(app);
   assertTokenQueryRedactedOrDropped(app.entry, entryToken, "registry.apps[].entry");
   assertTokenQueryRedactedOrDropped(enriched?.settings?.url, instanceUrlToken, "registry.appInstances[].settings.url");
+
+  const statusReq = requests.find((item) => item.url.includes("/api/v1/services/statuses"));
+  assert.ok(statusReq, "Expected Core to call service-manager /api/v1/services/statuses for runtime state.");
+});
+
+test("service-manager: services/statuses response exposes sanitized runtime state", async (t) => {
+  const serviceManagerToken = randomId("sm-token");
+  const fixture = buildServiceManagerFixture({ serviceToken: serviceManagerToken });
+  const wrapped = fixture.services.map((serviceRecord) => ({
+    service: serviceRecord,
+    status: {
+      service_id: serviceRecord.id,
+      state: "running",
+      message: "ready",
+      pid: 7357,
+      observed_at: "2026-06-25T00:00:00.000000000Z",
+      started_at: "2026-06-25T00:00:01.000000000Z",
+    },
+  }));
+
+  const requests = installFetchStub(t, (request) => {
+    if (request.url.includes("/api/v1/services/statuses")) {
+      return { status: 200, body: wrapped };
+    }
+    return { status: 404, body: { ok: false, error: "not found" } };
+  });
+
+  const service = new SmallPhoneService({
+    dataFile: tmpDataFile(),
+    runtime: { mode: "mock" },
+    serviceManager: {
+      baseUrl: "http://service-manager.local",
+      token: serviceManagerToken,
+      timeoutMs: 50,
+    },
+  });
+
+  const result = await service.listServiceManagerServices();
+  assert.equal(result.serviceManager.available, true);
+  assert.equal(result.services.length, 1);
+  assert.equal(result.services[0].id, "svc-example");
+  assert.equal(result.services[0].state, "running");
+  assert.equal(result.services[0].message, "ready");
+  assert.equal(result.services[0].pid, 7357);
+  assert.equal(result.services[0].observedAt, "2026-06-25T00:00:00.000000000Z");
+  assert.equal(result.services[0].startedAt, "2026-06-25T00:00:01.000000000Z");
+
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, /^http:\/\/service-manager\.local\/api\/v1\/services\/statuses\b/);
 });
 
 test("service-manager: app registry degrades gracefully when service-manager is unavailable", async (t) => {

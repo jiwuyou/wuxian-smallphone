@@ -450,7 +450,10 @@ class SmallPhoneService {
   }
 
   async listServiceManagerServices() {
-    const response = await this.serviceManager.request({ method: "GET", path: "/services" });
+    let response = await this.serviceManager.request({ method: "GET", path: "/services/statuses" });
+    if (!response.ok && (response.status === 404 || response.status === 405)) {
+      response = await this.serviceManager.request({ method: "GET", path: "/services" });
+    }
     const serviceManager = this.serviceManager.describePublic({ available: response.status > 0 });
     if (!response.ok) {
       return {
@@ -6199,9 +6202,13 @@ function inferServiceManagerErrorMessage(data, text, status) {
 function extractServiceManagerServicesPayload(payload) {
   if (Array.isArray(payload)) return payload;
   if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.statuses)) return payload.statuses;
+    if (Array.isArray(payload.items)) return payload.items;
     if (Array.isArray(payload.services)) return payload.services;
     if (Array.isArray(payload.data)) return payload.data;
     if (payload.data && typeof payload.data === "object" && Array.isArray(payload.data.services)) return payload.data.services;
+    if (payload.data && typeof payload.data === "object" && Array.isArray(payload.data.statuses)) return payload.data.statuses;
+    if (payload.data && typeof payload.data === "object" && Array.isArray(payload.data.items)) return payload.data.items;
   }
   return [];
 }
@@ -6262,11 +6269,17 @@ function extractServiceManagerLogsPayload(data, text) {
 }
 
 function sanitizeServiceManagerServiceRecord(record, serviceManager) {
-  const raw = record && typeof record === "object" ? record : {};
+  const input = record && typeof record === "object" ? record : {};
+  const raw = input.service && typeof input.service === "object" ? input.service : input;
+  const status = input.status && typeof input.status === "object"
+    ? input.status
+    : raw.status && typeof raw.status === "object"
+      ? raw.status
+      : {};
   const spec = raw.spec && typeof raw.spec === "object" ? raw.spec : {};
   const health = spec.health && typeof spec.health === "object" ? spec.health : {};
 
-  const id = String(raw.id || raw.service_id || raw.serviceId || "").trim();
+  const id = String(raw.id || raw.service_id || raw.serviceId || status.service_id || status.serviceId || "").trim();
   const tagsSource = Array.isArray(raw.tags) ? raw.tags : Array.isArray(spec.tags) ? spec.tags : [];
   const tags = tagsSource.map((tag) => String(tag || "").trim()).filter(Boolean);
   const enabled =
@@ -6279,6 +6292,8 @@ function sanitizeServiceManagerServiceRecord(record, serviceManager) {
   const observedAt = String(
     raw.observedAt ||
       raw.observed_at ||
+      status.observedAt ||
+      status.observed_at ||
       health.observedAt ||
       health.observed_at ||
       "",
@@ -6286,6 +6301,8 @@ function sanitizeServiceManagerServiceRecord(record, serviceManager) {
   const startedAt = String(
     raw.startedAt ||
       raw.started_at ||
+      status.startedAt ||
+      status.started_at ||
       health.startedAt ||
       health.started_at ||
       "",
@@ -6293,10 +6310,12 @@ function sanitizeServiceManagerServiceRecord(record, serviceManager) {
   const exitCodeValue =
     raw.exitCode ??
     raw.exit_code ??
+    status.exitCode ??
+    status.exit_code ??
     health.exitCode ??
     health.exit_code ??
     null;
-  const pidValue = raw.pid ?? health.pid ?? null;
+  const pidValue = raw.pid ?? status.pid ?? health.pid ?? null;
   const capabilitiesSource = raw.capabilities ?? spec.capabilities ?? null;
   return {
     id,
@@ -6305,8 +6324,8 @@ function sanitizeServiceManagerServiceRecord(record, serviceManager) {
     provider: String(raw.provider || spec.provider || "").trim(),
     tags,
     enabled,
-    state: String(raw.state || health.state || health.status || spec.state || "").trim(),
-    message: String(raw.message || health.message || "").trim(),
+    state: String(raw.state || status.state || health.state || health.status || spec.state || "").trim(),
+    message: String(raw.message || status.message || health.message || "").trim(),
     pid: Number.isFinite(Number(pidValue)) ? Number(pidValue) : null,
     observedAt,
     startedAt,
