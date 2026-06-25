@@ -209,6 +209,40 @@ parent = Path(parent_dir)
 
 group_tag = "group:local-stack"
 
+def env_path(*names: str) -> Path | None:
+    for name in names:
+        raw = os.environ.get(name)
+        if raw:
+            return Path(raw).expanduser()
+    return None
+
+def first_existing(*paths: Path | None) -> Path:
+    candidates = [path for path in paths if path is not None]
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+def resolve_frontend_dir() -> Path:
+    explicit = env_path("SMALLPHONE_FRONTEND_DIR", "FRONTEND_DIR")
+    if explicit is not None:
+        return explicit
+    return first_existing(
+        root / "generic-mini-phone",
+        Path("/root/generic-mini-phone"),
+        root / "generic-mini-phone-beta",
+    )
+
+def resolve_sillytavern_dir() -> Path:
+    explicit = env_path("SMALLPHONE_SILLYTAVERN_DIR", "SILLYTAVERN_DIR")
+    if explicit is not None:
+        return explicit
+    return first_existing(
+        parent / "sillytavern",
+        Path("/root/SillyTavern"),
+        Path("/root/.local/share/SillyTavern"),
+    )
+
 def tcp_check(host: str, port: str):
     return {
         "type": "tcp",
@@ -243,6 +277,9 @@ def spec_process(name: str, desc: str, cmd: list[str], cwd: Path, env: dict, hea
 if key == "smallphone-core":
     app_dir = root / "smallphone-app"
     smallphone_home = str(parent / "smallphone-home")
+    sillytavern_dir = resolve_sillytavern_dir()
+    sillytavern_host = os.environ.get("SMALLPHONE_SILLYTAVERN_HOST") or os.environ.get("SILLYTAVERN_HOST") or "127.0.0.1"
+    sillytavern_port = os.environ.get("SMALLPHONE_SILLYTAVERN_PORT") or os.environ.get("SILLYTAVERN_PORT") or "8000"
     spec = spec_process(
         "smallphone-core",
         "SmallPhone core API (smallphone-app)",
@@ -258,12 +295,18 @@ if key == "smallphone-core":
             "SMALLPHONE_CCCONNECT_PLATFORM": "smallphone",
             "SMALLPHONE_SERVICE_MANAGER_URL": service_manager_url,
             "SMALLPHONE_SERVICE_MANAGER_TOKEN": service_manager_token,
+            "SMALLPHONE_SILLYTAVERN_DIR": str(sillytavern_dir),
+            "SMALLPHONE_SILLYTAVERN_DATA_DIR": str(sillytavern_dir / "data"),
+            "SMALLPHONE_SILLYTAVERN_HOST": sillytavern_host,
+            "SMALLPHONE_SILLYTAVERN_PORT": str(sillytavern_port),
+            "SMALLPHONE_SILLYTAVERN_URL": f"http://{sillytavern_host}:{sillytavern_port}/",
+            "SMALLPHONE_SILLYTAVERN_SERVICE_ID": "smallphone-sillytavern",
         },
         [http_check(f"http://{core_host}:{core_port}/health")],
         [group_tag, "openhouse-component:smallphone-core", "smallphone"],
     )
 elif key == "smallphone-frontend":
-    front_dir = root / "generic-mini-phone"
+    front_dir = resolve_frontend_dir()
     spec = spec_process(
         "smallphone-frontend",
         "SmallPhone stable frontend (static, served by python http.server)",
@@ -352,18 +395,26 @@ elif key == "smallphone-standalone-like-girl-clone":
 elif key == "smallphone-like-girl-source":
     app_dir = root / "standalone-apps" / "vocabulary"
     port = "23002"
+    source_ready = (app_dir / "source").exists()
+    desc = "SmallPhone LikeGirl source-app adapter (Node launcher + PHP built-in server)"
+    tags = ["openhouse-component:smallphone-standalone", "smallphone", "smallphone-kind:source-app"]
+    if source_ready:
+        tags.insert(0, group_tag)
+    else:
+        desc += " (disabled: source checkout not present)"
     # This adapter spawns PHP; health is best-effort TCP only.
     spec = spec_process(
         "smallphone-like-girl-source",
-        "SmallPhone LikeGirl source-app adapter (Node launcher + PHP built-in server)",
+        desc,
         ["node", "./scripts/start.mjs"],
         app_dir,
         {"HOST": "127.0.0.1", "PORT": port},
         [tcp_check("127.0.0.1", port)],
-        [group_tag, "openhouse-component:smallphone-standalone", "smallphone", "smallphone-kind:source-app"],
+        tags,
     )
+    spec["enabled"] = source_ready
 elif key == "smallphone-sillytavern":
-    app_dir = Path(os.environ.get("SMALLPHONE_SILLYTAVERN_DIR") or os.environ.get("SILLYTAVERN_DIR") or str(parent / "sillytavern"))
+    app_dir = resolve_sillytavern_dir()
     data_dir = Path(os.environ.get("SMALLPHONE_SILLYTAVERN_DATA_DIR") or os.environ.get("SILLYTAVERN_DATA_DIR") or str(app_dir / "data"))
     host = os.environ.get("SMALLPHONE_SILLYTAVERN_HOST") or os.environ.get("SILLYTAVERN_HOST") or "127.0.0.1"
     port = os.environ.get("SMALLPHONE_SILLYTAVERN_PORT") or os.environ.get("SILLYTAVERN_PORT") or "8000"
@@ -384,7 +435,7 @@ elif key == "smallphone-sillytavern":
 elif key == "controlled-browser":
     status_command = os.environ.get("SMALLPHONE_CONTROLLED_BROWSER_COMMAND") or (
         "printf '%s\\n' 'controlled-browser is event-driven; use openhouse-browser commands to control the app WebView'; "
-        "exec tail -f /dev/null"
+        "while :; do sleep \"${SMALLPHONE_CONTROLLED_BROWSER_KEEPALIVE_INTERVAL:-3600}\"; done"
     )
     spec = spec_process(
         "controlled-browser",

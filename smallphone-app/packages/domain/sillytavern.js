@@ -7,14 +7,28 @@ const DEFAULT_CHECK_TIMEOUT_MS = 15000;
 const SCRIPT_OUTPUT_LIMIT = 16000;
 const DEFAULT_REPO_URL = "https://github.com/SillyTavern/SillyTavern.git";
 
+function firstExistingPath(paths) {
+  for (const candidate of paths) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return paths.find(Boolean);
+}
+
 function getSillyTavernConfig(options = {}) {
   const env = options.env || process.env;
   const repoRoot = path.resolve(__dirname, "..", "..", "..");
+  const defaultInstallDir = firstExistingPath([
+    path.resolve(repoRoot, "..", "sillytavern"),
+    "/root/SillyTavern",
+    "/root/.local/share/SillyTavern",
+  ]);
   const installDir = path.resolve(
     options.installDir ||
       env.SMALLPHONE_SILLYTAVERN_DIR ||
       env.SILLYTAVERN_DIR ||
-      "/root/projects/smallphone/sillytavern",
+      defaultInstallDir,
   );
   const dataDir = path.resolve(
     options.dataDir ||
