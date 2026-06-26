@@ -12,6 +12,17 @@ const state = {
     loadedAt: "",
     error: "",
   },
+  apkRelease: {
+    phase: "idle", // idle | loading | loaded | saving | checking | error
+    settings: {
+      releaseServerBaseUrl: "",
+      channel: "stable",
+      updatedAt: "",
+    },
+    result: null,
+    error: "",
+    settingsFile: "",
+  },
   selectedThreadId: "",
   messages: [],
   reminders: [],
@@ -60,6 +71,13 @@ const els = {
   permissionAgentMeta: document.querySelector("#permission-agent-meta"),
   permissionTemplateList: document.querySelector("#permission-template-list"),
   permissionDecisionList: document.querySelector("#permission-decision-list"),
+  apkReleaseSummary: document.querySelector("#apk-release-summary"),
+  apkReleaseForm: document.querySelector("#apk-release-form"),
+  apkReleaseBaseUrl: document.querySelector("#apk-release-base-url"),
+  apkReleaseChannel: document.querySelector("#apk-release-channel"),
+  apkReleaseSaveButton: document.querySelector("#apk-release-save-button"),
+  apkReleaseCheckButton: document.querySelector("#apk-release-check-button"),
+  apkReleaseResult: document.querySelector("#apk-release-result"),
   threadDebugPanel: document.querySelector("#thread-debug-panel"),
   threadDebugUpdated: document.querySelector("#thread-debug-updated"),
   threadDebugOverview: document.querySelector("#thread-debug-overview"),
@@ -134,6 +152,15 @@ els.reloadWorkflowsButton?.addEventListener("click", async () => {
   await loadWorkflows({ force: true });
   renderWorkflows();
   renderCompanionWorkflowSection();
+});
+
+els.apkReleaseForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await saveApkReleaseSettings();
+});
+
+els.apkReleaseCheckButton?.addEventListener("click", async () => {
+  await checkApkReleaseManifestFromWeb();
 });
 
 els.newCompanionButton.addEventListener("click", () => openCompanionDrawer("create"));
@@ -226,6 +253,7 @@ async function boot() {
   await loadWorkflows();
   state.worldbookEntries = await apiGet("/api/worldbook");
   state.permissionTemplates = await apiGet("/api/permissions/templates");
+  await loadApkReleaseSettings();
   state.selectedThreadId = resolvePreferredThreadId(state.threads, "");
   els.runtimeBadge.textContent = state.bootstrap.runtime.id;
   await Promise.all([loadMessages(), loadReminders(), loadThreadDebug(), loadThreadPermissions()]);
@@ -293,6 +321,7 @@ function render() {
   renderHeader();
   renderThreadDebug();
   renderPermissions();
+  renderApkRelease();
   renderWorkflows();
   renderMessages();
   renderReminders();
@@ -471,6 +500,175 @@ function renderWorkflows() {
       `;
     })
     .join("");
+}
+
+async function loadApkReleaseSettings() {
+  state.apkRelease.phase = "loading";
+  renderApkRelease();
+  try {
+    const payload = await apiGet("/api/apk-release/server");
+    state.apkRelease.settings = normalizeApkReleaseSettings(payload.settings);
+    state.apkRelease.settingsFile = String(payload.settingsFile || "");
+    state.apkRelease.error = "";
+    state.apkRelease.phase = "loaded";
+  } catch (error) {
+    state.apkRelease.error = error instanceof Error ? error.message : String(error);
+    state.apkRelease.phase = "error";
+  }
+  renderApkRelease();
+}
+
+async function saveApkReleaseSettings() {
+  state.apkRelease.phase = "saving";
+  state.apkRelease.error = "";
+  renderApkRelease();
+  try {
+    const payload = await apiPut("/api/apk-release/server", buildApkReleaseSettingsPayload());
+    state.apkRelease.settings = normalizeApkReleaseSettings(payload.settings);
+    state.apkRelease.settingsFile = String(payload.settingsFile || state.apkRelease.settingsFile || "");
+    state.apkRelease.error = "";
+    state.apkRelease.phase = "loaded";
+  } catch (error) {
+    state.apkRelease.error = error instanceof Error ? error.message : String(error);
+    state.apkRelease.phase = "error";
+  }
+  renderApkRelease();
+}
+
+async function checkApkReleaseManifestFromWeb() {
+  state.apkRelease.phase = "checking";
+  state.apkRelease.error = "";
+  renderApkRelease();
+  try {
+    const result = await apiPost("/api/apk-release/check", buildApkReleaseSettingsPayload());
+    state.apkRelease.result = result;
+    state.apkRelease.error = result?.ok ? "" : String(result?.error || "Manifest check failed.");
+    state.apkRelease.phase = result?.ok ? "loaded" : "error";
+  } catch (error) {
+    state.apkRelease.result = null;
+    state.apkRelease.error = error instanceof Error ? error.message : String(error);
+    state.apkRelease.phase = "error";
+  }
+  renderApkRelease();
+}
+
+function buildApkReleaseSettingsPayload() {
+  return normalizeApkReleaseSettings({
+    releaseServerBaseUrl: els.apkReleaseBaseUrl?.value,
+    channel: els.apkReleaseChannel?.value || "stable",
+  });
+}
+
+function normalizeApkReleaseSettings(settings = {}) {
+  const source = settings && typeof settings === "object" ? settings : {};
+  return {
+    releaseServerBaseUrl: String(source.releaseServerBaseUrl || source.release_server_base_url || source.baseUrl || "").trim(),
+    channel: String(source.channel || source.releaseChannel || "stable").trim() || "stable",
+    updatedAt: String(source.updatedAt || source.updated_at || "").trim(),
+  };
+}
+
+function renderApkRelease() {
+  if (!els.apkReleaseSummary || !els.apkReleaseResult) return;
+  const releaseState = state.apkRelease || {};
+  const settings = normalizeApkReleaseSettings(releaseState.settings);
+  const baseUrl = settings.releaseServerBaseUrl || "未设置";
+  const channel = settings.channel || "stable";
+  const phase = String(releaseState.phase || "idle");
+
+  if (els.apkReleaseBaseUrl && document.activeElement !== els.apkReleaseBaseUrl) {
+    els.apkReleaseBaseUrl.value = settings.releaseServerBaseUrl;
+  }
+  if (els.apkReleaseChannel && document.activeElement !== els.apkReleaseChannel) {
+    els.apkReleaseChannel.value = channel;
+  }
+
+  const busy = phase === "loading" || phase === "saving" || phase === "checking";
+  if (els.apkReleaseSaveButton) {
+    els.apkReleaseSaveButton.disabled = busy;
+    els.apkReleaseSaveButton.textContent = phase === "saving" ? "保存中" : "保存配置";
+  }
+  if (els.apkReleaseCheckButton) {
+    els.apkReleaseCheckButton.disabled = busy || !settings.releaseServerBaseUrl;
+    els.apkReleaseCheckButton.textContent = phase === "checking" ? "检查中" : "检查 manifest";
+  }
+
+  els.apkReleaseSummary.textContent =
+    phase === "loading"
+      ? "正在读取发布服务器配置。"
+      : phase === "saving"
+        ? "正在保存发布服务器配置。"
+        : phase === "checking"
+          ? `正在检查 ${channel} manifest。`
+          : releaseState.error
+            ? `检查失败：${releaseState.error}`
+            : `${channel} · ${baseUrl}`;
+
+  els.apkReleaseResult.innerHTML = renderApkReleaseResult(releaseState.result, releaseState.error);
+}
+
+function renderApkReleaseResult(result, error) {
+  if (result?.ok) {
+    const release = result.release || {};
+    const warnings = Array.isArray(release.warnings) ? release.warnings.filter(Boolean) : [];
+    return `
+      <article class="card apk-release-card apk-release-card-ok">
+        <div class="workflow-card-head">
+          <div>
+            <div class="workflow-name">Manifest 可用</div>
+            <div class="workflow-id">${escapeHtml(result.manifestUrl || "")}</div>
+          </div>
+          <span class="runtime-badge">ok</span>
+        </div>
+        <div class="apk-release-kv">
+          ${renderApkReleaseRow("channel", release.channel || result.settings?.channel || "-")}
+          ${renderApkReleaseRow("versionCode", release.versionCode || "-")}
+          ${renderApkReleaseRow("versionName", release.versionName || "-")}
+          ${renderApkReleaseRow("package", release.packageName || "-")}
+          ${renderApkReleaseRow("apk", release.apkUrl || "-")}
+          ${renderApkReleaseRow("sha256", release.apkSha256 || "-")}
+          ${renderApkReleaseRow("size", formatBytes(release.sizeBytes))}
+          ${renderApkReleaseRow("published", release.publishedAt || "-")}
+        </div>
+        ${warnings.length ? `<div class="apk-release-warnings">${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+        ${release.releaseNotes ? `<pre class="workflow-pre">${escapeHtml(release.releaseNotes)}</pre>` : ""}
+      </article>
+    `;
+  }
+
+  if (result && result.ok === false) {
+    const attempts = Array.isArray(result.attempts) ? result.attempts : [];
+    return `
+      <article class="card apk-release-card apk-release-card-error">
+        <div class="workflow-name">Manifest 检查失败</div>
+        <div class="card-meta">${escapeHtml(result.error || error || "unknown error")}</div>
+        ${attempts.length ? `
+          <div class="apk-release-attempts">
+            ${attempts.map((attempt) => `
+              <div class="apk-release-attempt">
+                <strong>${escapeHtml(String(attempt.statusCode || "-"))}</strong>
+                <span>${escapeHtml(attempt.manifestUrl || "")}</span>
+                <em>${escapeHtml(attempt.error || (attempt.ok ? "ok" : ""))}</em>
+              </div>
+            `).join("")}
+          </div>
+        ` : ""}
+      </article>
+    `;
+  }
+
+  if (error) {
+    return `<article class="card apk-release-card apk-release-card-error"><div>配置或检查失败。</div><div class="card-meta">${escapeHtml(error)}</div></article>`;
+  }
+
+  return `<article class="card apk-release-card"><div>保存配置后可检查 release manifest。</div></article>`;
+}
+
+function renderApkReleaseRow(label, value) {
+  return `
+    <strong>${escapeHtml(label)}</strong>
+    <span>${escapeHtml(value == null || value === "" ? "-" : String(value))}</span>
+  `;
 }
 
 function normalizeJsonSchema(schema) {
@@ -1817,6 +2015,18 @@ async function apiPost(url, body) {
   return response.json();
 }
 
+async function apiPut(url, body) {
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(`PUT ${url} failed`);
+  }
+  return response.json();
+}
+
 async function apiPatch(url, body) {
   const response = await fetch(url, {
     method: "PATCH",
@@ -1854,6 +2064,25 @@ function formatTime(value) {
     minute: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+function formatBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return "-";
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ["KB", "MB", "GB"];
+  let scaled = bytes;
+  let unit = "B";
+  for (const candidate of units) {
+    scaled /= 1024;
+    unit = candidate;
+    if (scaled < 1024) break;
+  }
+  return `${scaled.toFixed(scaled >= 10 ? 1 : 2)} ${unit}`;
 }
 
 function renderDebugMetric(label, value) {

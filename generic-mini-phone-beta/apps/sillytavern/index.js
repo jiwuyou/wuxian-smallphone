@@ -158,7 +158,7 @@ function renderSillyTavern() {
   const details = qs('#sillytavern-details');
   if (pill) {
     const state = sillyState.status?.service?.state || (sillyState.status?.installed ? 'installed' : 'unknown');
-    pill.textContent = sillyState.loading ? '处理中' : state;
+    pill.textContent = sillyState.loading ? '处理中' : localizeStatus(state);
   }
   if (message) {
     message.textContent = sillyState.error || sillyState.message || '等待后端状态。';
@@ -177,6 +177,45 @@ function renderSillyTavern() {
   document.querySelectorAll('[data-sillytavern-action], #sillytavern-status-refresh').forEach((button) => {
     button.disabled = sillyState.loading;
   });
+}
+
+function localizeStatus(value) {
+  const state = String(value || '').trim().toLowerCase();
+  switch (state) {
+    case 'running':
+    case 'ready':
+    case 'healthy':
+    case 'available':
+      return '运行中';
+    case 'installed':
+      return '已安装';
+    case 'stopped':
+    case 'inactive':
+      return '已停止';
+    case 'starting':
+    case 'pending':
+      return '启动中';
+    case 'stopping':
+      return '停止中';
+    case 'restarting':
+      return '重启中';
+    case 'installing':
+      return '安装中';
+    case 'repairing':
+      return '修复中';
+    case 'uninstalled':
+    case 'missing':
+      return '未安装';
+    case 'error':
+    case 'failed':
+    case 'unhealthy':
+      return '异常';
+    case 'unknown':
+    case '':
+      return '未知';
+    default:
+      return value || '未知';
+  }
 }
 
 export function render({ state }) {

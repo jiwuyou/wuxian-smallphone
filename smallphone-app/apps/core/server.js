@@ -11,6 +11,11 @@ applyCcConnectEnvDefaults();
 const { SmallPhoneService } = require("../../packages/domain/service");
 const { isPathInside, resolveSmallPhonePaths } = require("../../packages/shared/paths");
 const {
+  checkApkReleaseManifest,
+  readApkReleaseServerSettings,
+  writeApkReleaseServerSettings,
+} = require("../../packages/domain/apk-release");
+const {
   checkSillyTavernGithubConnectivity,
   getSillyTavernConfig,
   getSillyTavernLocalStatus,
@@ -169,6 +174,13 @@ async function handleApi(req, res, url) {
   if (method === "GET" && url.pathname === "/api/app-registry") {
     return sendJson(res, 200, await service.getAppRegistry({ includeServiceManager: true }));
   }
+  if (method === "GET" && url.pathname === "/api/menu-overrides") {
+    return sendJson(res, 200, service.getMenuOverrides());
+  }
+  if (method === "PUT" && url.pathname === "/api/menu-overrides") {
+    const body = await readJson(req);
+    return sendJson(res, 200, service.updateMenuOverrides(body));
+  }
   if (method === "GET" && url.pathname === "/api/components") {
     return sendJson(res, 200, service.getComponents());
   }
@@ -187,6 +199,27 @@ async function handleApi(req, res, url) {
   }
   if (method === "GET" && url.pathname === "/api/service-manager/services") {
     return sendJson(res, 200, await service.listServiceManagerServices());
+  }
+  if (method === "GET" && url.pathname === "/api/apk-release/server") {
+    return sendJson(res, 200, {
+      ok: true,
+      ...readApkReleaseServerSettings({ paths: SMALLPHONE_PATHS }),
+    });
+  }
+  if (method === "PUT" && url.pathname === "/api/apk-release/server") {
+    const body = await readJson(req);
+    return sendJson(res, 200, {
+      ok: true,
+      ...writeApkReleaseServerSettings(body, { paths: SMALLPHONE_PATHS }),
+    });
+  }
+  if (method === "POST" && url.pathname === "/api/apk-release/check") {
+    const body = await readJson(req);
+    return sendJson(res, 200, await checkApkReleaseManifest({
+      paths: SMALLPHONE_PATHS,
+      settings: body,
+      timeoutMs: process.env.SMALLPHONE_APK_RELEASE_TIMEOUT_MS || "",
+    }));
   }
   const serviceStatusMatch = url.pathname.match(/^\/api\/service-manager\/services\/([^/]+)\/status$/);
   if (method === "GET" && serviceStatusMatch) {

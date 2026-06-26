@@ -36,7 +36,11 @@ const {
   listContactWorkflows,
   getWorkflowDefinition,
 } = require("./contact-workflows");
-const { readComponentRegistry } = require("./component-registry");
+const {
+  readComponentRegistry,
+  readMenuOverridesDocument,
+  writeMenuOverridesDocument,
+} = require("./component-registry");
 
 const DEFAULT_PATHS = resolveSmallPhonePaths();
 const MANAGED_BLOCK_START = "BEGIN_SMALLPHONE_MANAGED_BLOCK";
@@ -289,8 +293,10 @@ class SmallPhoneService {
       activeShell: content.activeShell,
       activeShellRecord,
       components: componentRegistry.components,
+      menuRegistry: componentRegistry.menuRegistry,
       componentRegistry: {
         sourceDir: componentRegistry.sourceDir,
+        overridesFile: componentRegistry.overridesFile,
         generatedAt: componentRegistry.generatedAt,
         errors: componentRegistry.errors,
       },
@@ -310,8 +316,27 @@ class SmallPhoneService {
   readComponentRegistry(options = {}) {
     return readComponentRegistry({
       dir: this.componentRegistryDir,
+      menuOverridesFile: options.menuOverridesFile,
       env: options.env || process.env,
     });
+  }
+
+  getMenuOverrides(options = {}) {
+    return readMenuOverridesDocument({
+      menuOverridesFile: options.menuOverridesFile,
+      env: options.env || process.env,
+    });
+  }
+
+  updateMenuOverrides(input = {}, options = {}) {
+    const overrides = writeMenuOverridesDocument(input, {
+      menuOverridesFile: options.menuOverridesFile,
+      env: options.env || process.env,
+    });
+    return {
+      overrides,
+      menuRegistry: this.readComponentRegistry(options).menuRegistry,
+    };
   }
 
   getComponents(options = {}) {
@@ -319,8 +344,10 @@ class SmallPhoneService {
     return sanitizePublicRegistryPayload({
       generatedAt: nowIso(),
       components: componentRegistry.components,
+      menuRegistry: componentRegistry.menuRegistry,
       componentRegistry: {
         sourceDir: componentRegistry.sourceDir,
+        overridesFile: componentRegistry.overridesFile,
         generatedAt: componentRegistry.generatedAt,
         errors: componentRegistry.errors,
       },
@@ -370,6 +397,7 @@ class SmallPhoneService {
     return {
       generatedAt: nowIso(),
       sourceDir: componentRegistry.sourceDir,
+      menuRegistry: componentRegistry.menuRegistry,
       components,
       errors,
     };
@@ -386,6 +414,9 @@ class SmallPhoneService {
     for (const serviceRecord of services) {
       if (serviceRecord?.id) {
         byId.set(serviceRecord.id, serviceRecord);
+      }
+      if (serviceRecord?.name) {
+        byId.set(serviceRecord.name, serviceRecord);
       }
       for (const tag of Array.isArray(serviceRecord?.tags) ? serviceRecord.tags : []) {
         const key = String(tag || "").trim();
@@ -6280,6 +6311,7 @@ function sanitizeServiceManagerServiceRecord(record, serviceManager) {
   const health = spec.health && typeof spec.health === "object" ? spec.health : {};
 
   const id = String(raw.id || raw.service_id || raw.serviceId || status.service_id || status.serviceId || "").trim();
+  const name = String(raw.name || spec.name || "").trim();
   const tagsSource = Array.isArray(raw.tags) ? raw.tags : Array.isArray(spec.tags) ? spec.tags : [];
   const tags = tagsSource.map((tag) => String(tag || "").trim()).filter(Boolean);
   const enabled =
@@ -6319,7 +6351,9 @@ function sanitizeServiceManagerServiceRecord(record, serviceManager) {
   const capabilitiesSource = raw.capabilities ?? spec.capabilities ?? null;
   return {
     id,
-    name: String(raw.name || spec.name || "").trim(),
+    name,
+    stableId: name || id,
+    aliases: [...new Set([id, name].filter(Boolean))],
     description: String(raw.description || spec.description || "").trim(),
     provider: String(raw.provider || spec.provider || "").trim(),
     tags,

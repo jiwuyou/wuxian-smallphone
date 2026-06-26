@@ -37,6 +37,7 @@ function resolveSmallPhonePaths(options = {}) {
     themesRoot: path.join(smallphoneHome, "themes"),
     desktopLayoutsRoot: path.join(smallphoneHome, "desktop-layouts"),
     openclawAgentRegistryPath: path.join(smallphoneHome, "openclaw-agents.generated.json"),
+    openhouseAiSettingsFile: path.join(smallphoneHome, "openhouseai-settings.json"),
   };
 }
 

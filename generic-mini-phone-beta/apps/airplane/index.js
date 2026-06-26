@@ -6,7 +6,7 @@ const storageKey = 'smallphone.airplaneShooterBestScore';
 
 export const manifest = {
   id: 'airplane',
-  name: '打飞机',
+  name: '飞机大战',
   shortName: '机',
   orbClass: 'orb-airplane',
   views: {
@@ -25,12 +25,12 @@ export const template = `
     <div class="app-view-topline airplane-topline">
       <div>
         <p class="eyebrow">Air Patrol</p>
-        <h2>打飞机</h2>
+        <h2>飞机大战</h2>
       </div>
       <span class="app-view-pill" id="airplane-best-score">最佳 0</span>
     </div>
     <div class="airplane-game-shell">
-      <canvas id="airplane-canvas" width="320" height="480" aria-label="打飞机小游戏"></canvas>
+      <canvas id="airplane-canvas" width="320" height="480" aria-label="飞机大战小游戏"></canvas>
       <div class="airplane-hud">
         <span id="airplane-score">分数 0</span>
         <span id="airplane-lives">生命 3</span>
@@ -41,7 +41,7 @@ export const template = `
         <button class="soft-button small-button" type="button" id="airplane-start-button">开始游戏</button>
       </div>
     </div>
-    <div class="airplane-control-row" aria-label="打飞机操作">
+    <div class="airplane-control-row" aria-label="飞机大战操作">
       <button class="secondary-button small-button" type="button" id="airplane-restart-button">重新开始</button>
       <p>躲开红色敌机，击中越多分越高。</p>
     </div>

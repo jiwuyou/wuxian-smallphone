@@ -20,6 +20,7 @@
           <button class="nav-item active" data-screen="chat">聊天</button>
           <button class="nav-item" data-screen="workflows">工作流</button>
           <button class="nav-item" data-screen="permissions">权限</button>
+          <button class="nav-item" data-screen="apk-release">APK 发布</button>
           <button class="nav-item" data-screen="reminders">提醒</button>
         </nav>
         <section class="contacts-panel">
@@ -108,6 +109,31 @@
           <div id="permission-agent-meta" class="permission-agent-meta"></div>
           <div id="permission-template-list" class="permission-template-list"></div>
           <div id="permission-decision-list" class="permission-decision-list"></div>
+        </section>
+
+        <section id="screen-apk-release" class="screen">
+          <div class="panel-head apk-release-head">
+            <div>
+              <h2>APK 发布</h2>
+              <div id="apk-release-summary" class="card-meta">未加载发布服务器配置。</div>
+            </div>
+            <div class="apk-release-toolbar">
+              <button id="apk-release-check-button" class="ghost-button" type="button">检查 manifest</button>
+              <button id="apk-release-save-button" form="apk-release-form" type="submit">保存配置</button>
+            </div>
+          </div>
+          <form id="apk-release-form" class="apk-release-form">
+            <label class="form-field">
+              <span>Release server base URL</span>
+              <input id="apk-release-base-url" placeholder="https://example.com/releases" />
+            </label>
+            <label class="form-field">
+              <span>Channel</span>
+              <input id="apk-release-channel" placeholder="stable" />
+            </label>
+          </form>
+          <article class="card apk-release-install-note">安装由 Android App 完成。</article>
+          <div id="apk-release-result" class="apk-release-result"></div>
         </section>
 
       </main>

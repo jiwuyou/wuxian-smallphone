@@ -5,7 +5,10 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { SmallPhoneService } = require("../packages/domain/service");
-const { readComponentRegistry } = require("../packages/domain/component-registry");
+const {
+  readComponentRegistry,
+  writeMenuOverridesDocument,
+} = require("../packages/domain/component-registry");
 
 function tmpDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -19,7 +22,163 @@ test("component registry: falls back to core apps and controlled browser", () =>
   assert.ok(registry.components.find((component) => component.id === "messages" && component.smallphoneApp.staticAppId === "messages"));
   assert.ok(registry.components.find((component) => component.id === "sillytavern" && component.smallphoneApp.staticAppId === "sillytavern"));
   assert.ok(registry.components.find((component) => component.id === "controlled-browser"));
+  assert.ok(registry.components.find((component) => component.id === "hermes-webui"));
+  assert.ok(registry.components.find((component) => component.id === "cloudcli" && component.title === "CC/Codex"));
   assert.ok(registry.appInstances.find((instance) => instance.appId === "controlled-browser"));
+  assert.equal(registry.menuRegistry.homeTarget, "hermes-webui");
+  assert.ok(registry.menuRegistry.quickEntries.find((entry) => entry.id === "hermes-webui" && entry.home));
+  const messages = registry.menuRegistry.items.find((entry) => entry.id === "messages");
+  assert.equal(messages.entry.type, "webview");
+  assert.equal(messages.entry.url, "http://127.0.0.1:22082/");
+  assert.equal(messages.controlEntry.type, "service-control");
+  assert.deepEqual(messages.controlEntry.serviceNames, ["smallphone-core", "smallphone-frontend-beta"]);
+  assert.equal(registry.menuRegistry.serviceIndex["smallphone-frontend-beta"].url, "http://127.0.0.1:22082/");
+  assert.equal(registry.menuRegistry.serviceIndex["smallphone-core"].url, "http://127.0.0.1:22000/");
+  assert.equal(registry.menuRegistry.serviceIndex.cloudcli.componentId, "cloudcli");
+  assert.equal(registry.menuRegistry.serviceIndex.cloudcli.url, "http://127.0.0.1:23083/");
+});
+
+test("component registry: final menu protects builtin entries and applies user home override", () => {
+  const componentsDir = tmpDir("smallphone-components-protected-");
+  const overridesFile = path.join(tmpDir("smallphone-menu-overrides-"), "menu-overrides.json");
+  fs.writeFileSync(
+    path.join(componentsDir, "hermes-webui.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "hermes-webui",
+      title: "Hermes Extension",
+      kind: "ai-partner",
+      shellMenu: {
+        visible: false,
+        section: "ai",
+        order: 5,
+        entry: { type: "webview", url: "http://127.0.0.1:23084/" },
+      },
+      smallphoneApp: {
+        visible: false,
+        section: "ai",
+        order: 5,
+        entry: { type: "webview", url: "http://127.0.0.1:23084/" },
+      },
+      serviceManager: {
+        services: [
+          {
+            name: "hermes-webui",
+            serviceRef: "service-manager://services/hermes-webui",
+            controls: ["status", "start", "stop", "restart", "logs", "repair"],
+          },
+        ],
+      },
+      ai: { visible: true },
+    }),
+    "utf8",
+  );
+  fs.writeFileSync(
+    overridesFile,
+    JSON.stringify({
+      homeTarget: "cloudcli",
+      favorites: ["cloudcli"],
+      items: {
+        "controlled-browser": { visible: false },
+      },
+    }),
+    "utf8",
+  );
+
+  try {
+    const registry = readComponentRegistry({ dir: componentsDir, menuOverridesFile: overridesFile });
+    const hermes = registry.menuRegistry.items.find((item) => item.id === "hermes-webui");
+    const cloudcli = registry.menuRegistry.items.find((item) => item.id === "cloudcli");
+    const controlledBrowser = registry.menuRegistry.items.find((item) => item.id === "controlled-browser");
+
+    assert.equal(hermes.protected, true);
+    assert.equal(hermes.visible, true);
+    assert.equal(hermes.source, "builtin+extension");
+    assert.equal(registry.menuRegistry.homeTarget, "cloudcli");
+    assert.equal(cloudcli.title, "CC/Codex");
+    assert.equal(cloudcli.home, true);
+    assert.equal(cloudcli.serviceNames.includes("cloudcli"), true);
+    assert.equal(controlledBrowser.visible, false);
+  } finally {
+    fs.rmSync(componentsDir, { recursive: true, force: true });
+    fs.rmSync(path.dirname(overridesFile), { recursive: true, force: true });
+  }
+});
+
+test("component registry: menu overrides writer updates home target safely", () => {
+  const componentsDir = path.join(tmpDir("smallphone-components-writer-"), "missing-components");
+  const overridesFile = path.join(tmpDir("smallphone-menu-writer-"), "menu-overrides.json");
+
+  try {
+    const written = writeMenuOverridesDocument({
+      homeTarget: "cloudcli",
+      favorites: ["cloudcli"],
+      items: {
+        cloudcli: {
+          title: "CC/Codex",
+          favorite: true,
+        },
+      },
+    }, { menuOverridesFile: overridesFile });
+    assert.equal(written.homeTarget, "cloudcli");
+    assert.deepEqual(written.favorites, ["cloudcli"]);
+
+    const registry = readComponentRegistry({ dir: componentsDir, menuOverridesFile: overridesFile });
+    assert.equal(registry.menuRegistry.homeTarget, "cloudcli");
+    assert.equal(registry.menuRegistry.items.find((item) => item.id === "cloudcli").home, true);
+  } finally {
+    fs.rmSync(path.dirname(componentsDir), { recursive: true, force: true });
+    fs.rmSync(path.dirname(overridesFile), { recursive: true, force: true });
+  }
+});
+
+test("component registry: menu overrides preserve top-level url and control entry", () => {
+  const componentsDir = path.join(tmpDir("smallphone-components-menu-url-"), "missing-components");
+  const overridesFile = path.join(tmpDir("smallphone-menu-url-writer-"), "menu-overrides.json");
+  const overrideUrl = "http://127.0.0.1:23999/workspace";
+  const overrideRef = "service-manager://services/cloudcli";
+
+  try {
+    const written = writeMenuOverridesDocument({
+      items: {
+        cloudcli: {
+          title: "CC/Codex Local",
+          url: overrideUrl,
+          controlEntry: {
+            type: "service-control",
+            serviceNames: ["cloudcli"],
+            serviceRefs: [overrideRef],
+          },
+          visible: true,
+          favorite: true,
+          home: true,
+        },
+      },
+    }, { menuOverridesFile: overridesFile });
+
+    assert.equal(written.items.cloudcli.title, "CC/Codex Local");
+    assert.equal(written.items.cloudcli.url, overrideUrl);
+    assert.deepEqual(written.items.cloudcli.controlEntry.serviceNames, ["cloudcli"]);
+    assert.deepEqual(written.items.cloudcli.controlEntry.serviceRefs, [overrideRef]);
+
+    const registry = readComponentRegistry({ dir: componentsDir, menuOverridesFile: overridesFile });
+    const cloudcli = registry.menuRegistry.items.find((item) => item.id === "cloudcli");
+
+    assert.equal(registry.menuRegistry.homeTarget, "cloudcli");
+    assert.equal(cloudcli.title, "CC/Codex Local");
+    assert.equal(cloudcli.entry.type, "webview");
+    assert.equal(cloudcli.entry.url, overrideUrl);
+    assert.equal(cloudcli.visible, true);
+    assert.equal(cloudcli.favorite, true);
+    assert.equal(cloudcli.home, true);
+    assert.equal(cloudcli.controlEntry.type, "service-control");
+    assert.deepEqual(cloudcli.controlEntry.serviceNames, ["cloudcli"]);
+    assert.ok(cloudcli.controlEntry.serviceRefs.includes(overrideRef));
+    assert.equal(registry.menuRegistry.serviceIndex.cloudcli.serviceRef, overrideRef);
+  } finally {
+    fs.rmSync(path.dirname(componentsDir), { recursive: true, force: true });
+    fs.rmSync(path.dirname(overridesFile), { recursive: true, force: true });
+  }
 });
 
 test("component registry: SmallPhone consumes only smallphoneApp from four-layer manifests", () => {
@@ -138,8 +297,8 @@ test("component registry: SmallPhone consumes only smallphoneApp from four-layer
     });
     const registry = service.getAppRegistry();
 
-    assert.ok(registry.staticAppControls.hiddenAppIds.includes("messages"));
-    assert.ok(registry.components.find((component) => component.id === "messages" && component.smallphoneApp.visible === false));
+    assert.equal(registry.staticAppControls.hiddenAppIds.includes("messages"), false);
+    assert.ok(registry.components.find((component) => component.id === "messages" && component.smallphoneApp.visible === true));
     assert.ok(registry.components.find((component) => component.id === "hermes-webui"));
     assert.equal(Boolean(registry.components.find((component) => component.id === "legacy-menu-only")), false);
     assert.equal(Boolean(registry.components.find((component) => component.id === "forbidden")), false);

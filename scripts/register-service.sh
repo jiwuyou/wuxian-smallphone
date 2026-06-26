@@ -85,6 +85,8 @@ print_intended_services() {
   sillytavern_host="${SMALLPHONE_SILLYTAVERN_HOST:-${SILLYTAVERN_HOST:-127.0.0.1}}"
   controlled_browser_port="${SMALLPHONE_CONTROLLED_BROWSER_PORT:-23080}"
   controlled_browser_host="${SMALLPHONE_CONTROLLED_BROWSER_HOST:-127.0.0.1}"
+  cloudcli_port="${SMALLPHONE_CLOUDCLI_PORT:-${CLOUDCLI_PORT:-${CLAUDE_CODE_UI_PORT:-23083}}}"
+  cloudcli_host="${SMALLPHONE_CLOUDCLI_HOST:-${CLOUDCLI_HOST:-127.0.0.1}}"
 
   log "Intended services (name | bind | tags):"
   log "  smallphone-core | ${core_host}:${core_port} | ${group_tag}, openhouse-component:smallphone-core"
@@ -98,6 +100,7 @@ print_intended_services() {
   log "  smallphone-like-girl-source | 127.0.0.1:23002 | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-kind:source-app"
   log "  smallphone-sillytavern | ${sillytavern_host}:${sillytavern_port} | ${group_tag}, openhouse-component:smallphone-standalone, smallphone-app:sillytavern"
   log "  controlled-browser | ${controlled_browser_host}:${controlled_browser_port} | ${group_tag}, openhouse-component:controlled-browser, smallphone-app:controlled-browser"
+  log "  cloudcli | ${cloudcli_host}:${cloudcli_port} | ${group_tag}, openhouse-component:cloudcli, openhouse-ai-partner:cloudcli"
   log ""
   log "Notes:"
   log "  - smallphone-core port is SMALLPHONE_PORT (default 22000) or APP_BACKEND_PORT."
@@ -446,6 +449,29 @@ elif key == "controlled-browser":
         [],
         [group_tag, "openhouse-component:controlled-browser", "smallphone", "smallphone-app:controlled-browser", "smallphone-instance:controlled-browser"],
     )
+elif key == "cloudcli":
+    host = os.environ.get("SMALLPHONE_CLOUDCLI_HOST") or os.environ.get("CLOUDCLI_HOST") or "127.0.0.1"
+    port = os.environ.get("SMALLPHONE_CLOUDCLI_PORT") or os.environ.get("CLOUDCLI_PORT") or os.environ.get("CLAUDE_CODE_UI_PORT") or "23083"
+    claude_cli = os.environ.get("CLAUDE_CLI_PATH") or "/root/.local/bin/claude"
+    path = os.environ.get("PATH") or "/root/.local/bin:/root/.local/node/bin:/root/.npm-global/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/system/bin:/system/xbin:/data/data/com.termux/files/usr/bin"
+    # Invoke node directly so service-manager's strict /proc cmdline verification
+    # matches the live process. Running the cloudcli symlink rewrites argv to
+    # "node /usr/local/bin/cloudcli ..." and makes stop/restart lose the pidfile.
+    spec = spec_process(
+        "cloudcli",
+        "CC/Codex web console powered by CloudCLI / Claude Code UI",
+        ["node", "/usr/local/bin/cloudcli", "start", "--port", str(port)],
+        Path("/root"),
+        {
+            "SERVER_PORT": str(port),
+            "PORT": str(port),
+            "HOST": host,
+            "CLAUDE_CLI_PATH": claude_cli,
+            "PATH": path,
+        },
+        [http_check(f"http://{host}:{port}")],
+        [group_tag, "openhouse-component:cloudcli", "openhouse-ai-partner:cloudcli", "smallphone"],
+    )
 else:
     raise SystemExit(f"unknown spec key: {key}")
 
@@ -597,7 +623,7 @@ main() {
   backend_port="${BACKEND_PORT:-22096}"
   backend_host="${BACKEND_HOST:-127.0.0.1}"
 
-  upsert_keys="smallphone-core smallphone-frontend smallphone-frontend-beta smallphone-standalone-diary smallphone-standalone-like-girl smallphone-standalone-like-girl-clone smallphone-standalone-album smallphone-like-girl-source smallphone-sillytavern controlled-browser"
+  upsert_keys="smallphone-core smallphone-frontend smallphone-frontend-beta smallphone-standalone-diary smallphone-standalone-like-girl smallphone-standalone-like-girl-clone smallphone-standalone-album smallphone-like-girl-source smallphone-sillytavern controlled-browser cloudcli"
 
   # Register the OpenCode backend only when the checkout exists.
   if [ -d "$PARENT_DIR/opencode" ]; then
@@ -619,6 +645,7 @@ main() {
       smallphone-like-girl-source) name="smallphone-like-girl-source" ;;
       smallphone-sillytavern) name="smallphone-sillytavern" ;;
       controlled-browser) name="controlled-browser" ;;
+      cloudcli) name="cloudcli" ;;
       *) die "unknown key: $key" ;;
     esac
 
