@@ -6,10 +6,14 @@ const DEFAULT_CC_CONNECT_CONFIG_FILE = "/root/.smallphoneai/cc-connect.toml";
 const OPENHOUSE_CC_CONNECT_CONFIG_FILE = "/root/smallphoneai-repos/openhouse-connect/config.smallphoneai.toml";
 const LEGACY_CC_CONNECT_CONFIG_FILE = "/root/.cc-connect/config.toml";
 const CC_CONNECT_DAEMON_FILE = "/root/.cc-connect/daemon.json";
+const DEFAULT_WEBCLIENT_PORT = "21030";
+const DEFAULT_WEBCLIENT_APP_ID = "smallphone";
+const DEFAULT_WEBCLIENT_HOST = "127.0.0.1";
+const DEFAULT_WEBCLIENT_TOKEN_ENV = "OPENHOUSE_WEBCLIENT_TOKEN";
 
 function applyCcConnectEnvDefaults(env = process.env) {
   if (!env.SMALLPHONE_RUNTIME_MODE) {
-    env.SMALLPHONE_RUNTIME_MODE = "cc-connect";
+    env.SMALLPHONE_RUNTIME_MODE = "cc-webclient";
   }
   if (!env.SMALLPHONE_HOME) {
     env.SMALLPHONE_HOME = path.join(resolveSmallphoneRoot(), "smallphone-home");
@@ -25,8 +29,7 @@ function applyCcConnectEnvDefaults(env = process.env) {
   if (mode !== "cc-webclient" && mode !== "cc-connect") return;
 
   const configFile = env.CC_CONNECT_CONFIG_FILE || DEFAULT_CC_CONNECT_CONFIG_FILE;
-  const config = readCcConnectConfig(configFile);
-  if (!config) return;
+  const config = readCcConnectConfig(configFile) || {};
 
   if (mode === "cc-webclient") {
     applyCcWebclientDefaults(env, config);
@@ -39,16 +42,23 @@ function applyCcWebclientDefaults(env, config) {
   const webclient = config.webclient || {};
   const management = config.management || {};
   const projectName = env.SMALLPHONE_CCCONNECT_PROJECT || findSmallphoneProject(config.projects);
-  const webclientPort = normalizeText(webclient.port) || "21040";
-  const webclientToken = normalizeText(webclient.token);
+  const webclientHost = normalizeWebclientHost(webclient.host);
+  const webclientPort = normalizeText(webclient.port) || DEFAULT_WEBCLIENT_PORT;
+  const webclientToken =
+    resolveEnvText(webclient.token, env) ||
+    normalizeText(env[DEFAULT_WEBCLIENT_TOKEN_ENV]);
+  const webclientAppId =
+    resolveEnvText(webclient.default_app, env) ||
+    findWebclientAppId(webclient.apps) ||
+    DEFAULT_WEBCLIENT_APP_ID;
   const managementPort = normalizeText(management.port) || "21020";
-  const managementToken = normalizeText(management.token);
+  const managementToken = resolveEnvText(management.token, env);
 
-  setDefault(env, "SMALLPHONE_WEBCLIENT_BASE_URL", `http://127.0.0.1:${webclientPort}`);
+  setDefault(env, "SMALLPHONE_WEBCLIENT_BASE_URL", `http://${formatUrlHost(webclientHost)}:${webclientPort}`);
   setDefault(env, "SMALLPHONE_WEBCLIENT_TOKEN", webclientToken);
-  setDefault(env, "SMALLPHONE_WEBCLIENT_APP_ID", "smallphone");
+  setDefault(env, "SMALLPHONE_WEBCLIENT_APP_ID", webclientAppId);
   setDefault(env, "SMALLPHONE_CCCONNECT_PROJECT", projectName);
-  setDefault(env, "SMALLPHONE_CCCONNECT_PLATFORM", "smallphone");
+  setDefault(env, "SMALLPHONE_CCCONNECT_PLATFORM", "web-smallphone");
   setDefault(env, "SMALLPHONE_CCCONNECT_MANAGEMENT_URL", `http://127.0.0.1:${managementPort}`);
   setDefault(env, "SMALLPHONE_CCCONNECT_MANAGEMENT_TOKEN", managementToken);
 }
@@ -59,9 +69,9 @@ function applyCcBridgeDefaults(env, config) {
   const projectName = env.SMALLPHONE_CCCONNECT_PROJECT || findSmallphoneProject(config.projects);
   const bridgePort = normalizeText(bridge.port) || "21010";
   const bridgePath = normalizeText(bridge.path) || "/bridge/ws";
-  const bridgeToken = normalizeText(bridge.token);
+  const bridgeToken = resolveEnvText(bridge.token, env);
   const managementPort = normalizeText(management.port) || "21020";
-  const managementToken = normalizeText(management.token);
+  const managementToken = resolveEnvText(management.token, env);
 
   setDefault(env, "SMALLPHONE_CCCONNECT_WS_URL", `ws://127.0.0.1:${bridgePort}${bridgePath}`);
   setDefault(env, "SMALLPHONE_CCCONNECT_TOKEN", bridgeToken);
@@ -240,6 +250,37 @@ function setDefault(env, key, value) {
   const normalized = normalizeText(value);
   if (!normalized || env[key]) return;
   env[key] = normalized;
+}
+
+function findWebclientAppId(apps) {
+  const items = Array.isArray(apps) ? apps : [];
+  const match = items.find((app) => normalizeText(app?.id) === DEFAULT_WEBCLIENT_APP_ID) || items[0];
+  return normalizeText(match?.id);
+}
+
+function resolveEnvText(value, env = process.env) {
+  const text = normalizeText(value);
+  if (!text) return "";
+  return text
+    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name) => normalizeText(env[name]))
+    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, name) => normalizeText(env[name]))
+    .trim();
+}
+
+function normalizeWebclientHost(value) {
+  const host = normalizeText(value) || DEFAULT_WEBCLIENT_HOST;
+  if (host === "0.0.0.0" || host === "::" || host === "[::]") {
+    return DEFAULT_WEBCLIENT_HOST;
+  }
+  return host;
+}
+
+function formatUrlHost(value) {
+  const host = normalizeText(value) || DEFAULT_WEBCLIENT_HOST;
+  if (host.includes(":") && !host.startsWith("[")) {
+    return `[${host}]`;
+  }
+  return host;
 }
 
 function normalizeText(value) {

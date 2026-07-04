@@ -1,5 +1,5 @@
 import { escapeHtml, qs } from '../shared.js';
-import { resolveBackendBase } from '../workflows/api.js?v=4';
+import { resolveBackendBase } from '../workflows/api.js?v=5';
 
 const defaultUrl = 'http://127.0.0.1:8000/';
 

@@ -143,6 +143,91 @@ test("createRuntimeAdapter recognizes cc-webclient modes", () => {
   assert.equal(createRuntimeAdapter({ mode: "ccwebclient" }).describe().id, "cc-webclient");
 });
 
+test("cc-webclient adapter defaults to localhost backend and environment token", async (t) => {
+  const previousToken = process.env.OPENHOUSE_WEBCLIENT_TOKEN;
+  process.env.OPENHOUSE_WEBCLIENT_TOKEN = "env-webclient-secret";
+  t.after(() => {
+    if (previousToken === undefined) {
+      delete process.env.OPENHOUSE_WEBCLIENT_TOKEN;
+    } else {
+      process.env.OPENHOUSE_WEBCLIENT_TOKEN = previousToken;
+    }
+  });
+
+  const calls = [];
+  const fetchStub = async (url, options = {}) => {
+    const method = String(options.method || "GET").toUpperCase();
+    const u = new URL(String(url));
+    calls.push({
+      method,
+      origin: u.origin,
+      pathname: u.pathname,
+      auth: options?.headers?.authorization || "",
+      body: options.body ? JSON.parse(String(options.body)) : null,
+    });
+
+    if (method === "POST" && u.pathname.endsWith("/sessions")) {
+      return makeResponse({ ok: true, status: 200, json: { ok: true, data: { id: "s-env" } } });
+    }
+    if (method === "POST" && u.pathname.endsWith("/send")) {
+      return makeResponse({
+        ok: true,
+        status: 200,
+        json: { ok: true, data: { session_id: "s-env", outbox_id: "out-env" } },
+      });
+    }
+    if (method === "GET" && u.pathname.includes("/sessions/s-env")) {
+      return makeResponse({
+        ok: true,
+        status: 200,
+        json: {
+          ok: true,
+          data: {
+            history: [
+              {
+                id: "a-env",
+                role: "assistant",
+                user_message_id: "out-env",
+                content: "ok",
+              },
+            ],
+          },
+        },
+      });
+    }
+    return makeResponse({ ok: false, status: 500, text: `unexpected fetch ${method} ${u.pathname}` });
+  };
+
+  const runtime = createRuntimeAdapter({
+    mode: "cc-webclient",
+    ccConnectProject: "proj",
+    timeoutMs: 2000,
+    pollIntervalMs: 1,
+    fetch: fetchStub,
+  });
+
+  const description = runtime.describe();
+  assert.equal(description.baseUrl, "http://127.0.0.1:21030/");
+  assert.equal(description.appId, "smallphone");
+  assert.equal(JSON.stringify(description).includes("env-webclient-secret"), false);
+
+  const result = await runtime.sendTurn({
+    thread: { id: "thread-env", title: "Thread", runtime: {} },
+    contact: { id: "c1", displayName: "Alice" },
+    character: { name: "Bob", persona: "persona" },
+    relationship: { trust: 0.5, intimacy: 0.1, tension: 0.2 },
+    memories: [],
+    messages: [{ role: "user", content: "hello" }],
+    turnContext: null,
+    attachments: [],
+  });
+
+  assert.equal(result.assistantText, "ok");
+  assert.ok(calls.length >= 3);
+  assert.ok(calls.every((call) => call.origin === "http://127.0.0.1:21030"));
+  assert.ok(calls.every((call) => call.auth === "Bearer env-webclient-secret"));
+});
+
 test("cc-webclient adapter wraps user text by default", async () => {
   const { sendBody } = await sendWebclientTestTurn();
 

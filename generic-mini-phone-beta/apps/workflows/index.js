@@ -5,7 +5,7 @@ import {
   resolveBackendBase,
   sanitizeModulesForCompile,
   saveThreadPromptBoard,
-} from './api.js?v=4';
+} from './api.js?v=5';
 
 const PROMPTBOARD_STORAGE_KEY = 'smallphone.promptBoard.drafts.v1';
 const PROMPTBOARD_SELECTED_THREAD_KEY = 'smallphone.promptBoard.selectedThreadId';
@@ -76,7 +76,7 @@ export const template = `
       <button class="secondary-button" id="promptboard-compile" type="button">编译</button>
     </div>
 
-    <div id="promptboard-meta" class="promptboard-meta">将发送到 21040 的最终文本由模块拼接而成；标题/说明不会被发送。</div>
+    <div id="promptboard-meta" class="promptboard-meta">将交给 smallphone-core 的最终文本由模块拼接而成；标题/说明不会被发送。</div>
 
     <details class="details-panel promptboard-details promptboard-preview-details" id="promptboard-preview-details">
       <summary>编译输入（本次 user 消息）</summary>
@@ -88,7 +88,7 @@ export const template = `
     <div class="promptboard-preview-head">
       <div>
         <strong>合并预览（真实发送文本）</strong>
-        <p class="promptboard-subtitle">这是最终发给 21040 的文本；颜色只用于标记模块边界，点击对应颜色段进入编辑。</p>
+        <p class="promptboard-subtitle">这是最终交给 smallphone-core 的文本；颜色只用于标记模块边界，点击对应颜色段进入编辑。</p>
       </div>
       <span class="promptboard-pill" id="promptboard-source">local</span>
     </div>
@@ -251,7 +251,7 @@ function renderPromptBoard() {
     meta.textContent = promptBoardState.loadedAt ? `已同步 ${formatTime(promptBoardState.loadedAt)}` : '已同步';
   } else {
     status.textContent = '未加载';
-    meta.textContent = '将发送到 21040 的最终文本由模块拼接而成；标题/说明不会被发送。';
+    meta.textContent = '将交给 smallphone-core 的最终文本由模块拼接而成；标题/说明不会被发送。';
   }
 
   const threads = Array.isArray(promptBoardState.threads) ? promptBoardState.threads : [];
@@ -1462,7 +1462,7 @@ function renderModuleEditor() {
 
   container.innerHTML = `
     <div class="promptboard-module-hint">
-      <span class="promptboard-chip">标题/说明不会发送到 21040</span>
+      <span class="promptboard-chip">标题/说明不会发送到 smallphone-core</span>
       <span class="promptboard-chip promptboard-chip-mono">${escapeHtml(module.id)}</span>
       <span class="promptboard-chip">${escapeHtml(moduleKind)}</span>
       <span class="promptboard-chip">${escapeHtml(moduleWorkflow.mode)}</span>

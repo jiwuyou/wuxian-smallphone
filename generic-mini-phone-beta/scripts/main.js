@@ -4,7 +4,8 @@ import {
   fetchDynamicAppRegistry,
   mergeStaticAndDynamicDesktopApps,
   registeredApps,
-} from './app-registry.js?v=19';
+  sanitizeDynamicAppLaunchUrl,
+} from './app-registry.js?v=20';
 import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=17';
 import {
   buildServiceManagerDefinitions,
@@ -12,10 +13,12 @@ import {
   getManagedServiceTargets,
   mergeServiceManagerDefinitionWithStatus,
 } from './service-manager-logic.js?v=1';
-
-const DEFAULT_BACKEND_PORT = '22000';
-const DEFAULT_BACKEND_BASE = `http://127.0.0.1:${DEFAULT_BACKEND_PORT}/api`;
-const BACKEND_STORAGE_KEY = 'smallphone.backendBase';
+import {
+  BACKEND_STORAGE_KEY,
+  DEFAULT_BACKEND_BASE,
+  DEFAULT_BACKEND_PORT,
+  normalizeCoreBackendBase,
+} from '../apps/workflows/api.js?v=5';
 const AVATAR_CLASSES = ['avatar-pink', 'avatar-blue', 'avatar-gold', 'avatar-green'];
 const DEFAULT_TIMEZONE = 'Etc/UTC';
 const DEFAULT_WAIFU_DELAY_MS_PER_CHAR = 55;
@@ -120,14 +123,7 @@ function normalizeApiBaseUrl(url) {
 }
 
 function normalizeBackendBase(url) {
-  const raw = String(url || '').trim();
-  if (!raw) return '';
-  const withoutSlash = raw.replace(/\/$/, '');
-  if (withoutSlash.endsWith('/api')) return withoutSlash;
-  if (withoutSlash.endsWith('/smallphone')) {
-    return `${withoutSlash.slice(0, -'/smallphone'.length)}/api`;
-  }
-  return `${withoutSlash}/api`;
+  return normalizeCoreBackendBase(url);
 }
 
 function getBackendCandidates() {
@@ -143,7 +139,7 @@ function getBackendCandidates() {
   if (protocol === 'http:' || protocol === 'https:') {
     if (port === DEFAULT_BACKEND_PORT) candidates.push(`${origin}/api`);
     if (hostname && hostname !== '127.0.0.1' && hostname !== 'localhost') {
-      candidates.push(`http://${hostname}:${DEFAULT_BACKEND_PORT}/api`);
+      candidates.push(`${protocol}//${hostname}:${DEFAULT_BACKEND_PORT}/api`);
     }
     candidates.push(`http://127.0.0.1:${DEFAULT_BACKEND_PORT}/api`);
     candidates.push(`http://localhost:${DEFAULT_BACKEND_PORT}/api`);
@@ -155,8 +151,10 @@ function getBackendCandidates() {
 }
 
 function rememberBackendBase(url) {
-  backendBase = url;
-  window.localStorage.setItem(BACKEND_STORAGE_KEY, url);
+  const normalized = normalizeBackendBase(url);
+  if (!normalized) return;
+  backendBase = normalized;
+  window.localStorage.setItem(BACKEND_STORAGE_KEY, normalized);
 }
 
 function normalizeStandaloneUrl(value, fallback = 'http://127.0.0.1:23003/') {
@@ -2781,7 +2779,8 @@ function showDynamicAppEmpty(message = '', isError = false) {
 
 function renderDynamicAppView(message = '', isError = false) {
   const entry = activeDynamicApp;
-  const url = String(entry?.launchUrl || '').trim();
+  const rawUrl = String(entry?.launchUrl || '').trim();
+  const url = sanitizeDynamicAppLaunchUrl(rawUrl, backendBase);
   const title = getDynamicAppTitle(entry);
   const appId = String(entry?.appId || 'Dynamic App').trim();
   const instanceId = getDynamicEntryKey(entry);
@@ -3683,11 +3682,11 @@ function renderPermissionPanel(errorMessage = '') {
   dom.permissionPanelSummary.textContent = summaryParts.join(' · ');
 
   dom.permissionPanelSource.textContent = capabilities.source === 'cc-connect-project'
-    ? '来源：cc-connect（项目）'
+    ? '来源：后端运行时（项目）'
     : snapshot.evaluation?.remote_error
       ? '来源：本地回退'
       : snapshot.configured
-        ? '来源：cc-connect'
+        ? '来源：后端运行时'
         : '来源：本地';
   dom.permissionTemplateGrid.innerHTML = modes
     .map((mode) => {

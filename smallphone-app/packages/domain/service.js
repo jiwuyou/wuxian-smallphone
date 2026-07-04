@@ -3221,7 +3221,7 @@ function attachThreadRouting(thread, runtimeProvider = "", paths = DEFAULT_PATHS
 }
 
 function defaultRuntimeProjectForAgent(runtimeProvider, agentType) {
-  if (normalizeRuntimeProvider(runtimeProvider) !== "cc-connect") return "";
+  if (!isCcConnectProjectRuntime(runtimeProvider)) return "";
   switch (normalizeAgentType(agentType)) {
     case "claudecode":
       return "smallphone-claude";

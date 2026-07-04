@@ -54,6 +54,23 @@ const DYNAMIC_APP_ORB_CLASSES = [
 const STATIC_APP_ALIASES = {
   chat: 'messages',
 };
+const BLOCKED_DYNAMIC_APP_PORTS = new Set(['21010', '21020', '21030', '21040']);
+const SENSITIVE_QUERY_NAMES = new Set([
+  'apikey',
+  'auth',
+  'authorization',
+  'bearer',
+  'clientsecret',
+  'key',
+  'password',
+  'passwd',
+  'pwd',
+  'secret',
+  'session',
+  'sessionid',
+  'sid',
+  'jwt',
+]);
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -276,12 +293,50 @@ function resolveUrlAgainstBackend(value, backendBase) {
   if (!raw) return '';
 
   try {
-    const resolved = new URL(raw, backendBase);
-    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return '';
-    return resolved.href;
+    return sanitizeDynamicAppLaunchUrl(raw, backendBase);
   } catch {
     return '';
   }
+}
+
+function isSensitiveQueryName(name) {
+  const normalized = normalizeString(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!normalized) return false;
+  return SENSITIVE_QUERY_NAMES.has(normalized)
+    || normalized.endsWith('token')
+    || normalized.endsWith('secret')
+    || normalized.includes('session')
+    || normalized.includes('password')
+    || normalized.includes('authorization')
+    || normalized.includes('apikey');
+}
+
+export function sanitizeDynamicAppLaunchUrl(value, backendBase = DEFAULT_DYNAMIC_APP_BACKEND_ORIGIN) {
+  const raw = normalizeString(value);
+  if (!raw) return '';
+
+  let resolved;
+  try {
+    resolved = new URL(raw, backendBase || DEFAULT_DYNAMIC_APP_BACKEND_ORIGIN);
+  } catch {
+    return '';
+  }
+
+  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return '';
+  if (BLOCKED_DYNAMIC_APP_PORTS.has(resolved.port)) return '';
+
+  resolved.username = '';
+  resolved.password = '';
+  resolved.hash = '';
+
+  const safeSearchParams = new URLSearchParams();
+  for (const [key, valuePart] of resolved.searchParams.entries()) {
+    if (isSensitiveQueryName(key)) continue;
+    safeSearchParams.append(key, valuePart);
+  }
+  resolved.search = safeSearchParams.toString();
+
+  return resolved.href;
 }
 
 function createDynamicDesktopAppEntry(instance, app, options = {}) {
@@ -327,6 +382,8 @@ export function resolveDynamicAppBackendBase(backendBase = '') {
   try {
     const url = new URL(raw, DEFAULT_DYNAMIC_APP_BACKEND_ORIGIN);
     const pathname = trimTrailingSlash(url.pathname);
+    url.username = '';
+    url.password = '';
     if (pathname.endsWith(APP_REGISTRY_API_PATH)) {
       url.pathname = pathname.slice(0, -APP_REGISTRY_API_PATH.length) || '/';
     } else if (pathname.endsWith('/api')) {

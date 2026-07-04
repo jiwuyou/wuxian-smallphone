@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { normalizeDynamicAppRegistry, registeredApps } from './app-registry.js';
+import {
+  normalizeDynamicAppRegistry,
+  registeredApps,
+  resolveDynamicAppEntryUrl,
+  sanitizeDynamicAppLaunchUrl,
+} from './app-registry.js';
 import { bind as bindMessages, render as renderMessages, template as messagesTemplate } from '../apps/messages/index.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -209,4 +214,78 @@ test('component registry consumes smallphoneApp for hidden static apps and dynam
   assert.equal(Boolean(normalized.components.find((component) => component.id === 'legacy-menu-only')), false);
   assert.equal(normalized.dynamicAppEntries.length, 1);
   assert.equal(normalized.dynamicAppEntries[0].appId, 'hermes-webui');
+});
+
+test('dynamic app launch urls reject cc-connect ports', () => {
+  const payload = {
+    apps: [
+      {
+        id: 'cc-webclient',
+        title: 'cc webclient',
+        entry: 'http://phone.test:21030/app/',
+      },
+      {
+        id: 'cc-bridge',
+        title: 'cc bridge',
+        entry: 'http://phone.test:21010/',
+      },
+    ],
+    appInstances: [
+      {
+        id: 'instance-cc-webclient',
+        appId: 'cc-webclient',
+        title: 'cc webclient',
+        settings: {
+          url: 'http://phone.test:21030/app/?token=secret',
+        },
+      },
+      {
+        id: 'instance-cc-bridge',
+        appId: 'cc-bridge',
+        title: 'cc bridge',
+      },
+    ],
+  };
+
+  const normalized = normalizeDynamicAppRegistry(payload);
+
+  assert.equal(normalized.dynamicAppEntries.length, 0);
+  for (const port of ['21010', '21020', '21030', '21040']) {
+    assert.equal(resolveDynamicAppEntryUrl(`http://phone.test:${port}/app/`), '');
+  }
+});
+
+test('dynamic app launch urls strip userinfo, sensitive query params, and hash', () => {
+  const payload = {
+    apps: [
+      {
+        id: 'tool-web',
+        title: 'Tool Web',
+        entry: 'https://user:password@app.example/tools/?view=main&token=secret&api_key=abc&safe=1#access_token=frag',
+      },
+    ],
+    appInstances: [
+      {
+        id: 'instance-tool-web',
+        appId: 'tool-web',
+        title: 'Tool Web',
+      },
+    ],
+  };
+
+  const normalized = normalizeDynamicAppRegistry(payload);
+
+  assert.equal(normalized.dynamicAppEntries.length, 1);
+  assert.equal(
+    normalized.dynamicAppEntries[0].launchUrl,
+    'https://app.example/tools/?view=main&safe=1',
+  );
+  assert.equal(
+    sanitizeDynamicAppLaunchUrl('https://user:pass@app.example/?auth=abc&q=ok#token=secret'),
+    'https://app.example/?q=ok',
+  );
+  assert.equal(
+    sanitizeDynamicAppLaunchUrl('https://app.example/?session_key=a&session-key=b&sessionKey=c&q=ok'),
+    'https://app.example/?q=ok',
+  );
 });

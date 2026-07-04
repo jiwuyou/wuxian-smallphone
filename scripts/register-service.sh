@@ -104,7 +104,7 @@ print_intended_services() {
   log ""
   log "Notes:"
   log "  - smallphone-core port is SMALLPHONE_PORT (default 22000) or APP_BACKEND_PORT."
-  log "  - frontends are served via python3 -m http.server; ports match start_smallphone.sh defaults."
+  log "  - stable frontend uses python3 http.server; beta frontend uses Node static-server.cjs."
   log "  - smallphone-backend is the OpenCode bun backend (optional; only registered if present)."
   log "  - standalone apps use PORT/HOST env vars; defaults are from each smallphone.app.json."
 }
@@ -188,6 +188,7 @@ emit_spec() {
     "$service_manager_token" <<'PY'
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -211,6 +212,50 @@ root = Path(root_dir)
 parent = Path(parent_dir)
 
 group_tag = "group:local-stack"
+
+def default_path() -> str:
+    entries = [
+        "/root/.local/bin",
+        "/root/.local/node/bin",
+        "/root/.npm-global/bin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/sbin",
+        "/usr/bin",
+        "/sbin",
+        "/bin",
+        "/system/bin",
+        "/system/xbin",
+        "/data/data/com.termux/files/usr/bin",
+    ]
+    seen: set[str] = set()
+    merged: list[str] = []
+    for raw in entries:
+        if raw and raw not in seen:
+            seen.add(raw)
+            merged.append(raw)
+    return ":".join(merged)
+
+def merged_path() -> str:
+    raw_path = os.environ.get("PATH") or ""
+    entries = []
+    for raw in f"{default_path()}:{raw_path}".split(":"):
+        if raw and raw not in entries:
+            entries.append(raw)
+    return ":".join(entries)
+
+def resolve_executable(env_names: list[str], candidates: list[str], fallback_name: str) -> str:
+    for env_name in env_names:
+        value = os.environ.get(env_name)
+        if value:
+            return value
+    for candidate in candidates:
+        if Path(candidate).is_file():
+            return candidate
+    found = shutil.which(fallback_name, path=merged_path())
+    if found:
+        return found
+    return candidates[0] if candidates else fallback_name
 
 def env_path(*names: str) -> Path | None:
     for name in names:
@@ -293,9 +338,12 @@ if key == "smallphone-core":
             "SMALLPHONE_HOST": core_host,
             "SMALLPHONE_HOSTS": core_host,
             "SMALLPHONE_PORT": str(core_port),
-            "SMALLPHONE_RUNTIME_MODE": "cc-connect",
+            "SMALLPHONE_RUNTIME_MODE": "cc-webclient",
             "CC_CONNECT_CONFIG_FILE": "/root/.smallphoneai/cc-connect.toml",
-            "SMALLPHONE_CCCONNECT_PLATFORM": "smallphone",
+            "SMALLPHONE_WEBCLIENT_BASE_URL": os.environ.get("SMALLPHONE_WEBCLIENT_BASE_URL", "http://127.0.0.1:21030"),
+            "SMALLPHONE_WEBCLIENT_APP_ID": os.environ.get("SMALLPHONE_WEBCLIENT_APP_ID", "smallphone"),
+            "OPENHOUSE_WEBCLIENT_TOKEN": os.environ.get("OPENHOUSE_WEBCLIENT_TOKEN") or os.environ.get("SMALLPHONE_WEBCLIENT_TOKEN", ""),
+            "SMALLPHONE_CCCONNECT_PLATFORM": "web-smallphone",
             "SMALLPHONE_SERVICE_MANAGER_URL": service_manager_url,
             "SMALLPHONE_SERVICE_MANAGER_TOKEN": service_manager_token,
             "SMALLPHONE_SILLYTAVERN_DIR": str(sillytavern_dir),
@@ -323,10 +371,10 @@ elif key == "smallphone-frontend-beta":
     front_dir = root / "generic-mini-phone-beta"
     spec = spec_process(
         "smallphone-frontend-beta",
-        "SmallPhone beta frontend (static, served by python http.server)",
-        ["python3", "-m", "http.server", str(beta_port), "--bind", str(beta_host)],
+        "SmallPhone beta frontend (static, served by Node)",
+        ["node", "scripts/static-server.cjs", str(beta_port), str(beta_host)],
         front_dir,
-        {},
+        {"HOME": "/root", "PATH": merged_path()},
         [tcp_check(beta_host, beta_port)],
         [group_tag, "openhouse-component:smallphone-frontend-beta", "smallphone"],
     )
@@ -453,20 +501,28 @@ elif key == "cloudcli":
     host = os.environ.get("SMALLPHONE_CLOUDCLI_HOST") or os.environ.get("CLOUDCLI_HOST") or "127.0.0.1"
     port = os.environ.get("SMALLPHONE_CLOUDCLI_PORT") or os.environ.get("CLOUDCLI_PORT") or os.environ.get("CLAUDE_CODE_UI_PORT") or "23083"
     claude_cli = os.environ.get("CLAUDE_CLI_PATH") or "/root/.local/bin/claude"
-    path = os.environ.get("PATH") or "/root/.local/bin:/root/.local/node/bin:/root/.npm-global/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/system/bin:/system/xbin:/data/data/com.termux/files/usr/bin"
+    path = merged_path()
+    cloudcli_bin = resolve_executable(
+        ["SMALLPHONE_CLOUDCLI_BIN", "CLOUDCLI_BIN"],
+        ["/root/.npm-global/bin/cloudcli", "/usr/local/bin/cloudcli"],
+        "cloudcli",
+    )
     # Invoke node directly so service-manager's strict /proc cmdline verification
     # matches the live process. Running the cloudcli symlink rewrites argv to
-    # "node /usr/local/bin/cloudcli ..." and makes stop/restart lose the pidfile.
+    # "node /path/to/cloudcli ..." and makes stop/restart lose the pidfile.
     spec = spec_process(
         "cloudcli",
         "CC/Codex web console powered by CloudCLI / Claude Code UI",
-        ["node", "/usr/local/bin/cloudcli", "start", "--port", str(port)],
+        ["node", cloudcli_bin, "start", "--port", str(port)],
         Path("/root"),
         {
+            "HOME": "/root",
             "SERVER_PORT": str(port),
             "PORT": str(port),
             "HOST": host,
             "CLAUDE_CLI_PATH": claude_cli,
+            "WORKSPACES_ROOT": os.environ.get("WORKSPACES_ROOT") or "/root",
+            "DATABASE_PATH": os.environ.get("DATABASE_PATH") or "/root/.cloudcli/openhouse-auth.db",
             "PATH": path,
         },
         [http_check(f"http://{host}:{port}")],

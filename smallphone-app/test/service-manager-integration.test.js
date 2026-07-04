@@ -545,3 +545,39 @@ test("bootstrap: runtime does not expose command or entry", () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   }
 });
+
+test("bootstrap: cc-webclient runtime does not expose backend token", () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "smallphone-bootstrap-webclient-"));
+  try {
+    const secretToken = `secret-${randomId("webclient-token")}`;
+    const service = new SmallPhoneService({
+      dataFile: tmpDataFile(),
+      smallphoneHome: homeDir,
+      runtime: {
+        mode: "cc-webclient",
+        webclientBaseUrl: `http://127.0.0.1:21030?token=${secretToken}`,
+        webclientToken: secretToken,
+        webclientAppId: "smallphone",
+        ccConnectProject: "smallphone-pi",
+      },
+      projectManagement: {
+        webclientBaseUrl: `http://127.0.0.1:21030?token=${secretToken}`,
+        webclientToken: secretToken,
+      },
+    });
+
+    const payload = service.bootstrap();
+    assert.equal(payload.runtime.id, "cc-webclient");
+    assert.equal(payload.runtime.project, "smallphone-pi");
+    assert.equal(hasOwn(payload.runtime, "webclientToken"), false);
+    assert.equal(hasOwn(payload.runtime, "token"), false);
+
+    const serialized = JSON.stringify(payload);
+    assert.equal(serialized.includes(secretToken), false, "Bootstrap leaked cc-webclient token.");
+    assert.equal(serialized.includes(`token=${secretToken}`), false, "Bootstrap leaked token query.");
+    assertTokenQueryRedactedOrDropped(payload.runtime.baseUrl, secretToken, "runtime.baseUrl");
+    assertTokenQueryRedactedOrDropped(payload.projects.baseUrl, secretToken, "projects.baseUrl");
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});

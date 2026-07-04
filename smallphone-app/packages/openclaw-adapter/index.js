@@ -4,6 +4,9 @@ const { spawn } = require("child_process");
 const WebSocket = require("ws");
 const { createId } = require("../shared/types");
 
+const DEFAULT_WEBCLIENT_BASE_URL = "http://127.0.0.1:21030";
+const DEFAULT_WEBCLIENT_APP_ID = "smallphone";
+
 function createRuntimeAdapter(config = {}) {
   const mode = normalizeText(config.mode) || "mock";
   if (mode === "cc-connect" || mode === "ccconnect") {
@@ -63,10 +66,16 @@ function createCcConnectAdapter(config) {
 }
 
 function createCcWebclientAdapter(config) {
-  const baseUrl = normalizeText(config.webclientBaseUrl) || normalizeText(config.baseUrl);
-  const token = normalizeText(config.webclientToken) || normalizeText(config.token);
-  const appId = normalizeText(config.webclientAppId) || normalizeText(config.appId);
-  const project = normalizeText(config.ccConnectProject) || normalizeText(config.project);
+  const baseUrl = normalizeText(config.webclientBaseUrl) || normalizeText(config.baseUrl) || DEFAULT_WEBCLIENT_BASE_URL;
+  const token =
+    normalizeText(config.webclientToken) ||
+    normalizeText(config.token) ||
+    normalizeText(process.env.OPENHOUSE_WEBCLIENT_TOKEN);
+  const appId = normalizeText(config.webclientAppId) || normalizeText(config.appId) || DEFAULT_WEBCLIENT_APP_ID;
+  const project =
+    normalizeText(config.ccConnectProject) ||
+    normalizeText(config.project) ||
+    normalizeText(process.env.SMALLPHONE_CCCONNECT_PROJECT);
   const timeoutMs = Number.isFinite(Number(config.timeoutMs)) ? Number(config.timeoutMs) : 300000;
   const pollIntervalMs = Number.isFinite(Number(config.pollIntervalMs)) ? Number(config.pollIntervalMs) : 750;
   const historyLimit = Number.isFinite(Number(config.historyLimit)) ? Number(config.historyLimit) : 80;

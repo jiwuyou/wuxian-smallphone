@@ -1,5 +1,7 @@
-const BACKEND_STORAGE_KEY = 'smallphone.backendBase';
-const DEFAULT_BACKEND_BASE = 'http://127.0.0.1:22000/api';
+export const BACKEND_STORAGE_KEY = 'smallphone.backendBase';
+export const DEFAULT_BACKEND_PORT = '22000';
+export const DEFAULT_BACKEND_BASE = `http://127.0.0.1:${DEFAULT_BACKEND_PORT}/api`;
+const BLOCKED_CC_CONNECT_PORTS = new Set(['21010', '21020', '21030', '21040']);
 
 export async function requestBackend(url, init = {}) {
   const response = await fetch(url, {
@@ -152,19 +154,73 @@ function sanitizeModuleWorkflow(workflow) {
 }
 
 export function resolveBackendBase() {
-  const saved = normalizeApiBase(window.localStorage.getItem(BACKEND_STORAGE_KEY));
+  const savedRaw = window.localStorage.getItem(BACKEND_STORAGE_KEY);
+  const saved = normalizeCoreBackendBase(savedRaw);
   if (saved) return saved;
+  if (savedRaw) {
+    window.localStorage.removeItem(BACKEND_STORAGE_KEY);
+  }
 
   const { protocol, hostname } = window.location;
   if ((protocol === 'http:' || protocol === 'https:') && hostname && hostname !== '127.0.0.1' && hostname !== 'localhost') {
-    return `http://${hostname}:22000/api`;
+    return `${protocol}//${hostname}:${DEFAULT_BACKEND_PORT}/api`;
   }
   return DEFAULT_BACKEND_BASE;
 }
 
-function normalizeApiBase(value) {
+export function normalizeCoreBackendBase(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
-  const withoutSlash = raw.replace(/\/+$/, '');
-  return withoutSlash.endsWith('/api') ? withoutSlash : `${withoutSlash}/api`;
+
+  let parsed;
+  try {
+    parsed = new URL(completeBackendUrl(raw));
+  } catch {
+    return '';
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+  if (BLOCKED_CC_CONNECT_PORTS.has(parsed.port)) return '';
+
+  parsed.username = '';
+  parsed.password = '';
+  parsed.search = '';
+  parsed.hash = '';
+
+  const path = parsed.pathname.replace(/\/+$/, '');
+  if (!path || path === '/') {
+    parsed.pathname = '/api';
+  } else if (path.endsWith('/api')) {
+    parsed.pathname = path;
+  } else if (path.endsWith('/smallphone')) {
+    parsed.pathname = `${path.slice(0, -'/smallphone'.length) || ''}/api`;
+  } else {
+    parsed.pathname = `${path}/api`;
+  }
+
+  return parsed.toString().replace(/\/$/, '');
+}
+
+function completeBackendUrl(value) {
+  const raw = String(value || '').trim();
+  if (/^\/\//.test(raw)) {
+    return `${getCurrentProtocol()}${raw}`;
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    return raw;
+  }
+  if (raw.startsWith('/')) {
+    return new URL(raw, getCurrentOrigin()).toString();
+  }
+  return `http://${raw}`;
+}
+
+function getCurrentProtocol() {
+  const protocol = globalThis.window?.location?.protocol;
+  return protocol === 'https:' ? 'https:' : 'http:';
+}
+
+function getCurrentOrigin() {
+  const origin = globalThis.window?.location?.origin;
+  return typeof origin === 'string' && origin ? origin : DEFAULT_BACKEND_BASE;
 }
