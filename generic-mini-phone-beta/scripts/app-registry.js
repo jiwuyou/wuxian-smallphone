@@ -6,12 +6,10 @@ import * as vocabulary from '../apps/vocabulary/index.js';
 import * as airplane from '../apps/airplane/index.js';
 import * as likeGirl from '../apps/like-girl/index.js';
 import * as likeGirlClone from '../apps/like-girl-clone/index.js';
-import * as messages from '../apps/messages/index.js';
 import * as sillytavern from '../apps/sillytavern/index.js';
 import * as workflows from '../apps/workflows/index.js?v=6';
 
 export const appModules = [
-  messages,
   calendar,
   weather,
   diary,

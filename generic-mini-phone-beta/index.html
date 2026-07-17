@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>手机桌面</title>
-  <link rel="stylesheet" href="style.css?v=25">
+  <link rel="stylesheet" href="style.css?v=26">
 </head>
 <body>
   <div class="app-shell">
@@ -19,8 +19,8 @@
           <h1 class="lock-time" id="lock-time">10:18</h1>
           <div class="lock-card">
             <p class="eyebrow">新通知</p>
-            <strong id="lock-notice-title">林秋</strong>
-            <p id="lock-notice-text">我把今天的晚霞拍下来了，要不要一起去看海边夜市？</p>
+            <strong id="lock-notice-title">SmallPhone</strong>
+            <p id="lock-notice-text">应用与服务入口已准备好</p>
           </div>
         </div>
         <button class="soft-button unlock-button" id="unlock-button">进入桌面</button>
@@ -32,7 +32,7 @@
               <p class="eyebrow">桌面</p>
               <h2 id="desktop-greeting">晚上好，晚风</h2>
               <p class="desktop-weather" id="desktop-weather">晴 23°C · 海边风轻</p>
-              <p class="desktop-guidance">从桌面选择应用，或从底部进入消息和联系人。</p>
+              <p class="desktop-guidance">从桌面选择应用，统一查看和控制本机服务。</p>
             </div>
             <div class="desktop-head-actions">
               <button class="ghost-pill ghost-pill-subtle" id="relock-button">锁屏</button>
@@ -46,14 +46,6 @@
           <div class="desktop-pagination" id="desktop-pagination" aria-label="桌面分页"></div>
 
         <div class="dock-row ios-dock">
-          <button class="dock-app" data-desktop-target="messages" data-component-app-id="messages">
-            <span class="icon-orb orb-chat">聊</span>
-            <strong>消息</strong>
-          </button>
-          <button class="dock-app" data-desktop-target="contacts">
-            <span class="icon-orb orb-character">人</span>
-            <strong>联系人</strong>
-          </button>
           <button class="dock-app" data-panel-target="app-manager">
             <span class="icon-orb orb-app-manager">管</span>
             <strong>应用</strong>
@@ -203,10 +195,6 @@
             <section class="panel-view" data-panel="settings">
               <form class="settings-form" id="settings-form">
                 <section class="settings-home-grid" aria-label="设置入口">
-                  <button type="button" class="settings-shortcut" data-panel-target="character">
-                    <strong>角色与联系人</strong>
-                    <span>编辑头像、简介、语气和主动联系</span>
-                  </button>
 	                  <button type="button" class="settings-shortcut" data-panel-target="persona">
 	                    <strong>我的资料</strong>
 	                    <span>调整昵称、签名和人设</span>
@@ -516,13 +504,11 @@
       </main>
 
       <nav class="tab-bar">
-        <button class="tab" data-tab="messages" data-component-app-id="messages">消息</button>
-        <button class="tab" data-tab="contacts">联系人</button>
         <button class="tab" data-tab="my">我的</button>
       </nav>
     </div>
   </div>
 
-  <script type="module" src="scripts/main.js?v=33"></script>
+  <script type="module" src="scripts/main.js?v=34"></script>
 </body>
 </html>

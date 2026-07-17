@@ -5,8 +5,8 @@ import {
   mergeStaticAndDynamicDesktopApps,
   registeredApps,
   sanitizeDynamicAppLaunchUrl,
-} from './app-registry.js?v=20';
-import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=17';
+} from './app-registry.js?v=21';
+import { cloneDefaultState, panelMeta, saveState, state, uiState } from './state.js?v=18';
 import {
   buildServiceManagerDefinitions,
   createServiceFromDefinition,
@@ -63,14 +63,12 @@ const displayedWaifuMessageKeys = loadDisplayedWaifuMessageKeys();
 const recentPersistedAssistantByThreadId = new Map();
 
 const CORE_DESKTOP_APPS = [
-  { id: 'contacts', name: '联系人', shortName: '人', orbClass: 'orb-character', target: 'contacts' },
   { id: 'app-manager', name: '应用管理', shortName: '管', orbClass: 'orb-app-manager', panel: 'app-manager' },
   { id: 'settings', name: '设置', shortName: '设', orbClass: 'orb-settings', panel: 'settings' },
 ];
 
-const CORE_DESKTOP_APP_ALIASES = [
-  { backendId: 'chat', nativeId: 'messages' },
-];
+const RETIRED_COMMUNICATION_APP_IDS = ['contacts', 'messages', 'chat'];
+const RETIRED_COMMUNICATION_VIEWS = new Set(['contacts', 'messages', 'chat']);
 
 const DESKTOP_APPS_PER_PAGE = 8;
 const SLASH_COMMANDS = [
@@ -891,9 +889,6 @@ async function bootstrapState() {
         Object.fromEntries((bootstrap.threads || []).map((thread) => [thread.id, thread])),
         uiState.activeChatKey,
       );
-      if (preferredChatKey && !snapshot.messagesByThreadId[preferredChatKey]) {
-        snapshot.messagesByThreadId[preferredChatKey] = await apiRequest(`/threads/${encodeURIComponent(preferredChatKey)}/messages`);
-      }
       applyBackendSnapshot(snapshot, preferredChatKey);
       rememberBackendBase(candidate);
       backendEnabled = true;
@@ -2482,14 +2477,18 @@ function setActiveView(viewName) {
 function resolveAllowedViewName(viewName) {
   const requested = String(viewName || '').trim();
   if (requested && isViewAllowed(requested)) return requested;
-  if (isViewAllowed('contacts')) return 'contacts';
+  const firstRegisteredView = registeredApps
+    .map((app) => String(app?.views?.normal || '').trim())
+    .find((view) => isViewAllowed(view));
+  if (firstRegisteredView) return firstRegisteredView;
+  if (isViewAllowed('my')) return 'my';
   const fallback = Array.from(document.querySelectorAll('.view')).find((view) => isViewAllowed(view.dataset.view || ''));
   return fallback?.dataset?.view || '';
 }
 
 function isViewAllowed(viewName) {
   const normalized = String(viewName || '').trim();
-  if (!normalized) return false;
+  if (!normalized || RETIRED_COMMUNICATION_VIEWS.has(normalized)) return false;
   const view = Array.from(document.querySelectorAll('.view')).find((item) => item.dataset.view === normalized) || null;
   if (!view) return false;
   const componentAppId = String(view.getAttribute('data-component-app-id') || '').trim();
@@ -2528,7 +2527,7 @@ function getStaticDesktopAppEntries() {
 function getStaticDesktopAppIds() {
   return [
     ...getStaticDesktopAppEntries().map((app) => app.id),
-    ...CORE_DESKTOP_APP_ALIASES.map((alias) => alias.backendId),
+    ...RETIRED_COMMUNICATION_APP_IDS,
   ];
 }
 
@@ -2545,9 +2544,6 @@ function getHiddenStaticAppIds() {
       .map((id) => String(id || '').trim())
       .filter(Boolean),
   );
-  CORE_DESKTOP_APP_ALIASES.forEach((alias) => {
-    if (hiddenIds.has(alias.backendId)) hiddenIds.add(alias.nativeId);
-  });
   return hiddenIds;
 }
 
@@ -2563,7 +2559,7 @@ function applyComponentVisibility() {
     element.setAttribute('aria-hidden', String(!visible));
   });
   if (document.body.dataset.activeView && !isViewAllowed(document.body.dataset.activeView)) {
-    setActiveView('contacts');
+    setActiveView('');
   }
 }
 
@@ -2592,7 +2588,7 @@ function setPhoneShell(mode) {
   saveState();
   applyPhoneShell();
   if (mode === 'app' && !document.body.dataset.activeView) {
-    setActiveView('contacts');
+    setActiveView('');
   }
 }
 
@@ -3486,14 +3482,8 @@ function renderDesktopBadge() {
 }
 
 function renderLockNotification() {
-  const chat = Object.values(state.chats).find((entry) => entry.unread) || getFallbackChat();
-  if (!chat) {
-    dom.lockNoticeTitle.textContent = 'SmallPhone';
-    dom.lockNoticeText.textContent = '暂无新消息';
-    return;
-  }
-  dom.lockNoticeTitle.textContent = chat.name;
-  dom.lockNoticeText.textContent = chat.summary;
+  dom.lockNoticeTitle.textContent = 'SmallPhone';
+  dom.lockNoticeText.textContent = '应用与服务入口已准备好';
 }
 
 function renderCharacterEditor() {
@@ -3967,7 +3957,7 @@ dom.dynamicAppFrame?.addEventListener('error', () => {
 [dom.desktopCameraApp, dom.dockCameraApp].filter(Boolean).forEach((button) => {
   button.addEventListener('click', () => {
     setPhoneShell('app');
-    setActiveView('contacts');
+    setActiveView('');
   });
 });
 

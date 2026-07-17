@@ -1,4 +1,4 @@
-import { appDefaultState } from './app-registry.js?v=17';
+import { appDefaultState } from './app-registry.js?v=21';
 
 export const STORAGE_KEY = 'generic-mini-phone-state-v1';
 
@@ -266,7 +266,7 @@ export function loadState() {
 export const state = loadState();
 
 export const uiState = {
-  previousView: 'contacts',
+  previousView: '',
   activeChatKey: 'claude',
   editingCharacterKey: 'claude',
   desktopTouchStartX: 0,

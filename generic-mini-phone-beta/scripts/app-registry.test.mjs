@@ -118,12 +118,10 @@ test('workflows is a static bundled app, not a broken dynamic iframe entry', () 
   assert.equal(normalized.dynamicAppEntries.length, 0);
 });
 
-test('messages is a registered static app', () => {
-  assert.ok(registeredApps.find((app) => (
-    app.id === 'messages' &&
-    app.views?.normal === 'messages' &&
-    app.badge === 'unread'
-  )));
+test('messages is retained in source but not registered in the beta shell', () => {
+  assert.equal(registeredApps.some((app) => app.id === 'messages'), false);
+  assert.equal(typeof renderMessages, 'function');
+  assert.equal(typeof bindMessages, 'function');
 });
 
 test('messages app owns message and chat views', () => {
@@ -141,7 +139,17 @@ test('shell html does not hardcode messages primary dom', () => {
   assert.doesNotMatch(html, /id="message-list"/);
   assert.doesNotMatch(html, /data-view="chat"/);
   assert.doesNotMatch(html, /id="chat-form"/);
+  assert.doesNotMatch(html, /data-desktop-target="(?:messages|contacts)"/);
+  assert.doesNotMatch(html, /data-tab="(?:messages|contacts)"/);
+  assert.doesNotMatch(html, /data-panel-target="character"/);
   assert.match(html, /id="registered-app-views"/);
+});
+
+test('startup bootstrap does not eagerly load thread messages', () => {
+  const source = readFileSync(resolve(currentDir, './main.js'), 'utf8');
+  const bootstrapBody = source.match(/async function bootstrapState\(\) \{([\s\S]*?)\n\}\n\nfunction disableBackendWithStatus/)?.[1] || '';
+  assert.doesNotMatch(bootstrapBody, /\/threads\/.*\/messages/);
+  assert.match(bootstrapBody, /loadBackendSnapshot\(apiRequest\)/);
 });
 
 test('component registry consumes smallphoneApp for hidden static apps and dynamic webview apps', () => {
