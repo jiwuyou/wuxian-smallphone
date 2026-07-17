@@ -48,25 +48,6 @@ resolve_sm_token() {
   printf '%s' ""
 }
 
-resolve_smallphone_sm_token() {
-  raw="${SMALLPHONE_SERVICE_MANAGER_TOKEN:-}"
-  if [ -n "$raw" ]; then
-    printf '%s' "$raw"
-    return 0
-  fi
-  raw="${SERVICE_MANAGER_TOKEN:-}"
-  if [ -n "$raw" ]; then
-    printf '%s' "$raw"
-    return 0
-  fi
-  if have service-manager; then
-    # Capture token without printing it.
-    service-manager token show 2>/dev/null | tr -d '\r\n' || true
-    return 0
-  fi
-  printf '%s' ""
-}
-
 print_intended_services() {
   group_tag="group:local-stack"
 
@@ -178,14 +159,12 @@ emit_spec() {
   backend_host="$9"
   backend_port="${10}"
   service_manager_url="${11}"
-  service_manager_token="${12}"
   "${py}" - "$key" "$ROOT_DIR" "$PARENT_DIR" \
     "$core_host" "$core_port" \
     "$frontend_host" "$frontend_port" \
     "$beta_host" "$beta_port" \
     "$backend_host" "$backend_port" \
-    "$service_manager_url" \
-    "$service_manager_token" <<'PY'
+    "$service_manager_url" <<'PY'
 import json
 import os
 import shutil
@@ -205,7 +184,6 @@ from pathlib import Path
     backend_host,
     backend_port,
     service_manager_url,
-    service_manager_token,
 ) = sys.argv[1:]
 
 root = Path(root_dir)
@@ -213,7 +191,7 @@ parent = Path(parent_dir)
 
 group_tag = "group:local-stack"
 
-def default_path() -> str:
+def guest_path() -> str:
     entries = [
         "/root/.local/bin",
         "/root/.local/node/bin",
@@ -224,9 +202,6 @@ def default_path() -> str:
         "/usr/bin",
         "/sbin",
         "/bin",
-        "/system/bin",
-        "/system/xbin",
-        "/data/data/com.termux/files/usr/bin",
     ]
     seen: set[str] = set()
     merged: list[str] = []
@@ -237,12 +212,18 @@ def default_path() -> str:
     return ":".join(merged)
 
 def merged_path() -> str:
-    raw_path = os.environ.get("PATH") or ""
-    entries = []
-    for raw in f"{default_path()}:{raw_path}".split(":"):
-        if raw and raw not in entries:
-            entries.append(raw)
-    return ":".join(entries)
+    return guest_path()
+
+termux_home = Path(os.environ.get("OPENHOUSEAI_TERMUX_HOME") or os.environ.get("SMALLPHONEAI_TERMUX_HOME") or "/data/data/com.termux/files/home")
+termux_prefix = Path(os.environ.get("TERMUX_PREFIX") or "/data/data/com.termux/files/usr")
+termux_config_root = termux_home / ".config" / "openhouseai"
+service_manager_config_file = Path(
+    os.environ.get("SMALLPHONEAI_SERVICE_MANAGER_CONFIG_PATH")
+    or os.environ.get("SERVICE_MANAGER_CONFIG_PATH")
+    or termux_config_root / "service-manager" / "config.json"
+)
+components_dir = Path(os.environ.get("SMALLPHONE_COMPONENTS_DIR") or termux_config_root / "components.d")
+menu_overrides_file = Path(os.environ.get("SMALLPHONE_MENU_OVERRIDES_FILE") or termux_config_root / "menu-overrides.json")
 
 def resolve_executable(env_names: list[str], candidates: list[str], fallback_name: str) -> str:
     for env_name in env_names:
@@ -308,18 +289,39 @@ def http_check(url: str):
     }
 
 def spec_process(name: str, desc: str, cmd: list[str], cwd: Path, env: dict, health: list, tags: list[str]):
+    guest_env = [f"{key}={value}" for key, value in sorted(env.items())]
+    wrapped_command = [
+        "sh",
+        "-lc",
+        'set -eu; unset LD_LIBRARY_PATH LD_PRELOAD PREFIX; export HOME=/root TMPDIR=/tmp; export PATH="$1"; shift; while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do export "$1"; shift; done; shift; exec "$@"',
+        "service-manager-guest",
+        guest_path(),
+        *guest_env,
+        "--",
+        *cmd,
+    ]
+    service_tags = list(tags)
+    for tag in ("runtime:ubuntu", "manager:termux-native"):
+        if tag not in service_tags:
+            service_tags.append(tag)
     return {
         "name": name,
         "description": desc,
-        "provider": "process",
-        "command": cmd,
+        "provider": "proot-distro",
+        "command": wrapped_command,
         "working_dir": str(cwd),
-        "env": env,
-        "runtime": {},
+        "env": {
+            "HOME": str(termux_home),
+            "PREFIX": str(termux_prefix),
+            "PATH": f"{termux_prefix}/bin:/system/bin:/system/xbin",
+            "LD_LIBRARY_PATH": f"{termux_prefix}/lib",
+            "TMPDIR": f"{termux_prefix}/tmp",
+        },
+        "runtime": {"distro": "ubuntu", "home": "/root", "user": "root"},
         "restart": {"mode": "always", "max_retries": 0},
         "health": health,
         "enabled": True,
-        "tags": tags,
+        "tags": service_tags,
     }
 
 if key == "smallphone-core":
@@ -330,22 +332,21 @@ if key == "smallphone-core":
     sillytavern_port = os.environ.get("SMALLPHONE_SILLYTAVERN_PORT") or os.environ.get("SILLYTAVERN_PORT") or "8000"
     spec = spec_process(
         "smallphone-core",
-        "SmallPhone core API (smallphone-app)",
-        ["node", "./apps/core/server.js"],
+        "SmallPhone core API backed by the Termux canonical OpenHouse registry",
+        ["node", "./apps/core/run-managed.js"],
         app_dir,
         {
             "SMALLPHONE_HOME": smallphone_home,
             "SMALLPHONE_HOST": core_host,
             "SMALLPHONE_HOSTS": core_host,
             "SMALLPHONE_PORT": str(core_port),
-            "SMALLPHONE_RUNTIME_MODE": "cc-webclient",
+            "SMALLPHONE_COMPONENTS_DIR": str(components_dir),
+            "SMALLPHONE_MENU_OVERRIDES_FILE": str(menu_overrides_file),
+            "SMALLPHONE_RUNTIME_MODE": "cc-connect",
             "CC_CONNECT_CONFIG_FILE": "/root/.smallphoneai/cc-connect.toml",
-            "SMALLPHONE_WEBCLIENT_BASE_URL": os.environ.get("SMALLPHONE_WEBCLIENT_BASE_URL", "http://127.0.0.1:21030"),
-            "SMALLPHONE_WEBCLIENT_APP_ID": os.environ.get("SMALLPHONE_WEBCLIENT_APP_ID", "smallphone"),
-            "OPENHOUSE_WEBCLIENT_TOKEN": os.environ.get("OPENHOUSE_WEBCLIENT_TOKEN") or os.environ.get("SMALLPHONE_WEBCLIENT_TOKEN", ""),
-            "SMALLPHONE_CCCONNECT_PLATFORM": "web-smallphone",
+            "SMALLPHONE_CCCONNECT_PLATFORM": "smallphone",
             "SMALLPHONE_SERVICE_MANAGER_URL": service_manager_url,
-            "SMALLPHONE_SERVICE_MANAGER_TOKEN": service_manager_token,
+            "SMALLPHONE_SERVICE_MANAGER_CONFIG_FILE": str(service_manager_config_file),
             "SMALLPHONE_SILLYTAVERN_DIR": str(sillytavern_dir),
             "SMALLPHONE_SILLYTAVERN_DATA_DIR": str(sillytavern_dir / "data"),
             "SMALLPHONE_SILLYTAVERN_HOST": sillytavern_host,
@@ -374,7 +375,7 @@ elif key == "smallphone-frontend-beta":
         "SmallPhone beta frontend (static, served by Node)",
         ["node", "scripts/static-server.cjs", str(beta_port), str(beta_host)],
         front_dir,
-        {"HOME": "/root", "PATH": merged_path()},
+        {},
         [tcp_check(beta_host, beta_port)],
         [group_tag, "openhouse-component:smallphone-frontend-beta", "smallphone"],
     )
@@ -501,7 +502,6 @@ elif key == "cloudcli":
     host = os.environ.get("SMALLPHONE_CLOUDCLI_HOST") or os.environ.get("CLOUDCLI_HOST") or "127.0.0.1"
     port = os.environ.get("SMALLPHONE_CLOUDCLI_PORT") or os.environ.get("CLOUDCLI_PORT") or os.environ.get("CLAUDE_CODE_UI_PORT") or "23083"
     claude_cli = os.environ.get("CLAUDE_CLI_PATH") or "/root/.local/bin/claude"
-    path = merged_path()
     cloudcli_bin = resolve_executable(
         ["SMALLPHONE_CLOUDCLI_BIN", "CLOUDCLI_BIN"],
         ["/root/.npm-global/bin/cloudcli", "/usr/local/bin/cloudcli"],
@@ -523,7 +523,6 @@ elif key == "cloudcli":
             "CLAUDE_CLI_PATH": claude_cli,
             "WORKSPACES_ROOT": os.environ.get("WORKSPACES_ROOT") or "/root",
             "DATABASE_PATH": os.environ.get("DATABASE_PATH") or "/root/.cloudcli/openhouse-auth.db",
-            "PATH": path,
         },
         [http_check(f"http://{host}:{port}")],
         [group_tag, "openhouse-component:cloudcli", "openhouse-ai-partner:cloudcli", "smallphone"],
@@ -603,12 +602,26 @@ print_manual_commands() {
   log "Tip: create/update via the service-manager Web UI at: ${sm_url%/}/"
 }
 
+print_spec() {
+  key="${1:-}"
+  [ -n "$key" ] || die "usage: $0 --print-spec <service-key>"
+  py="$(command -v python3 || command -v python || true)"
+  [ -n "$py" ] || die "python is required"
+  emit_spec "$py" "$key" \
+    "${APP_BACKEND_HOST:-${SMALLPHONE_HOST:-127.0.0.1}}" \
+    "${APP_BACKEND_PORT:-${SMALLPHONE_PORT:-22000}}" \
+    "${FRONTEND_HOST:-127.0.0.1}" "${FRONTEND_PORT:-22080}" \
+    "${BETA_FRONTEND_HOST:-${FRONTEND_HOST:-127.0.0.1}}" "${BETA_FRONTEND_PORT:-22082}" \
+    "${BACKEND_HOST:-127.0.0.1}" "${BACKEND_PORT:-22096}" \
+    "$(resolve_sm_url)"
+}
+
 main() {
   log "SmallPhone service registration (best-effort)"
   sm_url="$(resolve_sm_url)"
   log "service-manager url: ${sm_url}"
   log "registration token sources: SERVICE_MANAGER_TOKEN, SMALLPHONE_SERVICE_MANAGER_TOKEN, or \`service-manager token show\`"
-  log "smallphone-core token sources: SMALLPHONE_SERVICE_MANAGER_TOKEN, SERVICE_MANAGER_TOKEN, or \`service-manager token show\`"
+  log "smallphone-core reads the runtime token from the Termux canonical service-manager config"
   log ""
   print_intended_services
 
@@ -634,12 +647,6 @@ main() {
     print_manual_commands "$sm_url"
     exit 0
   fi
-  core_sm_token="$(resolve_smallphone_sm_token)"
-  if [ -z "$core_sm_token" ]; then
-    warn "smallphone-core service-manager token not available; using registration token"
-    core_sm_token="$sm_token"
-  fi
-
   py=""
   if have python3; then
     py="python3"
@@ -710,8 +717,7 @@ main() {
       "$frontend_host" "$frontend_port" \
       "$beta_host" "$beta_port" \
       "$backend_host" "$backend_port" \
-      "$sm_url" \
-      "$core_sm_token" >"$spec_file"
+      "$sm_url" >"$spec_file"
 
     upsert_one "$sm_url" "$curl_cfg" "$py" "$key" "$name" "$spec_file" || true
   done
@@ -719,4 +725,8 @@ main() {
   log "done"
 }
 
-main "$@"
+if [ "${1:-}" = "--print-spec" ]; then
+  print_spec "${2:-}"
+else
+  main "$@"
+fi

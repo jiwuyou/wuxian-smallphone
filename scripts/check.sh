@@ -172,6 +172,9 @@ main() {
     exit 2
   fi
 
+  log "run: register-service spec tests"
+  "$SCRIPT_DIR/register-service.test.sh"
+
   log "done"
 }
 
